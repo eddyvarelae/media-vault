@@ -31,7 +31,20 @@ Companion to [media-transfer](https://github.com/eddyvarelae/media-transfer)
 - [ ] UGOS / Synology / QNAP launcher integration
 - [ ] Tailscale-friendly remote access docs
 
-## Quick try (CLI on your Mac/Linux host)
+## Install
+
+### On a NAS (recommended)
+
+This is what vault is designed for — running on the NAS itself, with the
+source disk plugged into the NAS's USB port. Verify and copy run at local
+disk speeds (hundreds of MB/s) instead of Wi-Fi speeds (single-digit MB/s).
+
+- **UGREEN UGOS** (DXP series): see [docs/install/ugos.md](docs/install/ugos.md)
+- **Synology / QNAP / TrueNAS**: any platform with Docker can pull the
+  image — `docker run --rm -v ...:/sources -v ...:/dest -v ...:/config
+  ghcr.io/eddyvarelae/media-vault scan tars /sources /dest`
+
+### Quick try (CLI on your Mac/Linux host)
 
 Requires Go 1.23+.
 
