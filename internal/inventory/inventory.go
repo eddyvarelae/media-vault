@@ -32,6 +32,29 @@ var junkNames = map[string]bool{
 	".Trashes":      true,
 }
 
+// directory names whose entire subtree we skip — these blow up inventory
+// time with millions of tiny files and never belong in a media archive.
+var skipDirs = map[string]bool{
+	"node_modules":   true,
+	".git":           true,
+	".svn":           true,
+	".hg":            true,
+	"__pycache__":    true,
+	".pytest_cache":  true,
+	".tox":           true,
+	".venv":          true,
+	"venv":           true,
+	".gradle":        true,
+	".m2":            true,
+	"target":         true, // Rust / Java
+	".next":          true,
+	".nuxt":          true,
+	".turbo":         true,
+	".pnpm-store":    true,
+	"bower_components": true,
+	".terraform":     true,
+}
+
 func isJunk(name string) bool {
 	if junkNames[name] {
 		return true
@@ -61,7 +84,7 @@ func Run(ctx context.Context, m *manifest.Manifest, disk, root string, onFile fu
 			return ctx.Err()
 		}
 		if d.IsDir() {
-			if isJunk(d.Name()) {
+			if isJunk(d.Name()) || skipDirs[d.Name()] {
 				return filepath.SkipDir
 			}
 			return nil
