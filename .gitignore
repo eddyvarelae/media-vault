@@ -1,0 +1,12 @@
+vault-config/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+/vault
+/dist
+/build
+.DS_Store
+.idea/
+.vscode/
+node_modules/
