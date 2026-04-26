@@ -1,4 +1,5 @@
 vault-config/
+temp/
 *.db
 *.db-journal
 *.db-shm
