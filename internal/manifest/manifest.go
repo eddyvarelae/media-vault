@@ -77,6 +77,109 @@ func (m *Manifest) Lookup(disk, sourcePath string) (*Entry, error) {
 	return &e, nil
 }
 
+// DuplicateGroup represents one set of files that share a sha256.
+type DuplicateGroup struct {
+	SHA256      string
+	Size        int64
+	Locations   []Location
+	WastedBytes int64 // (count-1) * size
+}
+
+type Location struct {
+	Disk string
+	Path string
+}
+
+// FindDuplicates returns all sha256 groups that have 2+ entries.
+// If minSize > 0, only groups with file size >= minSize are returned.
+func (m *Manifest) FindDuplicates(minSize int64) ([]DuplicateGroup, error) {
+	rows, err := m.db.Query(`
+		SELECT sha256, size, COUNT(*) AS n
+		FROM files
+		WHERE size >= ?
+		GROUP BY sha256
+		HAVING n > 1
+		ORDER BY size * (n - 1) DESC
+	`, minSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var groups []DuplicateGroup
+	for rows.Next() {
+		var g DuplicateGroup
+		var n int64
+		if err := rows.Scan(&g.SHA256, &g.Size, &n); err != nil {
+			return nil, err
+		}
+		g.WastedBytes = g.Size * (n - 1)
+		groups = append(groups, g)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for i := range groups {
+		locs, err := m.locationsByHash(groups[i].SHA256)
+		if err != nil {
+			return nil, err
+		}
+		groups[i].Locations = locs
+	}
+	return groups, nil
+}
+
+func (m *Manifest) locationsByHash(sha string) ([]Location, error) {
+	rows, err := m.db.Query(`
+		SELECT source_disk, source_path FROM files WHERE sha256 = ? ORDER BY source_disk, source_path
+	`, sha)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Location
+	for rows.Next() {
+		var l Location
+		if err := rows.Scan(&l.Disk, &l.Path); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+// FindUniqueIn returns files in `disk` whose sha256 does not appear under any
+// other disk in the manifest. Used to answer "what's only in #recycle?".
+func (m *Manifest) FindUniqueIn(disk string) ([]Entry, error) {
+	rows, err := m.db.Query(`
+		SELECT source_disk, source_path, dest_path, size, mtime_ns, sha256,
+		       copied_at, COALESCE(verified_at, 0), status
+		FROM files f
+		WHERE source_disk = ?
+		  AND NOT EXISTS (
+		    SELECT 1 FROM files g
+		    WHERE g.sha256 = f.sha256 AND g.source_disk != f.source_disk
+		  )
+		ORDER BY size DESC
+	`, disk)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Entry
+	for rows.Next() {
+		var e Entry
+		if err := rows.Scan(&e.SourceDisk, &e.SourcePath, &e.DestPath, &e.Size,
+			&e.MtimeNs, &e.SHA256, &e.CopiedAt, &e.VerifiedAt, &e.Status); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 func (m *Manifest) ListByDisk(disk string) ([]Entry, error) {
 	rows, err := m.db.Query(`
 		SELECT source_disk, source_path, dest_path, size, mtime_ns, sha256,

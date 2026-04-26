@@ -8,10 +8,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/eddyvarelae/media-vault/internal/certify"
 	"github.com/eddyvarelae/media-vault/internal/copy"
+	"github.com/eddyvarelae/media-vault/internal/dedup"
+	"github.com/eddyvarelae/media-vault/internal/inventory"
 	"github.com/eddyvarelae/media-vault/internal/manifest"
 	"github.com/eddyvarelae/media-vault/internal/scan"
 	"github.com/eddyvarelae/media-vault/internal/verify"
@@ -20,10 +24,13 @@ import (
 const usage = `vault — auditable media archive
 
 Usage:
-  vault scan    <source-disk-name> <source-dir> <dest-dir>
-  vault copy    <source-disk-name> <source-dir> <dest-dir>
-  vault verify  <source-disk-name> <dest-dir>
-  vault certify <source-disk-name> [out.json]
+  vault scan       <source-disk-name> <source-dir> <dest-dir>
+  vault copy       <source-disk-name> <source-dir> <dest-dir>
+  vault verify     <source-disk-name> <dest-dir>
+  vault certify    <source-disk-name> [out.json]
+  vault inventory  <source-disk-name> <dir>
+  vault dedup      [--min-size <bytes>]
+  vault unique     <source-disk-name>
 
 Manifest and signing key are stored under $VAULT_CONFIG
 (default: ./vault-config/).
@@ -64,6 +71,12 @@ func main() {
 		runVerify(ctx, m, args)
 	case "certify":
 		runCertify(m, configDir, args)
+	case "inventory":
+		runInventory(ctx, m, args)
+	case "dedup":
+		runDedup(m, args)
+	case "unique":
+		runUnique(m, args)
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
@@ -197,6 +210,70 @@ func runCertify(m *manifest.Manifest, configDir string, args []string) {
 		fmt.Fprintf(os.Stderr, "Files: %d   Bytes: %s   Disk: %s\n",
 			cert.FileCount, human(cert.TotalBytes), cert.SourceDisk)
 	}
+}
+
+func runInventory(ctx context.Context, m *manifest.Manifest, args []string) {
+	if len(args) != 2 {
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	disk, dir := args[0], args[1]
+
+	fmt.Printf("Inventorying %q under disk name %q\n", dir, disk)
+	fmt.Println("Files already in manifest with matching size+mtime are skipped.")
+	fmt.Println()
+
+	var lastReport time.Time
+	res, err := inventory.Run(ctx, m, disk, dir, func(rel, status string) {
+		// quiet by default; emit a heartbeat every 5 s
+		if time.Since(lastReport) > 5*time.Second {
+			lastReport = time.Now()
+			fmt.Printf("  %s %s\n", status, rel)
+		}
+	})
+	if err != nil {
+		die("inventory: %v", err)
+	}
+
+	fmt.Println()
+	fmt.Printf("Hashed: %d   Skipped: %d   Errors: %d   Bytes read: %s\n",
+		res.Hashed, res.Skipped, res.Errors, human(res.BytesRead))
+}
+
+func runDedup(m *manifest.Manifest, args []string) {
+	var minSize int64
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--min-size" && i+1 < len(args) {
+			n, err := strconv.ParseInt(args[i+1], 10, 64)
+			if err != nil {
+				die("invalid --min-size: %v", err)
+			}
+			minSize = n
+			i++
+		} else {
+			die("unknown arg: %s", args[i])
+		}
+	}
+
+	groups, err := m.FindDuplicates(minSize)
+	if err != nil {
+		die("dedup: %v", err)
+	}
+	dedup.PrintDuplicates(os.Stdout, groups)
+}
+
+func runUnique(m *manifest.Manifest, args []string) {
+	if len(args) != 1 {
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	disk := args[0]
+
+	entries, err := m.FindUniqueIn(disk)
+	if err != nil {
+		die("unique: %v", err)
+	}
+	dedup.PrintUnique(os.Stdout, disk, entries)
 }
 
 func human(n int64) string {
