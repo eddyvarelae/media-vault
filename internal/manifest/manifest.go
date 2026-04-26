@@ -48,6 +48,24 @@ func Open(path string) (*Manifest, error) {
 	if err != nil {
 		return nil, err
 	}
+	// busy_timeout is critical — without it, a concurrent reader and
+	// writer immediately collide with SQLITE_BUSY. With 30 s, contended
+	// writes wait politely.
+	if _, err := db.Exec("PRAGMA busy_timeout = 30000"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("busy_timeout: %w", err)
+	}
+	// Try to upgrade to WAL if we're not already there. Mode change
+	// requires exclusive DB access — if another writer beat us to it
+	// (or already set WAL on a previous run), we tolerate that and
+	// move on; the persistent setting in the DB file is what matters.
+	var mode string
+	_ = db.QueryRow("PRAGMA journal_mode").Scan(&mode)
+	if mode != "wal" {
+		_, _ = db.Exec("PRAGMA journal_mode = WAL")
+	}
+	_, _ = db.Exec("PRAGMA synchronous = NORMAL")
+
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("init schema: %w", err)
