@@ -49,15 +49,28 @@ type Result struct {
 }
 
 // Build assembles the move plan without touching anything on disk.
-func Build(m *manifest.Manifest, srcDisk, srcRoot, dstRoot string, rules []Rule) (*Plan, error) {
+//
+// srcRoot is the inventory root — i.e. the path that the manifest's
+// source_path values are relative to. prefix optionally narrows the move to
+// files under a sub-path of srcDisk (and strips that prefix when computing
+// the destination path).
+func Build(m *manifest.Manifest, srcDisk, srcRoot, prefix, dstRoot string, rules []Rule) (*Plan, error) {
 	entries, err := m.ListByDisk(srcDisk)
 	if err != nil {
 		return nil, err
 	}
+	prefix = strings.TrimRight(prefix, "/")
 
 	plan := &Plan{}
 	for _, e := range entries {
-		dstRel, applied := route(e.SourcePath, rules)
+		rel := e.SourcePath
+		if prefix != "" {
+			if !strings.HasPrefix(rel, prefix+"/") && rel != prefix {
+				continue
+			}
+			rel = strings.TrimPrefix(rel, prefix+"/")
+		}
+		dstRel, applied := route(rel, rules)
 		mv := Move{
 			Disk:        srcDisk,
 			SrcRel:      e.SourcePath,

@@ -39,7 +39,7 @@ Usage:
   vault symlinks   <tag> <source-disk>=<host-path>... <output-dir>
   vault hardlinks  <tag> <source-disk>=<host-path>... <output-dir>
   vault move       <src-disk> <dst-disk> <src-host-root> <dst-host-root>
-                   [--rule EXT=SUBDIR ...] [--dry-run]
+                   [--prefix SUB/] [--rule EXT=SUBDIR ...] [--dry-run]
 
 Manifest and signing key are stored under $VAULT_CONFIG
 (default: ./vault-config/).
@@ -426,6 +426,7 @@ func runLinks(m *manifest.Manifest, args []string, linkFn func(target, link stri
 func runMove(ctx context.Context, m *manifest.Manifest, args []string) {
 	// Pull positional args + flags out of the mixed slice.
 	dryRun := false
+	prefix := ""
 	var rules []string
 	var pos []string
 	for i := 0; i < len(args); i++ {
@@ -437,6 +438,12 @@ func runMove(ctx context.Context, m *manifest.Manifest, args []string) {
 				die("--rule needs a value")
 			}
 			rules = append(rules, args[i+1])
+			i++
+		case "--prefix":
+			if i+1 >= len(args) {
+				die("--prefix needs a value")
+			}
+			prefix = args[i+1]
 			i++
 		default:
 			pos = append(pos, args[i])
@@ -453,7 +460,7 @@ func runMove(ctx context.Context, m *manifest.Manifest, args []string) {
 		die("rules: %v", err)
 	}
 
-	plan, err := mvpkg.Build(m, srcDisk, srcRoot, dstRoot, parsed)
+	plan, err := mvpkg.Build(m, srcDisk, srcRoot, prefix, dstRoot, parsed)
 	if err != nil {
 		die("plan: %v", err)
 	}
