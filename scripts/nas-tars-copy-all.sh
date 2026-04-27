@@ -15,12 +15,15 @@ run_copy() {
   shift 2
   echo | tee -a "$LOG"
   echo "[$(date)] === $folder → $disk ===" | tee -a "$LOG"
-  /usr/bin/time -f "wall %e s" docker run --rm \
+  if ! docker run --rm \
     -v /volume1:/volume1 \
     -v /mnt/@usb:/usb:ro \
     -e VAULT_CONFIG=/volume1/docker/vault-nas-config \
     "$IMG" copy "$disk" "/usb/sdc1/$folder" "/volume1/media/$folder" \
-    "$@" --on-collision rename-mtime-year >> "$LOG" 2>&1
+    "$@" --on-collision rename-mtime-year >> "$LOG" 2>&1; then
+    echo "[$(date)] $folder FAILED" | tee -a "$LOG"
+    return 1
+  fi
   echo "[$(date)] $folder done" | tee -a "$LOG"
 }
 
