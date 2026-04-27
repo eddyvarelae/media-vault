@@ -14,12 +14,18 @@ import (
 	"github.com/eddyvarelae/media-vault/internal/scan"
 )
 
-// File copies srcRoot/task.RelPath → dstRoot/task.RelPath, hashing the bytes
+// File copies srcRoot/task.RelPath → dstRoot/task.DstRel, hashing the bytes
 // in flight. The destination is written through a .vault-partial file and
 // atomically renamed on success. mtime is preserved so future scans skip.
+// task.DstRel may equal task.RelPath (no rules / prefix) or differ when
+// routing rules redirected the file.
 func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk string) (manifest.Entry, error) {
 	srcPath := filepath.Join(srcRoot, task.RelPath)
-	dstPath := filepath.Join(dstRoot, task.RelPath)
+	dstRel := task.DstRel
+	if dstRel == "" {
+		dstRel = task.RelPath
+	}
+	dstPath := filepath.Join(dstRoot, dstRel)
 
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
 		return manifest.Entry{}, fmt.Errorf("mkdir: %w", err)
@@ -72,8 +78,8 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 
 	return manifest.Entry{
 		SourceDisk: disk,
-		SourcePath: task.RelPath,
-		DestPath:   task.RelPath,
+		SourcePath: task.RelPath, // src-relative — used by scan.Build to skip on resume
+		DestPath:   dstRel,       // dst-relative — used by verify to find the file
 		Size:       task.Size,
 		MtimeNs:    task.MtimeNs,
 		SHA256:     hex.EncodeToString(hasher.Sum(nil)),

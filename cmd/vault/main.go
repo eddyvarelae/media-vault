@@ -26,7 +26,9 @@ const usage = `vault — auditable media archive
 
 Usage:
   vault scan       <source-disk-name> <source-dir> <dest-dir>
+                   [--prefix SUB/] [--rule EXT=SUBDIR ...]
   vault copy       <source-disk-name> <source-dir> <dest-dir>
+                   [--prefix SUB/] [--rule EXT=SUBDIR ...] [--dry-run]
   vault verify     <source-disk-name> <dest-dir>
   vault certify    <source-disk-name> [out.json]
   vault inventory  <source-disk-name> <dir>
@@ -107,14 +109,43 @@ func main() {
 	}
 }
 
+func parseScanFlags(args []string) (positional []string, prefix string, rules []scan.Rule, dryRun bool) {
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--dry-run":
+			dryRun = true
+		case "--prefix":
+			if i+1 >= len(args) {
+				die("--prefix needs a value")
+			}
+			prefix = args[i+1]
+			i++
+		case "--rule":
+			if i+1 >= len(args) {
+				die("--rule needs a value")
+			}
+			r, err := scan.ParseRules([]string{args[i+1]})
+			if err != nil {
+				die("rule: %v", err)
+			}
+			rules = append(rules, r...)
+			i++
+		default:
+			positional = append(positional, args[i])
+		}
+	}
+	return
+}
+
 func runScan(ctx context.Context, m *manifest.Manifest, args []string) {
-	if len(args) != 3 {
+	pos, prefix, rules, _ := parseScanFlags(args)
+	if len(pos) != 3 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
-	disk, src, dst := args[0], args[1], args[2]
+	disk, src, dst := pos[0], pos[1], pos[2]
 
-	plan, err := scan.Build(ctx, m, disk, src, dst)
+	plan, err := scan.Build(ctx, m, disk, src, dst, prefix, rules)
 	if err != nil {
 		die("scan: %v", err)
 	}
@@ -122,6 +153,12 @@ func runScan(ctx context.Context, m *manifest.Manifest, args []string) {
 	fmt.Printf("Source disk:  %s\n", disk)
 	fmt.Printf("Source dir:   %s\n", src)
 	fmt.Printf("Dest dir:     %s\n", dst)
+	if prefix != "" {
+		fmt.Printf("Prefix:       %s\n", prefix)
+	}
+	if len(rules) > 0 {
+		fmt.Printf("Rules:        %d\n", len(rules))
+	}
 	fmt.Println()
 	fmt.Printf("Files to copy:    %d  (%s)\n", len(plan.ToCopy), human(plan.BytesToCopy))
 	fmt.Printf("Files to skip:    %d  (in manifest, unchanged)\n", plan.SkipCount)
@@ -130,13 +167,14 @@ func runScan(ctx context.Context, m *manifest.Manifest, args []string) {
 }
 
 func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
-	if len(args) != 3 {
+	pos, prefix, rules, dryRun := parseScanFlags(args)
+	if len(pos) != 3 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
-	disk, src, dst := args[0], args[1], args[2]
+	disk, src, dst := pos[0], pos[1], pos[2]
 
-	plan, err := scan.Build(ctx, m, disk, src, dst)
+	plan, err := scan.Build(ctx, m, disk, src, dst, prefix, rules)
 	if err != nil {
 		die("scan: %v", err)
 	}
@@ -149,6 +187,13 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
 
 	totalBytes := plan.BytesToCopy + plan.BytesToRecopy
 	fmt.Printf("Copying %d files (%s) from %s → %s\n", len(todo), human(totalBytes), src, dst)
+	if dryRun {
+		for _, f := range todo {
+			fmt.Printf("  %s → %s\n", f.RelPath, f.DstRel)
+		}
+		fmt.Printf("\n(dry-run; %d files would be copied)\n", len(todo))
+		return
+	}
 
 	var copied, copiedBytes int64
 	for i, f := range todo {
