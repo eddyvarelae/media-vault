@@ -27,8 +27,10 @@ const usage = `vault — auditable media archive
 Usage:
   vault scan       <source-disk-name> <source-dir> <dest-dir>
                    [--prefix SUB/] [--rule EXT=SUBDIR ...]
+                   [--on-collision skip|rename-mtime-year]
   vault copy       <source-disk-name> <source-dir> <dest-dir>
-                   [--prefix SUB/] [--rule EXT=SUBDIR ...] [--dry-run]
+                   [--prefix SUB/] [--rule EXT=SUBDIR ...]
+                   [--on-collision skip|rename-mtime-year] [--dry-run]
   vault verify     <source-disk-name> <dest-dir>
   vault certify    <source-disk-name> [out.json]
   vault inventory  <source-disk-name> <dir>
@@ -109,7 +111,8 @@ func main() {
 	}
 }
 
-func parseScanFlags(args []string) (positional []string, prefix string, rules []scan.Rule, dryRun bool) {
+func parseScanFlags(args []string) (positional []string, prefix string, rules []scan.Rule, collision scan.CollisionStrategy, dryRun bool) {
+	collisionRaw := ""
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--dry-run":
@@ -130,22 +133,33 @@ func parseScanFlags(args []string) (positional []string, prefix string, rules []
 			}
 			rules = append(rules, r...)
 			i++
+		case "--on-collision":
+			if i+1 >= len(args) {
+				die("--on-collision needs a value")
+			}
+			collisionRaw = args[i+1]
+			i++
 		default:
 			positional = append(positional, args[i])
 		}
 	}
+	c, err := scan.ParseCollision(collisionRaw)
+	if err != nil {
+		die("%v", err)
+	}
+	collision = c
 	return
 }
 
 func runScan(ctx context.Context, m *manifest.Manifest, args []string) {
-	pos, prefix, rules, _ := parseScanFlags(args)
+	pos, prefix, rules, collision, _ := parseScanFlags(args)
 	if len(pos) != 3 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
 	disk, src, dst := pos[0], pos[1], pos[2]
 
-	plan, err := scan.Build(ctx, m, disk, src, dst, prefix, rules)
+	plan, err := scan.Build(ctx, m, disk, src, dst, prefix, rules, collision)
 	if err != nil {
 		die("scan: %v", err)
 	}
@@ -164,34 +178,44 @@ func runScan(ctx context.Context, m *manifest.Manifest, args []string) {
 	fmt.Printf("Files to skip:    %d  (in manifest, unchanged)\n", plan.SkipCount)
 	fmt.Printf("Files to recopy:  %d  (%s, source size or mtime changed)\n",
 		len(plan.ToRecopy), human(plan.BytesToRecopy))
+	fmt.Printf("Dst collisions:   %d  (dst path already exists, would overwrite)\n", len(plan.DstCollisions))
 }
 
 func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
-	pos, prefix, rules, dryRun := parseScanFlags(args)
+	pos, prefix, rules, collision, dryRun := parseScanFlags(args)
 	if len(pos) != 3 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
 	disk, src, dst := pos[0], pos[1], pos[2]
 
-	plan, err := scan.Build(ctx, m, disk, src, dst, prefix, rules)
+	plan, err := scan.Build(ctx, m, disk, src, dst, prefix, rules, collision)
 	if err != nil {
 		die("scan: %v", err)
 	}
 
 	todo := append(plan.ToCopy, plan.ToRecopy...)
-	if len(todo) == 0 {
+	if len(todo) == 0 && len(plan.DstCollisions) == 0 {
 		fmt.Println("Nothing to copy. Manifest is up to date.")
 		return
 	}
 
 	totalBytes := plan.BytesToCopy + plan.BytesToRecopy
 	fmt.Printf("Copying %d files (%s) from %s → %s\n", len(todo), human(totalBytes), src, dst)
+	if len(plan.DstCollisions) > 0 {
+		fmt.Printf("(%d files SKIPPED — dst path already exists; use --on-collision rename-mtime-year to disambiguate)\n", len(plan.DstCollisions))
+	}
 	if dryRun {
 		for _, f := range todo {
 			fmt.Printf("  %s → %s\n", f.RelPath, f.DstRel)
 		}
-		fmt.Printf("\n(dry-run; %d files would be copied)\n", len(todo))
+		if len(plan.DstCollisions) > 0 {
+			fmt.Println("\nCollisions (skipped):")
+			for _, f := range plan.DstCollisions {
+				fmt.Printf("  %s → %s (already exists)\n", f.RelPath, f.DstRel)
+			}
+		}
+		fmt.Printf("\n(dry-run; %d files would be copied, %d collisions skipped)\n", len(todo), len(plan.DstCollisions))
 		return
 	}
 

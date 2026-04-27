@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/eddyvarelae/media-vault/internal/manifest"
 )
@@ -39,18 +41,37 @@ type FileTask struct {
 }
 
 type Plan struct {
-	ToCopy        []FileTask
-	ToRecopy      []FileTask
-	SkipCount     int
-	BytesToCopy   int64
-	BytesToRecopy int64
+	ToCopy           []FileTask
+	ToRecopy         []FileTask
+	SkipCount        int
+	DstCollisions    []FileTask // dst file already exists (would overwrite)
+	BytesToCopy      int64
+	BytesToRecopy    int64
+}
+
+type CollisionStrategy int
+
+const (
+	CollisionSkip CollisionStrategy = iota
+	CollisionRenameMtimeYear
+)
+
+func ParseCollision(s string) (CollisionStrategy, error) {
+	switch s {
+	case "", "skip":
+		return CollisionSkip, nil
+	case "rename-mtime-year":
+		return CollisionRenameMtimeYear, nil
+	default:
+		return 0, fmt.Errorf("unknown --on-collision value %q (want: skip | rename-mtime-year)", s)
+	}
 }
 
 // Build walks srcRoot, applies prefix filtering and routing rules, and groups
-// files into copy / recopy / skip buckets based on the manifest. prefix and
-// rules may both be empty for the simplest case (preserve sub-paths, no
-// filter).
-func Build(ctx context.Context, m *manifest.Manifest, disk, srcRoot, dstRoot, prefix string, rules []Rule) (*Plan, error) {
+// files into copy / recopy / skip / collision buckets based on the manifest
+// and the destination filesystem state. onCollision controls how dst files
+// that already exist (with no manifest entry to match) are handled.
+func Build(ctx context.Context, m *manifest.Manifest, disk, srcRoot, dstRoot, prefix string, rules []Rule, onCollision CollisionStrategy) (*Plan, error) {
 	p := &Plan{}
 	prefix = strings.TrimRight(prefix, "/")
 	err := filepath.WalkDir(srcRoot, func(path string, d fs.DirEntry, err error) error {
@@ -95,23 +116,55 @@ func Build(ctx context.Context, m *manifest.Manifest, disk, srcRoot, dstRoot, pr
 		if err != nil {
 			return err
 		}
-		if entry == nil {
-			p.ToCopy = append(p.ToCopy, task)
-			p.BytesToCopy += task.Size
-			return nil
-		}
-		if entry.Size != task.Size || entry.MtimeNs != task.MtimeNs {
+		if entry != nil {
+			if entry.Size == task.Size && entry.MtimeNs == task.MtimeNs {
+				p.SkipCount++
+				return nil
+			}
 			p.ToRecopy = append(p.ToRecopy, task)
 			p.BytesToRecopy += task.Size
 			return nil
 		}
-		p.SkipCount++
+
+		// New file according to the manifest. Before queueing it, make
+		// sure the destination path isn't already occupied — refuse to
+		// overwrite without explicit handling.
+		dstFull := filepath.Join(dstRoot, task.DstRel)
+		if _, statErr := os.Stat(dstFull); statErr == nil {
+			if onCollision == CollisionRenameMtimeYear {
+				task.DstRel = renameWithMtimeYear(task.DstRel, task.MtimeNs)
+				dstFull = filepath.Join(dstRoot, task.DstRel)
+				if _, again := os.Stat(dstFull); again == nil {
+					p.DstCollisions = append(p.DstCollisions, task)
+					return nil
+				}
+			} else {
+				p.DstCollisions = append(p.DstCollisions, task)
+				return nil
+			}
+		}
+
+		p.ToCopy = append(p.ToCopy, task)
+		p.BytesToCopy += task.Size
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	return p, nil
+}
+
+func renameWithMtimeYear(rel string, mtimeNs int64) string {
+	year := time.Unix(0, mtimeNs).Year()
+	dir := filepath.Dir(rel)
+	base := filepath.Base(rel)
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	newBase := fmt.Sprintf("%s_%d%s", stem, year, ext)
+	if dir == "." || dir == "" {
+		return newBase
+	}
+	return filepath.Join(dir, newBase)
 }
 
 func stripPrefix(rel, prefix string) string {
