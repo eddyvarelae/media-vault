@@ -179,6 +179,24 @@ func (m *Manifest) locationsByHash(sha string) ([]Location, error) {
 	return out, rows.Err()
 }
 
+// DeleteEntry removes a file row and any tags pointing at it. Used when a
+// source file is recognized as a verified duplicate of one already at the
+// destination, so the source is deleted and the manifest catches up.
+func (m *Manifest) DeleteEntry(disk, path string) error {
+	tx, err := m.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM tags WHERE source_disk = ? AND source_path = ?`, disk, path); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM files WHERE source_disk = ? AND source_path = ?`, disk, path); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // MoveEntry atomically rewrites a manifest row from (srcDisk, srcPath) to
 // (dstDisk, dstPath), carrying tags along. Used after a host-level mv so the
 // manifest reflects the new location.

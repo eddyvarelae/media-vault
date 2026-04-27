@@ -119,9 +119,39 @@ func Execute(ctx context.Context, m *manifest.Manifest, plan *Plan, dstDisk stri
 		}
 
 		if _, err := os.Stat(mv.DstAbs); err == nil {
+			// Destination already has a file. Look it up in the manifest
+			// to decide if this is a safe duplicate or a genuine collision.
+			existing, _ := m.Lookup(dstDisk, mv.DstRel)
+			if existing != nil && existing.SHA256 == mv.SHA256 {
+				// Same bytes already at dst — drop the source as a
+				// verified duplicate.
+				if err := os.Remove(mv.SrcAbs); err != nil {
+					res.Errors++
+					if onFile != nil {
+						onFile(mv, "dedup-rm-error: "+err.Error())
+					}
+					continue
+				}
+				if err := m.DeleteEntry(mv.Disk, mv.SrcRel); err != nil {
+					res.Errors++
+					if onFile != nil {
+						onFile(mv, "dedup-manifest-error: "+err.Error())
+					}
+					continue
+				}
+				res.Skipped++
+				if onFile != nil {
+					onFile(mv, "deduped")
+				}
+				continue
+			}
 			res.Skipped++
 			if onFile != nil {
-				onFile(mv, "dst-exists")
+				if existing != nil {
+					onFile(mv, "collision (different hash at dst)")
+				} else {
+					onFile(mv, "dst-exists (unmanaged)")
+				}
 			}
 			continue
 		}
