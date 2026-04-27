@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/eddyvarelae/media-vault/internal/manifest"
 )
@@ -21,8 +22,9 @@ type Rule struct {
 }
 
 type Plan struct {
-	Moves []Move
-	Skips []Skip
+	Moves   []Move
+	Skips   []Skip
+	dstRoot string // kept for collision-retry path resolution
 }
 
 type Move struct {
@@ -32,8 +34,34 @@ type Move struct {
 	SrcAbs      string // resolved host path
 	DstAbs      string // resolved host path
 	Size        int64
+	MtimeNs     int64
 	SHA256      string
 	RuleApplied string // empty if no rule matched
+}
+
+// CollisionStrategy controls behavior when the destination path already
+// holds a file whose hash differs from the source's.
+type CollisionStrategy int
+
+const (
+	// CollisionSkip: leave the destination alone, leave the source
+	// in place, count as skipped. Default.
+	CollisionSkip CollisionStrategy = iota
+	// CollisionRenameMtimeYear: rename the incoming file to include
+	// `_<source-mtime-year>` before the extension, then move. Used to
+	// merge two card-dumps that share filenames after a card format.
+	CollisionRenameMtimeYear
+)
+
+func ParseCollision(s string) (CollisionStrategy, error) {
+	switch s {
+	case "", "skip":
+		return CollisionSkip, nil
+	case "rename-mtime-year":
+		return CollisionRenameMtimeYear, nil
+	default:
+		return 0, fmt.Errorf("unknown --on-collision value %q (want: skip | rename-mtime-year)", s)
+	}
 }
 
 type Skip struct {
@@ -61,7 +89,7 @@ func Build(m *manifest.Manifest, srcDisk, srcRoot, prefix, dstRoot string, rules
 	}
 	prefix = strings.TrimRight(prefix, "/")
 
-	plan := &Plan{}
+	plan := &Plan{dstRoot: dstRoot}
 	for _, e := range entries {
 		rel := e.SourcePath
 		if prefix != "" {
@@ -78,6 +106,7 @@ func Build(m *manifest.Manifest, srcDisk, srcRoot, prefix, dstRoot string, rules
 			SrcAbs:      filepath.Join(srcRoot, e.SourcePath),
 			DstAbs:      filepath.Join(dstRoot, dstRel),
 			Size:        e.Size,
+			MtimeNs:     e.MtimeNs,
 			SHA256:      e.SHA256,
 			RuleApplied: applied,
 		}
@@ -86,9 +115,24 @@ func Build(m *manifest.Manifest, srcDisk, srcRoot, prefix, dstRoot string, rules
 	return plan, nil
 }
 
+// renameWithMtimeYear inserts _<year> before the file extension, derived
+// from the file's mtime. e.g. DCIM/DSC00012.JPG (2024) → DCIM/DSC00012_2024.JPG.
+func renameWithMtimeYear(rel string, mtimeNs int64) string {
+	year := time.Unix(0, mtimeNs).Year()
+	dir := filepath.Dir(rel)
+	base := filepath.Base(rel)
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	newBase := fmt.Sprintf("%s_%d%s", stem, year, ext)
+	if dir == "." || dir == "" {
+		return newBase
+	}
+	return filepath.Join(dir, newBase)
+}
+
 // Execute applies the plan: rename each file (mv), then update manifest. Run
 // per-file so a partial failure doesn't lose progress already committed.
-func Execute(ctx context.Context, m *manifest.Manifest, plan *Plan, dstDisk string, onFile func(mv Move, status string)) (*Result, error) {
+func Execute(ctx context.Context, m *manifest.Manifest, plan *Plan, dstDisk string, onCollision CollisionStrategy, onFile func(mv Move, status string)) (*Result, error) {
 	res := &Result{}
 	for _, mv := range plan.Moves {
 		if err := ctx.Err(); err != nil {
@@ -118,6 +162,9 @@ func Execute(ctx context.Context, m *manifest.Manifest, plan *Plan, dstDisk stri
 			continue
 		}
 
+		// Wrap the dst-exists check so collision handling can retry with
+		// a new destination path (e.g. mtime-year suffix).
+	collisionRetry:
 		if _, err := os.Stat(mv.DstAbs); err == nil {
 			// Destination already has a file. Look it up in the manifest
 			// to decide if this is a safe duplicate or a genuine collision.
@@ -144,6 +191,18 @@ func Execute(ctx context.Context, m *manifest.Manifest, plan *Plan, dstDisk stri
 					onFile(mv, "deduped")
 				}
 				continue
+			}
+			// Genuine collision (different hash) or unmanaged file.
+			if onCollision == CollisionRenameMtimeYear && existing != nil {
+				newRel := renameWithMtimeYear(mv.DstRel, mv.MtimeNs)
+				if newRel != mv.DstRel {
+					mv.DstRel = newRel
+					mv.DstAbs = filepath.Join(plan.dstRoot, newRel)
+					if onFile != nil {
+						onFile(mv, "renamed-on-collision → "+newRel)
+					}
+					goto collisionRetry
+				}
 			}
 			res.Skipped++
 			if onFile != nil {

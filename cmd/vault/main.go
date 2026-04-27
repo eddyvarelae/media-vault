@@ -39,7 +39,8 @@ Usage:
   vault symlinks   <tag> <source-disk>=<host-path>... <output-dir>
   vault hardlinks  <tag> <source-disk>=<host-path>... <output-dir>
   vault move       <src-disk> <dst-disk> <src-host-root> <dst-host-root>
-                   [--prefix SUB/] [--rule EXT=SUBDIR ...] [--dry-run]
+                   [--prefix SUB/] [--rule EXT=SUBDIR ...]
+                   [--on-collision skip|rename-mtime-year] [--dry-run]
 
 Manifest and signing key are stored under $VAULT_CONFIG
 (default: ./vault-config/).
@@ -427,6 +428,7 @@ func runMove(ctx context.Context, m *manifest.Manifest, args []string) {
 	// Pull positional args + flags out of the mixed slice.
 	dryRun := false
 	prefix := ""
+	collisionRaw := ""
 	var rules []string
 	var pos []string
 	for i := 0; i < len(args); i++ {
@@ -445,9 +447,19 @@ func runMove(ctx context.Context, m *manifest.Manifest, args []string) {
 			}
 			prefix = args[i+1]
 			i++
+		case "--on-collision":
+			if i+1 >= len(args) {
+				die("--on-collision needs a value")
+			}
+			collisionRaw = args[i+1]
+			i++
 		default:
 			pos = append(pos, args[i])
 		}
+	}
+	collision, err := mvpkg.ParseCollision(collisionRaw)
+	if err != nil {
+		die("%v", err)
 	}
 	if len(pos) != 4 {
 		fmt.Fprint(os.Stderr, usage)
@@ -485,7 +497,7 @@ func runMove(ctx context.Context, m *manifest.Manifest, args []string) {
 		return
 	}
 
-	res, err := mvpkg.Execute(ctx, m, plan, dstDisk, func(mv mvpkg.Move, status string) {
+	res, err := mvpkg.Execute(ctx, m, plan, dstDisk, collision, func(mv mvpkg.Move, status string) {
 		switch status {
 		case "moved":
 			fmt.Printf("  ok  %s\n", mv.DstRel)
