@@ -36,6 +36,7 @@ Usage:
   vault tagged     <tag>
   vault tags       <source-disk-name> <path>
   vault symlinks   <tag> <source-disk>=<host-path>... <output-dir>
+  vault hardlinks  <tag> <source-disk>=<host-path>... <output-dir>
 
 Manifest and signing key are stored under $VAULT_CONFIG
 (default: ./vault-config/).
@@ -91,7 +92,9 @@ func main() {
 	case "tags":
 		runTags(m, args)
 	case "symlinks":
-		runSymlinks(m, args)
+		runLinks(m, args, os.Symlink, "symlink")
+	case "hardlinks":
+		runLinks(m, args, os.Link, "hardlink")
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
@@ -358,10 +361,12 @@ func runTags(m *manifest.Manifest, args []string) {
 	}
 }
 
-// runSymlinks materializes a directory of symlinks to every file with `tag`,
-// pointing to the file's actual location on disk. Caller supplies one or more
-// `<disk>=<host-path>` pairs that map manifest disk names to filesystem roots.
-func runSymlinks(m *manifest.Manifest, args []string) {
+// runLinks materializes a directory of links to every file with `tag`,
+// pointing at the file's actual location on disk. linkFn is the kernel call
+// used to create each link (os.Symlink for soft, os.Link for hard).
+// Caller supplies one or more `<disk>=<host-path>` pairs that map manifest
+// disk names to filesystem roots.
+func runLinks(m *manifest.Manifest, args []string, linkFn func(target, link string) error, kind string) {
 	if len(args) < 3 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
@@ -379,7 +384,7 @@ func runSymlinks(m *manifest.Manifest, args []string) {
 
 	entries, err := m.FilesWithTag(tag)
 	if err != nil {
-		die("symlinks: %v", err)
+		die("%ss: %v", kind, err)
 	}
 	if len(entries) == 0 {
 		fmt.Printf("No files tagged %q.\n", tag)
@@ -399,20 +404,18 @@ func runSymlinks(m *manifest.Manifest, args []string) {
 			continue
 		}
 		target := filepath.Join(root, e.SourcePath)
-		// Use a flat layout with disk prefix to avoid filename collisions
-		// across disks: <disk>__<basename>.
 		linkBase := e.SourceDisk + "__" + filepath.Base(e.SourcePath)
 		linkPath := filepath.Join(out, linkBase)
-		// Best-effort cleanup of any stale symlink, then create.
+		// Best-effort cleanup of any stale link, then create.
 		_ = os.Remove(linkPath)
-		if err := os.Symlink(target, linkPath); err != nil {
-			fmt.Fprintf(os.Stderr, "  FAIL symlink %s -> %s: %v\n", linkPath, target, err)
+		if err := linkFn(target, linkPath); err != nil {
+			fmt.Fprintf(os.Stderr, "  FAIL %s %s -> %s: %v\n", kind, linkPath, target, err)
 			skipped++
 			continue
 		}
 		made++
 	}
-	fmt.Printf("Wrote %d symlinks for tag %q at %s (skipped %d).\n", made, tag, out, skipped)
+	fmt.Printf("Wrote %d %ss for tag %q at %s (skipped %d).\n", made, kind, tag, out, skipped)
 }
 
 func splitOnce(s string, sep byte) []string {
