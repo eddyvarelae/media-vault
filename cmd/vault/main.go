@@ -17,6 +17,7 @@ import (
 	"github.com/eddyvarelae/media-vault/internal/dedup"
 	"github.com/eddyvarelae/media-vault/internal/inventory"
 	"github.com/eddyvarelae/media-vault/internal/manifest"
+	mvpkg "github.com/eddyvarelae/media-vault/internal/move"
 	"github.com/eddyvarelae/media-vault/internal/scan"
 	"github.com/eddyvarelae/media-vault/internal/verify"
 )
@@ -37,6 +38,8 @@ Usage:
   vault tags       <source-disk-name> <path>
   vault symlinks   <tag> <source-disk>=<host-path>... <output-dir>
   vault hardlinks  <tag> <source-disk>=<host-path>... <output-dir>
+  vault move       <src-disk> <dst-disk> <src-host-root> <dst-host-root>
+                   [--rule EXT=SUBDIR ...] [--dry-run]
 
 Manifest and signing key are stored under $VAULT_CONFIG
 (default: ./vault-config/).
@@ -95,6 +98,8 @@ func main() {
 		runLinks(m, args, os.Symlink, "symlink")
 	case "hardlinks":
 		runLinks(m, args, os.Link, "hardlink")
+	case "move":
+		runMove(ctx, m, args)
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
@@ -416,6 +421,77 @@ func runLinks(m *manifest.Manifest, args []string, linkFn func(target, link stri
 		made++
 	}
 	fmt.Printf("Wrote %d %ss for tag %q at %s (skipped %d).\n", made, kind, tag, out, skipped)
+}
+
+func runMove(ctx context.Context, m *manifest.Manifest, args []string) {
+	// Pull positional args + flags out of the mixed slice.
+	dryRun := false
+	var rules []string
+	var pos []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--dry-run":
+			dryRun = true
+		case "--rule":
+			if i+1 >= len(args) {
+				die("--rule needs a value")
+			}
+			rules = append(rules, args[i+1])
+			i++
+		default:
+			pos = append(pos, args[i])
+		}
+	}
+	if len(pos) != 4 {
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	srcDisk, dstDisk, srcRoot, dstRoot := pos[0], pos[1], pos[2], pos[3]
+
+	parsed, err := mvpkg.ParseRules(rules)
+	if err != nil {
+		die("rules: %v", err)
+	}
+
+	plan, err := mvpkg.Build(m, srcDisk, srcRoot, dstRoot, parsed)
+	if err != nil {
+		die("plan: %v", err)
+	}
+	if len(plan.Moves) == 0 {
+		fmt.Println("Nothing to move — no manifest entries for that src-disk.")
+		return
+	}
+
+	fmt.Printf("Move plan: %s → %s\n", srcDisk, dstDisk)
+	fmt.Printf("  src root: %s\n  dst root: %s\n\n", srcRoot, dstRoot)
+	for _, mv := range plan.Moves {
+		marker := "  (no rule)"
+		if mv.RuleApplied != "" {
+			marker = "  [" + mv.RuleApplied + "]"
+		}
+		fmt.Printf("  %s%s\n    %s\n    → %s\n", mv.SrcRel, marker, mv.SrcAbs, mv.DstAbs)
+	}
+	fmt.Printf("\nTotal: %d files\n\n", len(plan.Moves))
+
+	if dryRun {
+		fmt.Println("(dry-run; nothing moved)")
+		return
+	}
+
+	res, err := mvpkg.Execute(ctx, m, plan, dstDisk, func(mv mvpkg.Move, status string) {
+		switch status {
+		case "moved":
+			fmt.Printf("  ok  %s\n", mv.DstRel)
+		default:
+			fmt.Printf("  %s  %s\n", status, mv.SrcRel)
+		}
+	})
+	if err != nil {
+		die("execute: %v", err)
+	}
+
+	fmt.Printf("\nMoved: %d   Skipped: %d   Errors: %d   Bytes moved: %s\n",
+		res.Moved, res.Skipped, res.Errors, human(res.BytesMoved))
 }
 
 func splitOnce(s string, sep byte) []string {

@@ -179,6 +179,52 @@ func (m *Manifest) locationsByHash(sha string) ([]Location, error) {
 	return out, rows.Err()
 }
 
+// MoveEntry atomically rewrites a manifest row from (srcDisk, srcPath) to
+// (dstDisk, dstPath), carrying tags along. Used after a host-level mv so the
+// manifest reflects the new location.
+func (m *Manifest) MoveEntry(srcDisk, srcPath, dstDisk, dstPath string) error {
+	tx, err := m.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`
+		INSERT INTO files
+		  (source_disk, source_path, dest_path, size, mtime_ns, sha256,
+		   copied_at, verified_at, status)
+		SELECT ?, ?, dest_path, size, mtime_ns, sha256,
+		       copied_at, verified_at, status
+		FROM files
+		WHERE source_disk = ? AND source_path = ?
+	`, dstDisk, dstPath, srcDisk, srcPath); err != nil {
+		return fmt.Errorf("insert dst row: %w", err)
+	}
+
+	if _, err := tx.Exec(`
+		INSERT OR IGNORE INTO tags (source_disk, source_path, tag, created_at)
+		SELECT ?, ?, tag, created_at
+		FROM tags
+		WHERE source_disk = ? AND source_path = ?
+	`, dstDisk, dstPath, srcDisk, srcPath); err != nil {
+		return fmt.Errorf("copy tags: %w", err)
+	}
+
+	if _, err := tx.Exec(`
+		DELETE FROM tags WHERE source_disk = ? AND source_path = ?
+	`, srcDisk, srcPath); err != nil {
+		return fmt.Errorf("delete src tags: %w", err)
+	}
+
+	if _, err := tx.Exec(`
+		DELETE FROM files WHERE source_disk = ? AND source_path = ?
+	`, srcDisk, srcPath); err != nil {
+		return fmt.Errorf("delete src row: %w", err)
+	}
+
+	return tx.Commit()
+}
+
 // ApplyTag adds `tag` to every file in `disk` whose source_path matches the
 // SQL LIKE `pattern` (use `%` as the wildcard). Returns count of newly tagged
 // files (already-tagged files are no-ops via INSERT OR IGNORE).
