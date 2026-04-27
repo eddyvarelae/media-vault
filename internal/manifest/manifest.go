@@ -3,6 +3,7 @@ package manifest
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -25,6 +26,17 @@ CREATE TABLE IF NOT EXISTS files (
 CREATE INDEX IF NOT EXISTS idx_files_dest   ON files(dest_path);
 CREATE INDEX IF NOT EXISTS idx_files_status ON files(status);
 CREATE INDEX IF NOT EXISTS idx_files_disk   ON files(source_disk);
+
+CREATE TABLE IF NOT EXISTS tags (
+  source_disk TEXT    NOT NULL,
+  source_path TEXT    NOT NULL,
+  tag         TEXT    NOT NULL,
+  created_at  INTEGER NOT NULL,
+  PRIMARY KEY (source_disk, source_path, tag)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tags_tag  ON tags(tag);
+CREATE INDEX IF NOT EXISTS idx_tags_disk ON tags(source_disk);
 `
 
 type Manifest struct {
@@ -163,6 +175,83 @@ func (m *Manifest) locationsByHash(sha string) ([]Location, error) {
 			return nil, err
 		}
 		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+// ApplyTag adds `tag` to every file in `disk` whose source_path matches the
+// SQL LIKE `pattern` (use `%` as the wildcard). Returns count of newly tagged
+// files (already-tagged files are no-ops via INSERT OR IGNORE).
+func (m *Manifest) ApplyTag(disk, pattern, tag string) (int64, error) {
+	now := time.Now().UnixNano()
+	res, err := m.db.Exec(`
+		INSERT OR IGNORE INTO tags (source_disk, source_path, tag, created_at)
+		SELECT source_disk, source_path, ?, ?
+		FROM files
+		WHERE source_disk = ? AND source_path LIKE ?
+	`, tag, now, disk, pattern)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// RemoveTag deletes a tag from files in `disk` matching `pattern`.
+func (m *Manifest) RemoveTag(disk, pattern, tag string) (int64, error) {
+	res, err := m.db.Exec(`
+		DELETE FROM tags
+		WHERE source_disk = ? AND source_path LIKE ? AND tag = ?
+	`, disk, pattern, tag)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// FilesWithTag returns every file carrying `tag`, joined with manifest data.
+func (m *Manifest) FilesWithTag(tag string) ([]Entry, error) {
+	rows, err := m.db.Query(`
+		SELECT f.source_disk, f.source_path, f.dest_path, f.size, f.mtime_ns,
+		       f.sha256, f.copied_at, COALESCE(f.verified_at, 0), f.status
+		FROM files f
+		JOIN tags t ON t.source_disk = f.source_disk AND t.source_path = f.source_path
+		WHERE t.tag = ?
+		ORDER BY f.source_disk, f.source_path
+	`, tag)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Entry
+	for rows.Next() {
+		var e Entry
+		if err := rows.Scan(&e.SourceDisk, &e.SourcePath, &e.DestPath, &e.Size,
+			&e.MtimeNs, &e.SHA256, &e.CopiedAt, &e.VerifiedAt, &e.Status); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// TagsFor returns the list of tags attached to a given (disk, path).
+func (m *Manifest) TagsFor(disk, path string) ([]string, error) {
+	rows, err := m.db.Query(`
+		SELECT tag FROM tags WHERE source_disk = ? AND source_path = ?
+		ORDER BY tag
+	`, disk, path)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
 	}
 	return out, rows.Err()
 }

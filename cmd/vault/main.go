@@ -31,6 +31,11 @@ Usage:
   vault inventory  <source-disk-name> <dir>
   vault dedup      [--min-size <bytes>]
   vault unique     <source-disk-name>
+  vault tag        <source-disk-name> <path-pattern> <tag>
+  vault untag      <source-disk-name> <path-pattern> <tag>
+  vault tagged     <tag>
+  vault tags       <source-disk-name> <path>
+  vault symlinks   <tag> <source-disk>=<host-path>... <output-dir>
 
 Manifest and signing key are stored under $VAULT_CONFIG
 (default: ./vault-config/).
@@ -77,6 +82,16 @@ func main() {
 		runDedup(m, args)
 	case "unique":
 		runUnique(m, args)
+	case "tag":
+		runTag(m, args)
+	case "untag":
+		runUntag(m, args)
+	case "tagged":
+		runTagged(m, args)
+	case "tags":
+		runTags(m, args)
+	case "symlinks":
+		runSymlinks(m, args)
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
@@ -274,6 +289,139 @@ func runUnique(m *manifest.Manifest, args []string) {
 		die("unique: %v", err)
 	}
 	dedup.PrintUnique(os.Stdout, disk, entries)
+}
+
+func runTag(m *manifest.Manifest, args []string) {
+	if len(args) != 3 {
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	disk, pattern, tag := args[0], args[1], args[2]
+	n, err := m.ApplyTag(disk, pattern, tag)
+	if err != nil {
+		die("tag: %v", err)
+	}
+	fmt.Printf("Tagged %d files in %s matching %q with %q.\n", n, disk, pattern, tag)
+}
+
+func runUntag(m *manifest.Manifest, args []string) {
+	if len(args) != 3 {
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	disk, pattern, tag := args[0], args[1], args[2]
+	n, err := m.RemoveTag(disk, pattern, tag)
+	if err != nil {
+		die("untag: %v", err)
+	}
+	fmt.Printf("Untagged %d files in %s matching %q from %q.\n", n, disk, pattern, tag)
+}
+
+func runTagged(m *manifest.Manifest, args []string) {
+	if len(args) != 1 {
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	tag := args[0]
+	entries, err := m.FilesWithTag(tag)
+	if err != nil {
+		die("tagged: %v", err)
+	}
+	if len(entries) == 0 {
+		fmt.Printf("No files tagged %q.\n", tag)
+		return
+	}
+	var total int64
+	for _, e := range entries {
+		fmt.Printf("  [%s] %s  (%s)\n", e.SourceDisk, e.SourcePath, human(e.Size))
+		total += e.Size
+	}
+	fmt.Printf("\n%d files, %s\n", len(entries), human(total))
+}
+
+func runTags(m *manifest.Manifest, args []string) {
+	if len(args) != 2 {
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	disk, path := args[0], args[1]
+	tags, err := m.TagsFor(disk, path)
+	if err != nil {
+		die("tags: %v", err)
+	}
+	if len(tags) == 0 {
+		fmt.Printf("No tags on %s/%s\n", disk, path)
+		return
+	}
+	for _, t := range tags {
+		fmt.Println(t)
+	}
+}
+
+// runSymlinks materializes a directory of symlinks to every file with `tag`,
+// pointing to the file's actual location on disk. Caller supplies one or more
+// `<disk>=<host-path>` pairs that map manifest disk names to filesystem roots.
+func runSymlinks(m *manifest.Manifest, args []string) {
+	if len(args) < 3 {
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	tag := args[0]
+	out := args[len(args)-1]
+	roots := map[string]string{}
+	for _, kv := range args[1 : len(args)-1] {
+		parts := splitOnce(kv, '=')
+		if len(parts) != 2 {
+			die("expected <disk>=<path>, got %q", kv)
+		}
+		roots[parts[0]] = parts[1]
+	}
+
+	entries, err := m.FilesWithTag(tag)
+	if err != nil {
+		die("symlinks: %v", err)
+	}
+	if len(entries) == 0 {
+		fmt.Printf("No files tagged %q.\n", tag)
+		return
+	}
+
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		die("mkdir %s: %v", out, err)
+	}
+
+	var made, skipped int
+	for _, e := range entries {
+		root, ok := roots[e.SourceDisk]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "  SKIP (no root for disk %q): %s\n", e.SourceDisk, e.SourcePath)
+			skipped++
+			continue
+		}
+		target := filepath.Join(root, e.SourcePath)
+		// Use a flat layout with disk prefix to avoid filename collisions
+		// across disks: <disk>__<basename>.
+		linkBase := e.SourceDisk + "__" + filepath.Base(e.SourcePath)
+		linkPath := filepath.Join(out, linkBase)
+		// Best-effort cleanup of any stale symlink, then create.
+		_ = os.Remove(linkPath)
+		if err := os.Symlink(target, linkPath); err != nil {
+			fmt.Fprintf(os.Stderr, "  FAIL symlink %s -> %s: %v\n", linkPath, target, err)
+			skipped++
+			continue
+		}
+		made++
+	}
+	fmt.Printf("Wrote %d symlinks for tag %q at %s (skipped %d).\n", made, tag, out, skipped)
+}
+
+func splitOnce(s string, sep byte) []string {
+	for i := 0; i < len(s); i++ {
+		if s[i] == sep {
+			return []string{s[:i], s[i+1:]}
+		}
+	}
+	return []string{s}
 }
 
 func human(n int64) string {
