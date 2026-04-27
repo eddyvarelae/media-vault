@@ -193,11 +193,11 @@ func (m *Manifest) MoveEntry(srcDisk, srcPath, dstDisk, dstPath string) error {
 		INSERT INTO files
 		  (source_disk, source_path, dest_path, size, mtime_ns, sha256,
 		   copied_at, verified_at, status)
-		SELECT ?, ?, dest_path, size, mtime_ns, sha256,
+		SELECT ?, ?, ?, size, mtime_ns, sha256,
 		       copied_at, verified_at, status
 		FROM files
 		WHERE source_disk = ? AND source_path = ?
-	`, dstDisk, dstPath, srcDisk, srcPath); err != nil {
+	`, dstDisk, dstPath, dstPath, srcDisk, srcPath); err != nil {
 		return fmt.Errorf("insert dst row: %w", err)
 	}
 

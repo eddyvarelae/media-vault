@@ -39,7 +39,14 @@ func Run(ctx context.Context, m *manifest.Manifest, disk, dstRoot string, onFile
 			return res, err
 		}
 
-		full := filepath.Join(dstRoot, e.DestPath)
+		// Inventory-only entries have an empty DestPath — fall back to
+		// SourcePath, which is the file's location relative to the
+		// inventory root.
+		rel := e.DestPath
+		if rel == "" {
+			rel = e.SourcePath
+		}
+		full := filepath.Join(dstRoot, rel)
 		got, n, err := hashFile(ctx, full)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
