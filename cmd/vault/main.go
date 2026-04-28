@@ -16,6 +16,7 @@ import (
 	"github.com/eddyvarelae/media-vault/internal/copy"
 	"github.com/eddyvarelae/media-vault/internal/dedup"
 	"github.com/eddyvarelae/media-vault/internal/inventory"
+	"github.com/eddyvarelae/media-vault/internal/importer"
 	"github.com/eddyvarelae/media-vault/internal/manifest"
 	mvpkg "github.com/eddyvarelae/media-vault/internal/move"
 	"github.com/eddyvarelae/media-vault/internal/scan"
@@ -42,6 +43,7 @@ Usage:
   vault tags       <source-disk-name> <path>
   vault symlinks   <tag> <source-disk>=<host-path>... <output-dir>
   vault hardlinks  <tag> <source-disk>=<host-path>... <output-dir>
+  vault import-tags <reports-dir> <source-disk-name>
   vault move       <src-disk> <dst-disk> <src-host-root> <dst-host-root>
                    [--prefix SUB/] [--rule EXT=SUBDIR ...]
                    [--on-collision skip|rename-mtime-year] [--dry-run]
@@ -105,6 +107,8 @@ func main() {
 		runLinks(m, args, os.Link, "hardlink")
 	case "move":
 		runMove(ctx, m, args)
+	case "import-tags":
+		runImportTags(ctx, m, args)
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
@@ -580,6 +584,30 @@ func runMove(ctx context.Context, m *manifest.Manifest, args []string) {
 
 	fmt.Printf("\nMoved: %d   Skipped: %d   Errors: %d   Bytes moved: %s\n",
 		res.Moved, res.Skipped, res.Errors, human(res.BytesMoved))
+}
+
+func runImportTags(ctx context.Context, m *manifest.Manifest, args []string) {
+	if len(args) != 2 {
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	reportsDir, disk := args[0], args[1]
+
+	fmt.Printf("Importing video-tagger reports from %s into disk %q\n\n", reportsDir, disk)
+	res, err := importer.Run(ctx, m, disk, reportsDir, func(report, status string) {
+		fmt.Printf("  %-30s  %s\n", report, status)
+	})
+	if err != nil {
+		die("import: %v", err)
+	}
+
+	fmt.Println()
+	fmt.Printf("Reports seen:  %d\n", res.Reports)
+	fmt.Printf("Matched:       %d\n", res.Matched)
+	fmt.Printf("Ambiguous:     %d\n", res.Ambiguous)
+	fmt.Printf("Not in disk:   %d\n", res.NotFound)
+	fmt.Printf("Tags applied:  %d\n", res.TagsApplied)
+	fmt.Printf("Metadata rows: %d\n", res.MetadataWritten)
 }
 
 func splitOnce(s string, sep byte) []string {

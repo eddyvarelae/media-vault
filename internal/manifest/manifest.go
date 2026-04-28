@@ -37,6 +37,18 @@ CREATE TABLE IF NOT EXISTS tags (
 
 CREATE INDEX IF NOT EXISTS idx_tags_tag  ON tags(tag);
 CREATE INDEX IF NOT EXISTS idx_tags_disk ON tags(source_disk);
+
+CREATE TABLE IF NOT EXISTS metadata (
+  source_disk TEXT    NOT NULL,
+  source_path TEXT    NOT NULL,
+  key         TEXT    NOT NULL,
+  value       TEXT    NOT NULL,
+  updated_at  INTEGER NOT NULL,
+  PRIMARY KEY (source_disk, source_path, key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_metadata_disk ON metadata(source_disk);
+CREATE INDEX IF NOT EXISTS idx_metadata_key  ON metadata(key);
 `
 
 type Manifest struct {
@@ -241,6 +253,44 @@ func (m *Manifest) MoveEntry(srcDisk, srcPath, dstDisk, dstPath string) error {
 	}
 
 	return tx.Commit()
+}
+
+// SetMetadata upserts a (key, value) pair against a manifest file.
+func (m *Manifest) SetMetadata(disk, path, key, value string) error {
+	_, err := m.db.Exec(`
+		INSERT INTO metadata (source_disk, source_path, key, value, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(source_disk, source_path, key) DO UPDATE SET
+		  value      = excluded.value,
+		  updated_at = excluded.updated_at
+	`, disk, path, key, value, time.Now().UnixNano())
+	return err
+}
+
+// FindByBasename returns manifest entries within `disk` whose source_path
+// ends in `basename` (i.e., last path segment matches). Used to look up files
+// by friendly name when ingesting external metadata.
+func (m *Manifest) FindByBasename(disk, basename string) ([]Entry, error) {
+	rows, err := m.db.Query(`
+		SELECT source_disk, source_path, dest_path, size, mtime_ns, sha256,
+		       copied_at, COALESCE(verified_at, 0), status
+		FROM files
+		WHERE source_disk = ? AND (source_path = ? OR source_path LIKE ?)
+	`, disk, basename, "%/"+basename)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Entry
+	for rows.Next() {
+		var e Entry
+		if err := rows.Scan(&e.SourceDisk, &e.SourcePath, &e.DestPath, &e.Size,
+			&e.MtimeNs, &e.SHA256, &e.CopiedAt, &e.VerifiedAt, &e.Status); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // ApplyTag adds `tag` to every file in `disk` whose source_path matches the
