@@ -15,8 +15,8 @@ import (
 	"github.com/eddyvarelae/media-vault/internal/certify"
 	"github.com/eddyvarelae/media-vault/internal/copy"
 	"github.com/eddyvarelae/media-vault/internal/dedup"
-	"github.com/eddyvarelae/media-vault/internal/inventory"
 	"github.com/eddyvarelae/media-vault/internal/importer"
+	"github.com/eddyvarelae/media-vault/internal/inventory"
 	"github.com/eddyvarelae/media-vault/internal/manifest"
 	mvpkg "github.com/eddyvarelae/media-vault/internal/move"
 	"github.com/eddyvarelae/media-vault/internal/scan"
@@ -27,6 +27,7 @@ const usage = `vault — auditable media archive
 
 Usage:
   vault scan       <source-disk-name> <source-dir> <dest-dir>
+                   [--dedupe-content]
                    [--prefix SUB/] [--rule EXT=SUBDIR ...]
                    [--on-collision skip|rename-mtime-year]
   vault copy       <source-disk-name> <source-dir> <dest-dir>
@@ -115,12 +116,14 @@ func main() {
 	}
 }
 
-func parseScanFlags(args []string) (positional []string, prefix string, rules []scan.Rule, collision scan.CollisionStrategy, dryRun bool) {
+func parseScanFlags(args []string) (positional []string, prefix string, rules []scan.Rule, collision scan.CollisionStrategy, dryRun bool, dedupeContent bool) {
 	collisionRaw := ""
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--dry-run":
 			dryRun = true
+		case "--dedupe-content":
+			dedupeContent = true
 		case "--prefix":
 			if i+1 >= len(args) {
 				die("--prefix needs a value")
@@ -156,14 +159,14 @@ func parseScanFlags(args []string) (positional []string, prefix string, rules []
 }
 
 func runScan(ctx context.Context, m *manifest.Manifest, args []string) {
-	pos, prefix, rules, collision, _ := parseScanFlags(args)
+	pos, prefix, rules, collision, _, dedupeContent := parseScanFlags(args)
 	if len(pos) != 3 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
 	disk, src, dst := pos[0], pos[1], pos[2]
 
-	plan, err := scan.Build(ctx, m, disk, src, dst, prefix, rules, collision)
+	plan, err := scan.BuildWithOptions(ctx, m, disk, src, dst, prefix, rules, collision, dedupeContent)
 	if err != nil {
 		die("scan: %v", err)
 	}
@@ -180,20 +183,24 @@ func runScan(ctx context.Context, m *manifest.Manifest, args []string) {
 	fmt.Println()
 	fmt.Printf("Files to copy:    %d  (%s)\n", len(plan.ToCopy), human(plan.BytesToCopy))
 	fmt.Printf("Files to skip:    %d  (in manifest, unchanged)\n", plan.SkipCount)
+	if plan.SkipContentCount > 0 || plan.HashedFiles > 0 {
+		fmt.Printf("Already archived: %d  (%s, same content under another disk/name; %d files hashed)\n",
+			plan.SkipContentCount, human(plan.BytesSkipContent), plan.HashedFiles)
+	}
 	fmt.Printf("Files to recopy:  %d  (%s, source size or mtime changed)\n",
 		len(plan.ToRecopy), human(plan.BytesToRecopy))
 	fmt.Printf("Dst collisions:   %d  (dst path already exists, would overwrite)\n", len(plan.DstCollisions))
 }
 
 func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
-	pos, prefix, rules, collision, dryRun := parseScanFlags(args)
+	pos, prefix, rules, collision, dryRun, dedupeContent := parseScanFlags(args)
 	if len(pos) != 3 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
 	disk, src, dst := pos[0], pos[1], pos[2]
 
-	plan, err := scan.Build(ctx, m, disk, src, dst, prefix, rules, collision)
+	plan, err := scan.BuildWithOptions(ctx, m, disk, src, dst, prefix, rules, collision, dedupeContent)
 	if err != nil {
 		die("scan: %v", err)
 	}

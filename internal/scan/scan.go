@@ -2,7 +2,10 @@ package scan
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -44,6 +47,9 @@ type Plan struct {
 	ToCopy           []FileTask
 	ToRecopy         []FileTask
 	SkipCount        int
+	SkipContentCount int // already in the archive under a different disk/path
+	BytesSkipContent int64
+	HashedFiles      int        // files read to resolve a size collision
 	DstCollisions    []FileTask // dst file already exists (would overwrite)
 	BytesToCopy      int64
 	BytesToRecopy    int64
@@ -72,6 +78,22 @@ func ParseCollision(s string) (CollisionStrategy, error) {
 // and the destination filesystem state. onCollision controls how dst files
 // that already exist (with no manifest entry to match) are handled.
 func Build(ctx context.Context, m *manifest.Manifest, disk, srcRoot, dstRoot, prefix string, rules []Rule, onCollision CollisionStrategy) (*Plan, error) {
+	return BuildWithOptions(ctx, m, disk, srcRoot, dstRoot, prefix, rules, onCollision, false)
+}
+
+// BuildWithOptions is Build plus dedupeContent.
+//
+// The manifest keys on (source_disk, source_path), so the same footage arriving
+// from a second physical disk looks entirely new: a plain scan of a 9,827-file
+// directory whose contents were already archived from another disk proposed
+// copying 9,339 of them. With --on-collision rename-mtime-year that does not
+// overwrite anything, it just fills the archive with renamed duplicates.
+//
+// dedupeContent closes that hole by asking whether this file's CONTENT is
+// already archived anywhere, using the sha256 the manifest already stores. It
+// is opt-in because it reads candidate files, and because "already archived
+// elsewhere" is a judgement some workflows may not want made for them.
+func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, dstRoot, prefix string, rules []Rule, onCollision CollisionStrategy, dedupeContent bool) (*Plan, error) {
 	p := &Plan{}
 	prefix = strings.TrimRight(prefix, "/")
 	err := filepath.WalkDir(srcRoot, func(path string, d fs.DirEntry, err error) error {
@@ -124,6 +146,27 @@ func Build(ctx context.Context, m *manifest.Manifest, disk, srcRoot, dstRoot, pr
 			p.ToRecopy = append(p.ToRecopy, task)
 			p.BytesToRecopy += task.Size
 			return nil
+		}
+
+		// New according to (disk, path) — but the same bytes may already be
+		// archived from another disk, possibly under another name.
+		if dedupeContent {
+			known, hErr := m.VerifiedHashesForSize(task.Size)
+			if hErr != nil {
+				return hErr
+			}
+			if len(known) > 0 {
+				sum, sErr := hashFile(path)
+				if sErr != nil {
+					return sErr
+				}
+				p.HashedFiles++
+				if _, dup := known[sum]; dup {
+					p.SkipContentCount++
+					p.BytesSkipContent += task.Size
+					return nil
+				}
+			}
 		}
 
 		// New file according to the manifest. Before queueing it, make
@@ -209,4 +252,18 @@ func isJunkDir(name string) bool {
 		return true
 	}
 	return false
+}
+
+// hashFile returns the hex sha256 of a file's contents.
+func hashFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }

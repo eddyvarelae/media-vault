@@ -26,6 +26,10 @@ CREATE TABLE IF NOT EXISTS files (
 CREATE INDEX IF NOT EXISTS idx_files_dest   ON files(dest_path);
 CREATE INDEX IF NOT EXISTS idx_files_status ON files(status);
 CREATE INDEX IF NOT EXISTS idx_files_disk   ON files(source_disk);
+-- Content dedup looks files up by size first (see VerifiedHashesForSize).
+-- Without this the planner falls back to idx_files_status, which matches every
+-- verified row and then filters, turning a per-file lookup into a full scan.
+CREATE INDEX IF NOT EXISTS idx_files_size   ON files(size, status);
 
 CREATE TABLE IF NOT EXISTS tags (
   source_disk TEXT    NOT NULL,
@@ -170,6 +174,30 @@ func (m *Manifest) FindDuplicates(minSize int64) ([]DuplicateGroup, error) {
 		groups[i].Locations = locs
 	}
 	return groups, nil
+}
+
+// VerifiedHashesForSize returns the sha256s of every VERIFIED file in the
+// archive with exactly this size, across all source disks.
+//
+// Size is a free discriminator: a candidate whose size matches nothing here
+// cannot be a duplicate of anything archived, so the caller can skip hashing
+// it entirely. Only size-collisions need to be read.
+func (m *Manifest) VerifiedHashesForSize(size int64) (map[string]struct{}, error) {
+	rows, err := m.db.Query(
+		`select sha256 from files where size = ? and status = 'verified' and sha256 != ''`, size)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]struct{})
+	for rows.Next() {
+		var sha string
+		if err := rows.Scan(&sha); err != nil {
+			return nil, err
+		}
+		out[sha] = struct{}{}
+	}
+	return out, rows.Err()
 }
 
 func (m *Manifest) locationsByHash(sha string) ([]Location, error) {
