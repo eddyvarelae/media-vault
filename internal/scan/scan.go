@@ -43,13 +43,21 @@ type FileTask struct {
 	MtimeNs int64
 }
 
+// DedupeHit records a source file whose bytes are already in the archive under
+// some other disk/path, together with the entry that already holds them.
+type DedupeHit struct {
+	Task     FileTask
+	Existing manifest.Entry
+}
+
 type Plan struct {
 	ToCopy           []FileTask
 	ToRecopy         []FileTask
 	SkipCount        int
-	SkipContentCount int // already in the archive under a different disk/path
+	Deduped          []DedupeHit // content already archived elsewhere
 	BytesSkipContent int64
 	HashedFiles      int        // files read to resolve a size collision
+	DedupeEligible   int        // verified rows content dedup could match against
 	DstCollisions    []FileTask // dst file already exists (would overwrite)
 	BytesToCopy      int64
 	BytesToRecopy    int64
@@ -95,6 +103,42 @@ func Build(ctx context.Context, m *manifest.Manifest, disk, srcRoot, dstRoot, pr
 // elsewhere" is a judgement some workflows may not want made for them.
 func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, dstRoot, prefix string, rules []Rule, onCollision CollisionStrategy, dedupeContent bool) (*Plan, error) {
 	p := &Plan{}
+	seenThisRun := map[string]manifest.Entry{}
+	sizeCount := map[int64]int{}
+	if dedupeContent {
+		n, err := m.CountVerifiedHashable()
+		if err != nil {
+			return nil, err
+		}
+		p.DedupeEligible = n
+		// Cheap stat-only pre-pass. A file whose size is unique within this
+		// source AND absent from the archive cannot be a duplicate of
+		// anything, so it never needs hashing. Without this count, two
+		// identical NEW files both get queued: neither is in the archive, so
+		// neither would be hashed, so nothing detects that they match.
+		if err := filepath.WalkDir(srcRoot, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				if isJunkDir(d.Name()) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if isJunkFile(d.Name()) {
+				return nil
+			}
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			sizeCount[info.Size()]++
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
 	prefix = strings.TrimRight(prefix, "/")
 	err := filepath.WalkDir(srcRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -151,20 +195,35 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 		// New according to (disk, path) — but the same bytes may already be
 		// archived from another disk, possibly under another name.
 		if dedupeContent {
-			known, hErr := m.VerifiedHashesForSize(task.Size)
+			known, hErr := m.VerifiedBySize(task.Size)
 			if hErr != nil {
 				return hErr
 			}
-			if len(known) > 0 {
-				sum, sErr := hashFile(path)
+			// Also catch two identical NEW files within this one source: the
+			// plan is built up front, so without this both get queued and we
+			// reproduce the duplicate problem intra-disk.
+			if len(known) > 0 || sizeCount[task.Size] > 1 {
+				sum, sErr := hashFile(ctx, path)
 				if sErr != nil {
 					return sErr
 				}
 				p.HashedFiles++
-				if _, dup := known[sum]; dup {
-					p.SkipContentCount++
+				if e, dup := known[sum]; dup {
+					p.Deduped = append(p.Deduped, DedupeHit{Task: task, Existing: e})
 					p.BytesSkipContent += task.Size
 					return nil
+				}
+				if e, dup := seenThisRun[sum]; dup {
+					p.Deduped = append(p.Deduped, DedupeHit{Task: task, Existing: e})
+					p.BytesSkipContent += task.Size
+					return nil
+				}
+				seenThisRun[sum] = manifest.Entry{
+					SourceDisk: disk,
+					SourcePath: task.RelPath,
+					DestPath:   task.DstRel,
+					Size:       task.Size,
+					SHA256:     sum,
 				}
 			}
 		}
@@ -254,16 +313,30 @@ func isJunkDir(name string) bool {
 	return false
 }
 
-// hashFile returns the hex sha256 of a file's contents.
-func hashFile(path string) (string, error) {
+// hashFile returns the hex sha256 of a file's contents. Honours ctx mid-file:
+// the only other cancellation check is per-WalkDir-entry, so without this a
+// Ctrl-C during a 50 GB hash waits for the whole file.
+func hashFile(ctx context.Context, path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
+	if _, err := io.Copy(h, &ctxReader{ctx: ctx, r: f}); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c *ctxReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
 }

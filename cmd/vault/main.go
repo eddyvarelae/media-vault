@@ -27,12 +27,13 @@ const usage = `vault — auditable media archive
 
 Usage:
   vault scan       <source-disk-name> <source-dir> <dest-dir>
-                   [--dedupe-content]
                    [--prefix SUB/] [--rule EXT=SUBDIR ...]
                    [--on-collision skip|rename-mtime-year]
   vault copy       <source-disk-name> <source-dir> <dest-dir>
                    [--prefix SUB/] [--rule EXT=SUBDIR ...]
                    [--on-collision skip|rename-mtime-year] [--dry-run]
+                   [--dedupe-content]   (scan and copy: skip files whose CONTENT
+                                         is already archived under any disk)
   vault verify     <source-disk-name> <dest-dir>
   vault certify    <source-disk-name> [out.json]
   vault inventory  <source-disk-name> <dir>
@@ -48,6 +49,8 @@ Usage:
   vault move       <src-disk> <dst-disk> <src-host-root> <dst-host-root>
                    [--prefix SUB/] [--rule EXT=SUBDIR ...]
                    [--on-collision skip|rename-mtime-year] [--dry-run]
+                   [--dedupe-content]   (scan and copy: skip files whose CONTENT
+                                         is already archived under any disk)
 
 Manifest and signing key are stored under $VAULT_CONFIG
 (default: ./vault-config/).
@@ -183,9 +186,16 @@ func runScan(ctx context.Context, m *manifest.Manifest, args []string) {
 	fmt.Println()
 	fmt.Printf("Files to copy:    %d  (%s)\n", len(plan.ToCopy), human(plan.BytesToCopy))
 	fmt.Printf("Files to skip:    %d  (in manifest, unchanged)\n", plan.SkipCount)
-	if plan.SkipContentCount > 0 || plan.HashedFiles > 0 {
-		fmt.Printf("Already archived: %d  (%s, same content under another disk/name; %d files hashed)\n",
-			plan.SkipContentCount, human(plan.BytesSkipContent), plan.HashedFiles)
+	if dedupeContent {
+		// Always print, including the zero case. "Found no duplicates" and
+		// "had nothing to compare against" look identical otherwise, and the
+		// latter is the normal state until `vault verify` has run.
+		fmt.Printf("Already archived: %d  (%s, same content under another disk/name; %d hashed, %d verified rows eligible)\n",
+			len(plan.Deduped), human(plan.BytesSkipContent), plan.HashedFiles, plan.DedupeEligible)
+		if plan.DedupeEligible == 0 {
+			fmt.Println("  note: no verified rows to match against — run `vault verify` on the")
+			fmt.Println("        already-archived disks first, or dedupe can never fire.")
+		}
 	}
 	fmt.Printf("Files to recopy:  %d  (%s, source size or mtime changed)\n",
 		len(plan.ToRecopy), human(plan.BytesToRecopy))
@@ -206,7 +216,7 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
 	}
 
 	todo := append(plan.ToCopy, plan.ToRecopy...)
-	if len(todo) == 0 && len(plan.DstCollisions) == 0 {
+	if len(todo) == 0 && len(plan.DstCollisions) == 0 && len(plan.Deduped) == 0 {
 		fmt.Println("Nothing to copy. Manifest is up to date.")
 		return
 	}
@@ -228,6 +238,34 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
 		}
 		fmt.Printf("\n(dry-run; %d files would be copied, %d collisions skipped)\n", len(todo), len(plan.DstCollisions))
 		return
+	}
+
+	// Record the content-dupes before copying anything. Without a row this
+	// disk has no provenance in an "auditable media archive" (vault unique
+	// would claim it holds nothing), and every future scan re-hashes the whole
+	// card because Lookup finds nothing to short-circuit on.
+	//
+	// Status "deduped" is to "copied" what by-reference is to by-value: the
+	// bytes are archived, at Existing.DestPath, but this row has not itself
+	// been verified against the destination. `vault verify` promotes it like
+	// any other row, and `certify` keeps refusing until it does — which is the
+	// same contract copied rows already have.
+	if !dryRun && len(plan.Deduped) > 0 {
+		for _, d := range plan.Deduped {
+			if err := m.Upsert(manifest.Entry{
+				SourceDisk: disk,
+				SourcePath: d.Task.RelPath,
+				DestPath:   d.Existing.DestPath,
+				Size:       d.Task.Size,
+				MtimeNs:    d.Task.MtimeNs,
+				SHA256:     d.Existing.SHA256,
+				CopiedAt:   time.Now().UnixNano(),
+				Status:     "deduped",
+			}); err != nil {
+				die("record dedupe %s: %v", d.Task.RelPath, err)
+			}
+		}
+		fmt.Printf("Recorded %d already-archived files in the manifest (status deduped).\n", len(plan.Deduped))
 	}
 
 	var copied, copiedBytes int64

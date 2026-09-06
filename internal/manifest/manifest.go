@@ -176,28 +176,48 @@ func (m *Manifest) FindDuplicates(minSize int64) ([]DuplicateGroup, error) {
 	return groups, nil
 }
 
-// VerifiedHashesForSize returns the sha256s of every VERIFIED file in the
-// archive with exactly this size, across all source disks.
+// VerifiedBySize returns every VERIFIED file in the archive with exactly this
+// size, keyed by sha256, across all source disks.
 //
 // Size is a free discriminator: a candidate whose size matches nothing here
 // cannot be a duplicate of anything archived, so the caller can skip hashing
 // it entirely. Only size-collisions need to be read.
-func (m *Manifest) VerifiedHashesForSize(size int64) (map[string]struct{}, error) {
+//
+// Deliberately verified-only. A `copied` row's sha256 attests to what the
+// SOURCE held, not that the destination is still intact — skipping a copy
+// against an unverified destination could drop the last good copy of a file.
+// Callers should surface how many rows were eligible, so "no duplicates found"
+// stays distinguishable from "nothing was eligible to compare against".
+func (m *Manifest) VerifiedBySize(size int64) (map[string]Entry, error) {
 	rows, err := m.db.Query(
-		`select sha256 from files where size = ? and status = 'verified' and sha256 != ''`, size)
+		`select source_disk, source_path, dest_path, size, mtime_ns, sha256, verified_at
+		   from files
+		  where size = ? and status = 'verified' and sha256 != ''`, size)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := make(map[string]struct{})
+	out := make(map[string]Entry)
 	for rows.Next() {
-		var sha string
-		if err := rows.Scan(&sha); err != nil {
+		var e Entry
+		if err := rows.Scan(&e.SourceDisk, &e.SourcePath, &e.DestPath,
+			&e.Size, &e.MtimeNs, &e.SHA256, &e.VerifiedAt); err != nil {
 			return nil, err
 		}
-		out[sha] = struct{}{}
+		e.Status = "verified"
+		out[e.SHA256] = e
 	}
 	return out, rows.Err()
+}
+
+// CountVerifiedHashable reports how many rows are eligible to be matched
+// against by VerifiedBySize. Zero means content dedup cannot possibly find
+// anything, which is a very different message to the user than "no duplicates".
+func (m *Manifest) CountVerifiedHashable() (int, error) {
+	var n int
+	err := m.db.QueryRow(
+		`select count(*) from files where status = 'verified' and sha256 != ''`).Scan(&n)
+	return n, err
 }
 
 func (m *Manifest) locationsByHash(sha string) ([]Location, error) {
