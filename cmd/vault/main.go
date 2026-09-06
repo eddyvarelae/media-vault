@@ -49,8 +49,6 @@ Usage:
   vault move       <src-disk> <dst-disk> <src-host-root> <dst-host-root>
                    [--prefix SUB/] [--rule EXT=SUBDIR ...]
                    [--on-collision skip|rename-mtime-year] [--dry-run]
-                   [--dedupe-content]   (scan and copy: skip files whose CONTENT
-                                         is already archived under any disk)
 
 Manifest and signing key are stored under $VAULT_CONFIG
 (default: ./vault-config/).
@@ -186,20 +184,28 @@ func runScan(ctx context.Context, m *manifest.Manifest, args []string) {
 	fmt.Println()
 	fmt.Printf("Files to copy:    %d  (%s)\n", len(plan.ToCopy), human(plan.BytesToCopy))
 	fmt.Printf("Files to skip:    %d  (in manifest, unchanged)\n", plan.SkipCount)
-	if dedupeContent {
-		// Always print, including the zero case. "Found no duplicates" and
-		// "had nothing to compare against" look identical otherwise, and the
-		// latter is the normal state until `vault verify` has run.
-		fmt.Printf("Already archived: %d  (%s, same content under another disk/name; %d hashed, %d verified rows eligible)\n",
-			len(plan.Deduped), human(plan.BytesSkipContent), plan.HashedFiles, plan.DedupeEligible)
-		if plan.DedupeEligible == 0 {
-			fmt.Println("  note: no verified rows to match against — run `vault verify` on the")
-			fmt.Println("        already-archived disks first, or dedupe can never fire.")
-		}
-	}
+	reportDedupe(plan, dedupeContent)
 	fmt.Printf("Files to recopy:  %d  (%s, source size or mtime changed)\n",
 		len(plan.ToRecopy), human(plan.BytesToRecopy))
 	fmt.Printf("Dst collisions:   %d  (dst path already exists, would overwrite)\n", len(plan.DstCollisions))
+}
+
+// reportDedupe prints the dedupe summary for both scan and copy. Always prints
+// when the flag is on, including the zero case: "found no duplicates" and "had
+// nothing to compare against" are different facts, and the second is the normal
+// state until `vault verify` has run.
+func reportDedupe(plan *scan.Plan, on bool) {
+	if !on {
+		return
+	}
+	fmt.Printf("Already archived: %d  (%s, same content under another disk/name; %d hashed, %d verified rows eligible)\n",
+		len(plan.Deduped), human(plan.BytesSkipContent), plan.HashedFiles, plan.DedupeEligible)
+	if plan.DedupeEligible == 0 {
+		// Scoped to cross-disk: intra-run dedupe compares files within this
+		// source and fires regardless of what is verified in the archive.
+		fmt.Println("  note: no verified rows to match against, so no CROSS-DISK dedupe is")
+		fmt.Println("        possible — run `vault verify` on the already-archived disks first.")
+	}
 }
 
 func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
@@ -214,6 +220,7 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
 	if err != nil {
 		die("scan: %v", err)
 	}
+	reportDedupe(plan, dedupeContent)
 
 	todo := append(plan.ToCopy, plan.ToRecopy...)
 	if len(todo) == 0 && len(plan.DstCollisions) == 0 && len(plan.Deduped) == 0 {
@@ -236,7 +243,18 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
 				fmt.Printf("  %s → %s (already exists)\n", f.RelPath, f.DstRel)
 			}
 		}
-		fmt.Printf("\n(dry-run; %d files would be copied, %d collisions skipped)\n", len(todo), len(plan.DstCollisions))
+		if len(plan.Deduped) > 0 {
+			fmt.Println("\nAlready archived (would be recorded as deduped, not copied):")
+			for _, d := range plan.Deduped {
+				if d.IntraRun {
+					fmt.Printf("  %s → duplicate of %s (this run)\n", d.Task.RelPath, d.RefRel)
+				} else {
+					fmt.Printf("  %s → already at %s (disk %s)\n", d.Task.RelPath, d.Existing.DestPath, d.Existing.SourceDisk)
+				}
+			}
+		}
+		fmt.Printf("\n(dry-run; %d files would be copied, %d recorded as deduped, %d collisions skipped)\n",
+			len(todo), len(plan.Deduped), len(plan.DstCollisions))
 		return
 	}
 
@@ -250,8 +268,12 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
 	// been verified against the destination. `vault verify` promotes it like
 	// any other row, and `certify` keeps refusing until it does — which is the
 	// same contract copied rows already have.
-	if !dryRun && len(plan.Deduped) > 0 {
+	if !dryRun {
+		n := 0
 		for _, d := range plan.Deduped {
+			if d.IntraRun {
+				continue // deferred: the file it references has not copied yet
+			}
 			if err := m.Upsert(manifest.Entry{
 				SourceDisk: disk,
 				SourcePath: d.Task.RelPath,
@@ -264,10 +286,14 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
 			}); err != nil {
 				die("record dedupe %s: %v", d.Task.RelPath, err)
 			}
+			n++
 		}
-		fmt.Printf("Recorded %d already-archived files in the manifest (status deduped).\n", len(plan.Deduped))
+		if n > 0 {
+			fmt.Printf("Recorded %d already-archived files in the manifest (status deduped).\n", n)
+		}
 	}
 
+	landed := map[string]manifest.Entry{} // source rel path -> the row that was written
 	var copied, copiedBytes int64
 	for i, f := range todo {
 		if ctx.Err() != nil {
@@ -284,9 +310,51 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
 			fmt.Printf("FAIL (manifest): %v\n", err)
 			continue
 		}
+		landed[f.RelPath] = entry
 		copied++
 		copiedBytes += entry.Size
 		fmt.Printf("ok (sha %s…)\n", entry.SHA256[:12])
+	}
+
+	// Intra-run dupes are recorded only now, against the file they reference
+	// as it ACTUALLY landed — final DstRel, and only if the copy succeeded.
+	// Writing these before the loop is how a row ends up asserting content is
+	// archived at a path holding foreign bytes, or nothing at all.
+	var intra, orphaned int
+	for _, d := range plan.Deduped {
+		if !d.IntraRun {
+			continue
+		}
+		ref, ok := landed[d.RefRel]
+		if !ok {
+			// The file it deduped against never made it: collision-skipped or
+			// a failed copy. Record nothing — with no manifest row the next
+			// run re-plans this file and copies it for real.
+			fmt.Fprintf(os.Stderr,
+				"  WARNING: %s deduped against %s, which was not copied — not recorded; re-run to archive it\n",
+				d.Task.RelPath, d.RefRel)
+			orphaned++
+			continue
+		}
+		if err := m.Upsert(manifest.Entry{
+			SourceDisk: disk,
+			SourcePath: d.Task.RelPath,
+			DestPath:   ref.DestPath,
+			Size:       d.Task.Size,
+			MtimeNs:    d.Task.MtimeNs,
+			SHA256:     ref.SHA256,
+			CopiedAt:   time.Now().UnixNano(),
+			Status:     "deduped",
+		}); err != nil {
+			die("record intra-run dedupe %s: %v", d.Task.RelPath, err)
+		}
+		intra++
+	}
+	if intra > 0 {
+		fmt.Printf("Recorded %d intra-run duplicates (status deduped).\n", intra)
+	}
+	if orphaned > 0 {
+		fmt.Fprintf(os.Stderr, "%d duplicate(s) left unarchived because their reference did not copy.\n", orphaned)
 	}
 
 	fmt.Printf("\nDone. Copied %d/%d files, %s.\n", copied, len(todo), human(copiedBytes))

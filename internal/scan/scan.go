@@ -43,11 +43,20 @@ type FileTask struct {
 	MtimeNs int64
 }
 
-// DedupeHit records a source file whose bytes are already in the archive under
-// some other disk/path, together with the entry that already holds them.
+// DedupeHit records a source file whose bytes are already archived.
+//
+// Two kinds, and the difference matters for when the manifest row may be
+// written. An inter-disk hit references a row that is already `verified`, so
+// its destination is known good and the row can be written immediately. An
+// intra-run hit references another file in THIS run that has not been copied
+// yet: its final DstRel is not settled until the collision policy has run, and
+// the copy can still fail. Writing that row up front is how a `deduped` row
+// ends up pointing at a foreign file, a renamed-away path, or nothing.
 type DedupeHit struct {
 	Task     FileTask
-	Existing manifest.Entry
+	Existing manifest.Entry // inter-disk: the verified row already holding these bytes
+	IntraRun bool           // if set, Existing is a placeholder; RefRelPath is the truth
+	RefRel   string         // intra-run: source-relative path of the file being referenced
 }
 
 type Plan struct {
@@ -103,8 +112,9 @@ func Build(ctx context.Context, m *manifest.Manifest, disk, srcRoot, dstRoot, pr
 // elsewhere" is a judgement some workflows may not want made for them.
 func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, dstRoot, prefix string, rules []Rule, onCollision CollisionStrategy, dedupeContent bool) (*Plan, error) {
 	p := &Plan{}
-	seenThisRun := map[string]manifest.Entry{}
+	seenThisRun := map[string]string{} // sha256 -> source-relative path queued to copy
 	sizeCount := map[int64]int{}
+	prefix = strings.TrimRight(prefix, "/")
 	if dedupeContent {
 		n, err := m.CountVerifiedHashable()
 		if err != nil {
@@ -129,6 +139,13 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 			if isJunkFile(d.Name()) {
 				return nil
 			}
+			rel, relErr := filepath.Rel(srcRoot, path)
+			if relErr != nil {
+				return relErr
+			}
+			if prefix != "" && !strings.HasPrefix(rel, prefix+"/") && rel != prefix {
+				return nil
+			}
 			info, err := d.Info()
 			if err != nil {
 				return err
@@ -139,7 +156,6 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 			return nil, err
 		}
 	}
-	prefix = strings.TrimRight(prefix, "/")
 	err := filepath.WalkDir(srcRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -171,6 +187,7 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 			}
 		}
 
+		pendingHash := ""
 		task := FileTask{
 			RelPath: rel,
 			DstRel:  route(stripPrefix(rel, prefix), rules),
@@ -213,18 +230,20 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 					p.BytesSkipContent += task.Size
 					return nil
 				}
-				if e, dup := seenThisRun[sum]; dup {
-					p.Deduped = append(p.Deduped, DedupeHit{Task: task, Existing: e})
+				if ref, dup := seenThisRun[sum]; dup {
+					p.Deduped = append(p.Deduped, DedupeHit{
+						Task:     task,
+						IntraRun: true,
+						RefRel:   ref,
+					})
 					p.BytesSkipContent += task.Size
 					return nil
 				}
-				seenThisRun[sum] = manifest.Entry{
-					SourceDisk: disk,
-					SourcePath: task.RelPath,
-					DestPath:   task.DstRel,
-					Size:       task.Size,
-					SHA256:     sum,
-				}
+				// Do NOT register as a reference target yet — this file may
+				// still be renamed by the collision policy, or dropped into
+				// DstCollisions and never copied at all. Registration happens
+				// below, once it is committed to ToCopy with a final DstRel.
+				pendingHash = sum
 			}
 		}
 
@@ -246,6 +265,9 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 			}
 		}
 
+		if pendingHash != "" {
+			seenThisRun[pendingHash] = task.RelPath
+		}
 		p.ToCopy = append(p.ToCopy, task)
 		p.BytesToCopy += task.Size
 		return nil
