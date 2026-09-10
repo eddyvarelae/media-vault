@@ -369,8 +369,14 @@ func runVerify(ctx context.Context, m *manifest.Manifest, args []string) {
 
 	fmt.Printf("Re-hashing destination files for disk %q at %s\n\n", disk, dst)
 
-	res, err := verify.Run(ctx, m, disk, dst, func(path, status string) {
-		fmt.Printf("  %-10s %s\n", status, path)
+	res, err := verify.Run(ctx, m, disk, dst, func(sourcePath, destPath, status string) {
+		// Show both sides: `deduped` rows share a dest_path, so printing the
+		// destination alone makes duplicate rows indistinguishable.
+		if destPath != "" && destPath != sourcePath {
+			fmt.Printf("  %-10s %s → %s\n", status, sourcePath, destPath)
+		} else {
+			fmt.Printf("  %-10s %s\n", status, sourcePath)
+		}
 	})
 	if err != nil {
 		die("verify: %v", err)

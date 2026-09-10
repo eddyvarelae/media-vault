@@ -27,11 +27,27 @@ type Result struct {
 //   - hash matches → mark verified
 //   - hash differs → mark mismatch
 //   - file missing → counted; manifest left untouched (so a later copy can fix)
-func Run(ctx context.Context, m *manifest.Manifest, disk, dstRoot string, onFile func(path, status string)) (*Result, error) {
+func Run(ctx context.Context, m *manifest.Manifest, disk, dstRoot string, onFile func(sourcePath, destPath, status string)) (*Result, error) {
 	entries, err := m.ListByDisk(disk)
 	if err != nil {
 		return nil, fmt.Errorf("list manifest: %w", err)
 	}
+
+	// `deduped` rows are by-reference: several rows in one disk can share one
+	// dest_path, and hashing per row would re-read the same file once per
+	// referencing row. Memoize per resolved path for this invocation.
+	//
+	// Misses and errors are cached too — otherwise N rows pointing at one
+	// missing file each pay a failed open. Cache is per-invocation on purpose:
+	// verify runs per-disk, so this covers repeats within a disk (the
+	// intra-run dedupe case); cross-disk duplicates are separate runs and
+	// should be re-read.
+	type hashResult struct {
+		sum string
+		n   int64
+		err error
+	}
+	seen := map[string]hashResult{}
 
 	res := &Result{}
 	for _, e := range entries {
@@ -47,22 +63,32 @@ func Run(ctx context.Context, m *manifest.Manifest, disk, dstRoot string, onFile
 			rel = e.SourcePath
 		}
 		full := filepath.Join(dstRoot, rel)
-		got, n, err := hashFile(ctx, full)
+		hr, cached := seen[full]
+		if !cached {
+			sum, n, err := hashFile(ctx, full)
+			hr = hashResult{sum: sum, n: n, err: err}
+			seen[full] = hr
+			// Count bytes only on a real read, so BytesRead keeps meaning
+			// actual I/O rather than the sum of row sizes.
+			if err == nil {
+				res.BytesRead += n
+			}
+		}
+		got, err := hr.sum, hr.err
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				res.Missing++
 				if onFile != nil {
-					onFile(e.DestPath, "missing")
+					onFile(e.SourcePath, e.DestPath, "missing")
 				}
 				continue
 			}
 			res.Errors++
 			if onFile != nil {
-				onFile(e.DestPath, "error: "+err.Error())
+				onFile(e.SourcePath, e.DestPath, "error: "+err.Error())
 			}
 			continue
 		}
-		res.BytesRead += n
 
 		now := time.Now().UnixNano()
 		if got == e.SHA256 {
@@ -71,7 +97,7 @@ func Run(ctx context.Context, m *manifest.Manifest, disk, dstRoot string, onFile
 			}
 			res.Verified++
 			if onFile != nil {
-				onFile(e.DestPath, "verified")
+				onFile(e.SourcePath, e.DestPath, "verified")
 			}
 		} else {
 			if err := m.MarkMismatch(disk, e.SourcePath, now); err != nil {
@@ -79,7 +105,7 @@ func Run(ctx context.Context, m *manifest.Manifest, disk, dstRoot string, onFile
 			}
 			res.Mismatch++
 			if onFile != nil {
-				onFile(e.DestPath, "MISMATCH")
+				onFile(e.SourcePath, e.DestPath, "MISMATCH")
 			}
 		}
 	}
