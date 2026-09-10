@@ -295,6 +295,7 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
 
 	landed := map[string]manifest.Entry{} // source rel path -> the row that was written
 	var copied, copiedBytes int64
+	failed := 0
 	for i, f := range todo {
 		if ctx.Err() != nil {
 			fmt.Fprintln(os.Stderr, "interrupted")
@@ -304,10 +305,12 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
 		entry, err := copy.File(ctx, src, dst, f, disk)
 		if err != nil {
 			fmt.Printf("FAIL: %v\n", err)
+			failed++
 			continue
 		}
 		if err := m.Upsert(entry); err != nil {
 			fmt.Printf("FAIL (manifest): %v\n", err)
+			failed++
 			continue
 		}
 		landed[f.RelPath] = entry
@@ -358,6 +361,16 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
 	}
 
 	fmt.Printf("\nDone. Copied %d/%d files, %s.\n", copied, len(todo), human(copiedBytes))
+	if failed > 0 || orphaned > 0 {
+		// Exit non-zero so callers can tell. scripts/nas-tars-copy-all.sh runs
+		// four cards sequentially and unattended, branching on this status —
+		// exiting 0 after a partial copy made it log "done" for a card that
+		// had failures, which is the only signal Eddy gets. Matches runVerify,
+		// which already exits 1 on mismatch/missing/errors.
+		fmt.Fprintf(os.Stderr, "\nINCOMPLETE: %d file(s) failed to copy, %d duplicate(s) left unarchived.\n",
+			failed, orphaned)
+		os.Exit(1)
+	}
 }
 
 func runVerify(ctx context.Context, m *manifest.Manifest, args []string) {
