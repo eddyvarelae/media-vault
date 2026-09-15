@@ -28,7 +28,23 @@ type Result struct {
 //   - hash differs → mark mismatch
 //   - file missing → counted; manifest left untouched (so a later copy can fix)
 func Run(ctx context.Context, m *manifest.Manifest, disk, dstRoot string, onFile func(sourcePath, destPath, status string)) (*Result, error) {
-	entries, err := m.ListByDisk(disk)
+	return RunWithOptions(ctx, m, disk, dstRoot, false, onFile)
+}
+
+// RunWithOptions is Run plus onlyUnverified, which restricts the sweep to rows
+// that are not yet `verified`.
+//
+// This is the fast route to a certifiable disk, not a way around certification:
+// certify still requires every row verified. But it deliberately skips the rows
+// that a full pass would re-read, and a full pass is the archive's only bit-rot
+// check — so the caller must make the skip visible. Opt-in; a bare verify still
+// reads everything.
+func RunWithOptions(ctx context.Context, m *manifest.Manifest, disk, dstRoot string, onlyUnverified bool, onFile func(sourcePath, destPath, status string)) (*Result, error) {
+	list := m.ListByDisk
+	if onlyUnverified {
+		list = m.ListByDiskUnverified
+	}
+	entries, err := list(disk)
 	if err != nil {
 		return nil, fmt.Errorf("list manifest: %w", err)
 	}

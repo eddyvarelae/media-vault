@@ -35,7 +35,7 @@ Usage:
                    [--on-collision skip|rename-mtime-year] [--dry-run]
                    [--dedupe-content]   (scan and copy: skip files whose CONTENT
                                          is already archived under any disk)
-  vault verify     <source-disk-name> <dest-dir>
+  vault verify     <source-disk-name> <dest-dir> [--only-unverified]
   vault certify    <source-disk-name> [out.json]
   vault inventory  <source-disk-name> <dir>
   vault dedup      [--min-size <bytes>]
@@ -392,15 +392,45 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
 }
 
 func runVerify(ctx context.Context, m *manifest.Manifest, args []string) {
-	if len(args) != 2 {
+	onlyUnverified := false
+	var pos []string
+	for _, a := range args {
+		if a == "--only-unverified" {
+			onlyUnverified = true
+			continue
+		}
+		pos = append(pos, a)
+	}
+	if len(pos) != 2 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
-	disk, dst := args[0], args[1]
+	disk, dst := pos[0], pos[1]
 
-	fmt.Printf("Re-hashing destination files for disk %q at %s\n\n", disk, dst)
+	if onlyUnverified {
+		// Say what is NOT being checked, as loudly as what is. A full verify
+		// is the archive's only bit-rot check and this pass skips it; nobody
+		// should mistake an incremental run for an integrity sweep.
+		skipped, newest, err := m.CountVerifiedInDisk(disk)
+		if err != nil {
+			die("count verified: %v", err)
+		}
+		fmt.Printf("Re-hashing ONLY unverified rows for disk %q at %s\n", disk, dst)
+		if skipped > 0 {
+			when := "unknown"
+			if newest > 0 {
+				when = time.Unix(0, newest).Format("2006-01-02 15:04")
+			}
+			fmt.Printf("  skipping %d already-verified row(s) — NOT an integrity check.\n", skipped)
+			fmt.Printf("  disk last verified: %s. Run without --only-unverified for a full sweep.\n\n", when)
+		} else {
+			fmt.Printf("  (no verified rows to skip — this is a full sweep)\n\n")
+		}
+	} else {
+		fmt.Printf("Re-hashing destination files for disk %q at %s\n\n", disk, dst)
+	}
 
-	res, err := verify.Run(ctx, m, disk, dst, func(sourcePath, destPath, status string) {
+	res, err := verify.RunWithOptions(ctx, m, disk, dst, onlyUnverified, func(sourcePath, destPath, status string) {
 		// Show both sides: `deduped` rows share a dest_path, so printing the
 		// destination alone makes duplicate rows indistinguishable.
 		if destPath != "" && destPath != sourcePath {

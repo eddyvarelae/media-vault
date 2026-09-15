@@ -450,13 +450,47 @@ func (m *Manifest) FindUniqueIn(disk string) ([]Entry, error) {
 }
 
 func (m *Manifest) ListByDisk(disk string) ([]Entry, error) {
-	rows, err := m.db.Query(`
+	return m.listByDisk(disk, false)
+}
+
+// ListByDiskUnverified returns only the rows for `disk` that are not yet
+// verified.
+//
+// Deliberately a negative predicate rather than an allow-list of statuses. The
+// vocabulary is copied / verified / mismatch / deduped / inventoried, and a
+// `mismatch` row in particular must be re-checked — a later recopy may have
+// fixed it, and excluding it would strand a row that can never be promoted.
+// `!= 'verified'` gets that right by construction and needs no maintenance
+// when a status is added.
+func (m *Manifest) ListByDiskUnverified(disk string) ([]Entry, error) {
+	return m.listByDisk(disk, true)
+}
+
+// CountVerifiedInDisk reports how many rows an incremental pass would skip, and
+// the newest verified_at among them, so the caller can say when the disk was
+// last fully checked.
+func (m *Manifest) CountVerifiedInDisk(disk string) (n int, newestVerifiedAt int64, err error) {
+	err = m.db.QueryRow(`
+		SELECT COUNT(*), COALESCE(MAX(verified_at), 0)
+		FROM files WHERE source_disk = ? AND status = 'verified'
+	`, disk).Scan(&n, &newestVerifiedAt)
+	return
+}
+
+func (m *Manifest) listByDisk(disk string, onlyUnverified bool) ([]Entry, error) {
+	q := `
 		SELECT source_disk, source_path, dest_path, size, mtime_ns, sha256,
 		       copied_at, COALESCE(verified_at, 0), status
 		FROM files
-		WHERE source_disk = ?
-		ORDER BY source_path
-	`, disk)
+		WHERE source_disk = ?`
+	if onlyUnverified {
+		// Filtered in SQL, not in Go: idx_files_disk covers the disk lookup
+		// and the archive can hold tens of thousands of rows per disk.
+		q += ` AND status != 'verified'`
+	}
+	q += `
+		ORDER BY source_path`
+	rows, err := m.db.Query(q, disk)
 	if err != nil {
 		return nil, err
 	}
