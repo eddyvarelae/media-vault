@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -361,14 +362,31 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
 	}
 
 	fmt.Printf("\nDone. Copied %d/%d files, %s.\n", copied, len(todo), human(copiedBytes))
-	if failed > 0 || orphaned > 0 {
+	if failed > 0 || orphaned > 0 || len(plan.DstCollisions) > 0 {
 		// Exit non-zero so callers can tell. scripts/nas-tars-copy-all.sh runs
 		// four cards sequentially and unattended, branching on this status —
 		// exiting 0 after a partial copy made it log "done" for a card that
 		// had failures, which is the only signal Eddy gets. Matches runVerify,
 		// which already exits 1 on mismatch/missing/errors.
-		fmt.Fprintf(os.Stderr, "\nINCOMPLETE: %d file(s) failed to copy, %d duplicate(s) left unarchived.\n",
-			failed, orphaned)
+		//
+		// DstCollisions counts here because reaching it already means the
+		// collision policy had its say and the file is STILL not archived:
+		// under rename-mtime-year a task only lands there if the renamed path
+		// also exists. Ordinary renames fall through to ToCopy, so a run that
+		// renames files and archives them all reports zero collisions and
+		// passes. A collision-skipped path gets no manifest row, and an
+		// unrecorded file is the thing this archive must not hold quietly.
+		reasons := make([]string, 0, 3)
+		if failed > 0 {
+			reasons = append(reasons, fmt.Sprintf("%d file(s) failed to copy", failed))
+		}
+		if len(plan.DstCollisions) > 0 {
+			reasons = append(reasons, fmt.Sprintf("%d file(s) skipped on unresolved destination collisions", len(plan.DstCollisions)))
+		}
+		if orphaned > 0 {
+			reasons = append(reasons, fmt.Sprintf("%d duplicate(s) left unarchived", orphaned))
+		}
+		fmt.Fprintf(os.Stderr, "\nINCOMPLETE: %s.\n", strings.Join(reasons, "; "))
 		os.Exit(1)
 	}
 }
