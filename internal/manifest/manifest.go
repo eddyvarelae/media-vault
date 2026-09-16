@@ -467,8 +467,9 @@ func (m *Manifest) ListByDiskUnverified(disk string) ([]Entry, error) {
 }
 
 // CountVerifiedInDisk reports how many rows an incremental pass would skip, and
-// the newest verified_at among them, so the caller can say when the disk was
-// last fully checked.
+// the newest verified_at among them. That timestamp is the newest single row
+// verification, not a full-sweep date: one incremental pass promoting one row
+// moves it, while every other row on the disk stays as old as it was.
 func (m *Manifest) CountVerifiedInDisk(disk string) (n int, newestVerifiedAt int64, err error) {
 	err = m.db.QueryRow(`
 		SELECT COUNT(*), COALESCE(MAX(verified_at), 0)

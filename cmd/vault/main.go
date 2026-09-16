@@ -422,7 +422,7 @@ func runVerify(ctx context.Context, m *manifest.Manifest, args []string) {
 				when = time.Unix(0, newest).Format("2006-01-02 15:04")
 			}
 			fmt.Printf("  skipping %d already-verified row(s) — NOT an integrity check.\n", skipped)
-			fmt.Printf("  disk last verified: %s. Run without --only-unverified for a full sweep.\n\n", when)
+			fmt.Printf("  newest verified row: %s (the newest single row, not a full-sweep date). Run without --only-unverified for a full sweep.\n\n", when)
 		} else {
 			fmt.Printf("  (no verified rows to skip — this is a full sweep)\n\n")
 		}
