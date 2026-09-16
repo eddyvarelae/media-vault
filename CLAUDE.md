@@ -83,7 +83,9 @@ A number nobody can recompute is a finding, not a fact.
 - Nothing merges to `main` without an `APPROVE` in
   `team/channels/review-requests.md`; the PM merges (never rewriting).
 - `.github/workflows/docker.yml` publishes on every push to `main` and on `v*`
-  tags. **The NAS scripts currently pull `:latest`, so a merge to `main` is a
-  production deploy** (B4 pins a tag; see `docs/release.md` once it lands).
+  tags. The NAS scripts pin a release tag
+  (`IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:vX.Y.Z}"`), so a merge
+  to `main` is not a deploy; cutting a tag is. Bump the scripts' default in the
+  same PR as the release — `docs/release.md`.
 - Roles, sacred paths, and the evidence ladder live in `team/TEAM.md`. Author
   evidence caps at `tested`.

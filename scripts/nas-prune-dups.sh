@@ -10,7 +10,10 @@
 # Designed to run as root via sudo. Logs every action to prune.log.
 
 set -u
-IMG=ghcr.io/eddyvarelae/media-vault:latest
+# Pinned release tag; override with VAULT_IMAGE=... for a one-off run.
+# v0.2.0 does not exist yet: the PM tags it on main after the B3/B4/B5 PR and
+# F4 (verify --only-unverified) merge. See docs/release.md.
+IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.0}"
 CFG=/volume1/docker/vault-nas-config
 LOG=/volume1/docker/prune.log
 LIST=/volume1/docker/prune-list.tsv
