@@ -1,0 +1,58 @@
+%%{init: {"flowchart": {"nodeSpacing": 70, "rankSpacing": 90}}}%%
+flowchart TB
+
+  HUMAN(["YOU - THE DECIDER<br/>final decisions · credentials · sign-offs<br/>one DECISIONS NEEDED note per cycle · agents draft, you send"])
+
+  PM["PM - THE DRIVER (Fable)<br/>drives the loop · reads every channel · routes notes<br/>boots Dev seats where tooling allows · never writes code"]
+  DEV["DEV (Opus, one per seat)<br/>builds top-down, evidence on every check-off<br/>covers design + infra while optionals are unbooted"]
+  TESTER["TESTER (Opus) - optional, boots when the product earns it<br/>verifies COMMITTED states from detached checkouts<br/>daily-drives · without it, Dev evidence caps at TESTED"]
+  REVIEWER["REVIEWER - NON-CLAUDE (Codex)<br/>recomputes numbers · reviews diffs pre-merge/deploy<br/>Claude never audits Claude"]
+
+  subgraph FILES["team/ - the only shared memory"]
+    direction TB
+    BACKLOG["BACKLOG.md<br/>one prioritized list, one item per fact"]
+    DQ["channels/dev-questions.md<br/>work order on top, Q&A below<br/>frozen while under verification"]
+    TF["channels/tester-feedback.md<br/>numbered findings"]
+    RR["channels/review-requests.md<br/>diffs + claims with falsification criteria<br/>unresolved FINDINGS = does not ship"]
+    DEC["DECISIONS.md<br/>any agent that hears a human decision<br/>logs it here BEFORE acting"]
+    CTX["context/<br/>ground truth · sacred paths<br/>(read-only for all agents)"]
+  end
+
+  PRODUCT["THE PRODUCT - project root, any shape<br/>who writes where: path-ownership table in TEAM.md<br/>deploys: main tip only, one at a time, heartbeats"]
+  EXT["EXTERNAL AGENTS<br/>other projects' sessions"]
+  DESIGNER["DESIGNER - optional, unbooted"]
+  CLOUD["CLOUD - optional, unbooted"]
+
+  HUMAN <-->|"decide · sign · credentials"| PM
+  PM <-->|"boots seats in VISIBLE terminals (subagents only for short fan-out)"| DEV
+  PM <-->|"boots + work orders"| TESTER
+
+  PM -->|"orders + scopes, strikes duplicates"| BACKLOG
+  DEV -->|"checks off with evidence rung"| BACKLOG
+  PM -->|"work order - new rev supersedes old"| DQ
+  DQ <-->|"down: your current job · up: Q&A + evidence"| DEV
+  TESTER -->|"files findings"| TF
+  TF -->|"triage: backlog item, reject, or question"| PM
+  PM -->|"stages diffs + claims"| RR
+  RR <-->|"verdict: APPROVE / FINDINGS / CANNOT VERIFY<br/>+ acceptance review of Tester evidence on high-stakes claims"| REVIEWER
+  PM -->|"keeps current, dated"| CTX
+  CTX -.-> DEV
+  CTX -.-> TESTER
+  HUMAN -.->|"decisions land here, whoever hears them"| DEC
+
+  DEV -->|"builds (own paths only)"| PRODUCT
+  TESTER -->|"verifies committed states · lives in it"| PRODUCT
+  EXT -->|"ONLY through the Tester's documented interface"| TESTER
+  DESIGNER -.->|"when booted: restyles via own paths"| PRODUCT
+  CLOUD -.->|"when booted: deploys · CI/CD · accounts"| PRODUCT
+
+  style HUMAN fill:#ffb400,stroke:#0d0d0d,stroke-width:3px,color:#0d0d0d
+  style PM fill:#0d0d0d,color:#ffffff,stroke:#ffb400,stroke-width:3px
+  style DEV fill:#0d0d0d,color:#ffffff
+  style TESTER fill:#ffffff,color:#777777,stroke:#b5b0a4,stroke-dasharray:6 4
+  style REVIEWER fill:#ffffff,stroke:#c0392b,stroke-width:2px,color:#c0392b
+  style PRODUCT fill:#ffffff,stroke:#0d0d0d,stroke-width:2px
+  style EXT fill:#efece5,stroke:#999999,stroke-dasharray:6 4
+  style DESIGNER fill:#ffffff,color:#777777,stroke:#b5b0a4,stroke-dasharray:6 4
+  style CLOUD fill:#ffffff,color:#777777,stroke:#b5b0a4,stroke-dasharray:6 4
+  style FILES fill:#f2f8e8,stroke:#7aa93c
