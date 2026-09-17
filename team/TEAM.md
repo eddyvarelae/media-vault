@@ -73,9 +73,9 @@ Branch policy: Dev works in its own worktree (`~/Projects/media-vault-dev`) on a
 
 ## Current state (2026-09-16 - PM-verified, don't re-derive)
 
-- `main` = `9518230` (F3, collision exit status) - pushed, builds and vets clean, **zero test files**.
+- `main` tip = `b3eabcc` (team files only); last code commit on `main` = `9518230` (F3). Builds and vets clean. **Zero test files on `main`** - B3 is on `tests-and-pinning` @ `14f4e2c`, PM-verified `go test ./...` green on 2026-09-17, awaiting Reviewer (#2).
 - `verify-incremental` = `f964b60` (F4, `--only-unverified`) - pushed, **under Reviewer review, not merged**. Nobody touches it.
 - Production: 6 camera disks in the NAS manifest (`media-djiflip`, `media-djimini2`, `media-iphone`, `media-sonya6700`, `media-sonyzve10`, `media-gopro`), 3.3 TiB, 195 `copied` rows awaiting verification (per handoff), 831 collision-renames. Full verify ≈ 11 h; F4 is what makes an incremental pass possible.
 - Source SSDs: 4 remain in play (names TBD - Tester to enumerate from the manifest); a 5th was repurposed as "Scratch1" on the Mac mini.
-- NAS access from the Mac mini: **unknown - open ACTION (human)** in `channels/tester-feedback.md`.
-- Seats booted: PM. Dev and Tester: boot lines in `dev-questions.md` / `tester-feedback.md`.
+- NAS: `192.168.1.167`, SMB user `figmaboi`, `/volume1/media` mounted at `~/mounts/media` on the Mac mini (read-only by rule). SSH: unknown - Tester probing (B2).
+- Seats booted 2026-09-16: PM (this), Dev (`~/Projects/media-vault-dev`), Tester (detached checkout `~/Projects/media-vault-tester`). Reviewer = `codex exec`, run by the PM.

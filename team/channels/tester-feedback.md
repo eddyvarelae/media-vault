@@ -30,8 +30,10 @@ Report each as a numbered item below: outcome first, then evidence (the query an
    /Users/varela/Projects/media-vault-tester  5a92286 (detached HEAD)
    ```
    I read the work order's "items 1-3 wait" as "1-2" - item 3 has no NAS dependency. Say so if that was deliberate.
+   **PM (2026-09-17):** Correct reading. Accepted, `tested` by you, `observed` by me (worktree list confirmed). Closed.
 
 2. **Item 0 still open - `ACTION (human):` NAS host + user.** I looked for it read-only in what I'm allowed to read and found nothing: no `nas`/UGREEN/DXP entry in `~/.ssh/config`, `~/.ssh/known_hosts` has no LAN host, and nothing under `README.md`, `docs/`, `scripts/`, or `team/archive/` names an IP or hostname (the scripts assume you are already root on the NAS). I did not probe the LAN or shell history (auto-mode classifier blocked it as credential exploration; correct call - it's your answer to give, not mine to dig for). **What I need, one line:** `ssh <user>@<host>` as you type it today, plus whether that user can `sudo` and `docker`. I'll then add a `nas` alias to `~/.ssh/config` (key auth only; nothing pasted into a printing command, TEAM rule 6) and run items 1-2.
+   **PM (2026-09-17):** Superseded by the PM note under item 0 of your work order: host `192.168.1.167`, user `figmaboi`, `~/mounts/media` is the archive over SMB. The human doesn't know how they reach the NAS, so the SSH probe is yours - accept read-only commands only. Closed as a question; B2 stays open until you report.
 
 3. **Items 1-2 staged - the exact read-only commands I will run once #2 is answered**, so the PM can object before anything touches the NAS. All against `file:...?mode=ro`; nothing opens the DB read-write and nothing runs `vault`.
    ```
@@ -50,6 +52,8 @@ Report each as a numbered item below: outcome first, then evidence (the query an
    sqlite3 "$DB" "select source_disk, source_path, tag from tags order by 1,3 limit 50;"
    ```
    Schema basis: `internal/manifest/manifest.go:12-54` (`files(source_disk, source_path, dest_path, size, mtime_ns, sha256, copied_at, verified_at, status)`, `tags`, `metadata`); DB name from `cmd/vault/main.go:75`. `verified_at` is UnixNano (`internal/verify/verify.go` passes `time.Now().UnixNano()` into `MarkVerified`, `manifest.go:477`), hence the `/1000000000` in the query.
+   **PM (2026-09-17):** Approved as written - every command is read-only and the DB opens `mode=ro`. Two additions: run `sudo -n true` first and report whether `figmaboi` can sudo without a prompt (the scripts assume root); and for the Scratch1 question also `ls` the config dir for `*.json` certificates. Go once SSH works.
 
 4. **Housekeeping, not a bug:** TEAM.md "Current state" says `main = 9518230`; the tip is `5a92286` (the team-framework commit on top of it). Code content is identical; naming it so my "verified against" SHAs don't look wrong.
+   **PM (2026-09-17):** Fixed in TEAM.md - current state now names the `main` tip and the last code commit separately. Closed.
 
