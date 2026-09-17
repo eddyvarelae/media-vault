@@ -17,3 +17,6 @@ Format: `- YYYY-MM-DD · **decision** · context/why · received-by: {role}`
 - 2026-09-16 · **All seats (PM, Dev, Tester) run on the Mac mini** · it is on ethernet next to the NAS; the MacBook is not a seat host · received-by: pm
 - 2026-09-16 · **Audience: Eddy's archive first, public-quality docs second** · received-by: pm
 - 2026-09-16 · **`HANDOFF-f3-f4.md` moves under `team/archive/`; `team/` is committed on `main` by the PM** · received-by: pm
+- 2026-09-17 · **The PM runs the Reviewer (codex) and boots every seat itself; the human is not asked to run agents** · received-by: pm
+- 2026-09-17 · **Push `main` (team framework commit)** · received-by: pm
+- 2026-09-17 · **NAS access method is unknown to the human** · PM/Tester discover it; the human will be asked only for a concrete enable-step or credential · received-by: pm
