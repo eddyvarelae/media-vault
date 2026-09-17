@@ -4,7 +4,20 @@ Protocol: the PM's current WORK ORDER lives at the top (newest supersedes; work 
 
 Boot line (Mac mini, visible terminal, Opus-class, Remote Control on): `cd ~/Projects/media-vault-dev && claude --model opus --remote-control media-vault-dev "You are the Dev for media-vault. Read team/TEAM.md, team/actors/dev.md, then team/channels/dev-questions.md."`
 
-## WORK ORDER - rev 2
+## WORK ORDER - rev 3
+
+**PM (2026-09-17):** Review #2 came back **FINDINGS** (five, read them in full in `team/channels/review-requests.md`). `tests-and-pinning` is unfrozen **for fixes only** - new commits on top of `14f4e2c`, never a rewrite. Do this before rev 2's `ci-and-docs` items; rev 2 is superseded below and its items 1-3 fold in here as item 6 so the CLAUDE.md edits land once.
+
+1. **Finding 1 (P1) - NAS guard in every writing test package.** One shared guard (a tiny internal test helper package, or a copied `TestMain` if you'd rather avoid a new package - your call, say which) that refuses to run when the *resolved* absolute temp root (`filepath.EvalSymlinks` + `filepath.Abs`) is under `/volume1` or `/mnt`. Apply in `cmd/vault`, `internal/certify`, `internal/scan`, `internal/copy`. Prove it: a test-of-the-guard that sets `TMPDIR` to a symlink pointing at a temp dir named `.../volume1/...` is fine as long as it never touches the real roots - or explain why you can't test it safely and I'll accept a trace.
+2. **Finding 2 - round-trip asserts persisted manifest state.** Reopen the manifest after `certify` and compare rows (path, hash, status, `verified_at`) against expectations; for the missing-file case, snapshot the row before and assert it is byte-identical after (status untouched).
+3. **Finding 3 - shell `FAILED` branch test.** A bash test (`scripts/test/`, run by `go test` via `exec` or a `make test`-style target - keep it in `go test ./...` so one command covers everything) that runs `nas-tars-copy-all.sh` with `docker` shadowed by a stub on `PATH` that exits 1, `LOG` pointed at a temp file, and asserts the log contains `FAILED`. The script hard-codes `LOG=/volume1/docker/tars-copy.log` - make it `LOG="${VAULT_LOG:-/volume1/docker/tars-copy.log}"` (same shape as `IMG`), nothing else changes.
+4. **Finding 4 - `CLAUDE.md:68`.** Replace "when the disk was last fully verified" with the approved F4 wording: the newest single-row `verified_at`, explicitly not a full-sweep date. A full sweep has no recorded date; say so.
+5. **Finding 5 - exit-code table.** Exit 2 = wrong positional arity only; exit 1 = `INCOMPLETE:` runs *and* every `die` (bad flag value, config/scan error, signing/output error, empty manifest) *and* interrupt. One table, all commands, matching `cmd/vault/main.go` as it is.
+6. **Former rev 2 items 1-3** (B16 CI on tags only + `ugos.md` tags; B15 gofmt as its own commit; B14 README). Same branch, after 1-5.
+
+**Evidence expected:** `go test ./... -count=1` green including the new shell test; paste the guard's refusal output from a deliberately bad `TMPDIR`; `gofmt -l` empty; the resulting CI `on:` block. Rung: `tested`. READY FOR REVIEW with the tip SHA; the PM stages #3 as "check the fixes" only. Do not merge.
+
+## WORK ORDER - rev 2 (Superseded by rev 3 on 2026-09-17 - folded into rev 3 item 6, not started)
 
 **PM (2026-09-17):** Branch `ci-and-docs` off the current `main` tip (`f7df496` - team files only on top of `5a92286`, so code-identical to your rev-1 base). Switch your worktree to it; leave `tests-and-pinning` exactly as committed. Small PR, four items:
 

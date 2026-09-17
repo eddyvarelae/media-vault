@@ -9,7 +9,7 @@ Maintained by the PM - ordering and scope are theirs alone. Fixed sections below
 
 ## P1
 
-- [ ] **B3** *(READY FOR REVIEW #2 @ `14f4e2c`, PM-verified green)* Test harness: `go test ./...` covering scan → copy → verify → certify end-to-end on temp dirs + a temp manifest, and the F3 "done when" list as tests. Owner: Dev (work order rev 1). Evidence rung expected: `tested`.
+- [ ] **B3** *(#2 FINDINGS 2026-09-17 - five items back to Dev, rev 3)* Test harness: `go test ./...` covering scan → copy → verify → certify end-to-end on temp dirs + a temp manifest, and the F3 "done when" list as tests. Owner: Dev (work order rev 1). Evidence rung expected: `tested`.
 - [ ] **B4** *(in #2)* Pin the NAS scripts to a release tag instead of `:latest`; PM cuts `v0.2.0` once B1 + B4 are on `main`. Owner: Dev (rev 1) → PM tags.
 - [ ] **B5** *(in #2)* `CLAUDE.md` conventions doc for the repo. Owner: Dev (rev 1), same PR as B3.
 - [ ] **B6** Incremental verify on the NAS for all six `media-*` disks with `--only-unverified`, then full `certify`. Needs B1 deployed (B4 tag). Owner: human runs, Tester witnesses. Evidence: logs under `/volume1/docker/`.
