@@ -205,8 +205,12 @@ number nobody can recompute is a finding, not a fact.
   that root (B43, needs Go 1.25): the component walk (`SymlinkComponentRoot`)
   and the op share one pinned fd and `os.Root` refuses any escaping component.
   It follows in-root symlinks, so the deterministic no-symlink-component policy
-  stays explicit; the residual is a parent swapped to an in-root symlink after
-  the walk.
+  stays explicit. Two residuals, both requiring write access to the destination
+  directory (assumed not attacker-writable): a parent swapped to an in-root
+  symlink after the walk is followed (os.Root blocks only escapes); and
+  `Root.Chtimes` on Unix has a documented regular-file→symlink race on its
+  target, so a `.vault-partial` swapped for a symlink between os.Root's lstat and
+  the chtimes would timestamp the link's target.
 - A `verified` destination is never overwritten by `copy` — nor by `move`
   (B32). Not by recopy, not by any collision policy, not through another
   row's route, not as a staging file, not through a symlinked directory,

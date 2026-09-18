@@ -364,6 +364,9 @@ func TestParentSwapRefused(t *testing.T) {
 	defer scan.SetTestAfterWalk(nil)
 
 	_, err := Build(context.Background(), m, "A", "x.JPG", filepath.Join(outside, "good.JPG"), root, sha("good"))
+	if !done {
+		t.Fatal("the after-walk seam never fired; the post-walk swap was not exercised")
+	}
 	if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "escape") {
 		t.Fatalf("parent swapped to an escaping symlink: err = %v, want a containment (escape) refusal", err)
 	}

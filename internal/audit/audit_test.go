@@ -444,6 +444,9 @@ func TestParentSwapRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !done {
+		t.Fatal("the after-walk seam never fired; the post-walk swap was not exercised")
+	}
 	if r.Errors != 1 || r.Plausible != 0 {
 		t.Errorf("parent swapped to an escaping symlink: errors=%d plausible=%d, want 1 error, 0 plausible", r.Errors, r.Plausible)
 	}

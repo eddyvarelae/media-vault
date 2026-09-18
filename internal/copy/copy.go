@@ -161,11 +161,10 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 	mt := time.Unix(0, task.MtimeNs)
 	// Caveat (os.Root doc): on Unix Root.Chtimes has a documented
 	// regular-file→symlink race on its target — if tmpRel were swapped for a
-	// symlink between os.Root's internal lstat and the chtimes, the link's
-	// target would be timestamped. tmpRel is a .vault-partial this call created
-	// O_EXCL under the pinned root fd moments ago, a name nothing else holds, so
-	// the swap is not a realistic threat; the race is the residual, noted, not
-	// relied upon.
+	// symlink between os.Root's internal lstat and the chtimes syscall, the
+	// link's target would be timestamped, not tmpRel. Making that swap requires
+	// write access to the destination directory; the binding assumes the archive
+	// directory is not attacker-writable. Recorded in CLAUDE.md's residuals.
 	if err := root.Chtimes(tmpRel, mt, mt); err != nil {
 		cleanup()
 		return manifest.Entry{}, fmt.Errorf("chtimes: %w", err)
