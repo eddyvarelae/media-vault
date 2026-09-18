@@ -118,6 +118,18 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 		cleanup()
 		return manifest.Entry{}, fmt.Errorf("short write: wrote %d, expected %d", written, task.Size)
 	}
+	// Invariant (B38): a row's sha is the hash of the bytes streamed from the
+	// source through this writer — io.Copy fed the destination and the hasher
+	// from one source reader (the tee), and `written == task.Size` above — so
+	// it is the hash of exactly the source bytes, never a stat/scan of the
+	// destination after the fact (the shape that produced the B39 empty-dest
+	// rows and the B40 torn write). copy.File is the only path that mints a row;
+	// refuse to return one whose hash was not computed here.
+	sum := hex.EncodeToString(hasher.Sum(nil))
+	if sum == "" {
+		cleanup()
+		return manifest.Entry{}, fmt.Errorf("refusing to record a row not backed by a source-compared hash")
+	}
 	mt := time.Unix(0, task.MtimeNs)
 	if err := os.Chtimes(tmpPath, mt, mt); err != nil {
 		cleanup()
@@ -134,7 +146,7 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 		DestPath:   dstRel,       // dst-relative — used by verify to find the file
 		Size:       task.Size,
 		MtimeNs:    task.MtimeNs,
-		SHA256:     hex.EncodeToString(hasher.Sum(nil)),
+		SHA256:     sum,
 		CopiedAt:   time.Now().UnixNano(),
 		Status:     "copied",
 	}, nil

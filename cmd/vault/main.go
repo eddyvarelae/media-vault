@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/eddyvarelae/media-vault/internal/audit"
 	"github.com/eddyvarelae/media-vault/internal/certify"
 	"github.com/eddyvarelae/media-vault/internal/copy"
 	"github.com/eddyvarelae/media-vault/internal/dedup"
@@ -48,6 +49,10 @@ Usage:
   vault gap        <source-dir> [--tsv <file>]
                    (report-only: what on the dir is NOT archived, by content -
                     size index over verified rows, sha256 only on a size match)
+  vault audit      <source-disk-name> <dest-dir> [--tsv <file>] [--strict]
+                   (report-only: per-type content plausibility of each row's
+                    file tail — a torn write verify cannot see; --strict exits
+                    non-zero on any SUSPECT or read error)
   vault restore    <source-disk-name> <source-path> <replacement-file> <dest-dir>
                    --expect-sha <sha256> [--dry-run]
                    (replace ONE row's destination file on purpose, with the
@@ -87,12 +92,12 @@ func main() {
 	dbPath := filepath.Join(configDir, "manifest.db")
 	var m *manifest.Manifest
 	var err error
-	if dryRunRequested(cmd, args) || cmd == "gap" {
+	if dryRunRequested(cmd, args) || cmd == "gap" || cmd == "audit" {
 		// A dry run writes nothing - not an archive file, not a row, and
 		// (B31) not the config dir or the manifest file either: the
 		// manifest is opened read-only, or planned against an empty
-		// in-memory one when none exists yet. `gap` is report-only by
-		// construction and gets the same open.
+		// in-memory one when none exists yet. `gap` and `audit` are
+		// report-only by construction and get the same open.
 		if _, statErr := os.Stat(dbPath); statErr == nil {
 			m, err = manifest.OpenReadOnly(dbPath)
 		} else if os.IsNotExist(statErr) {
@@ -134,6 +139,10 @@ func main() {
 		}
 	case "gap":
 		if code := runGap(ctx, m, args); code != 0 {
+			os.Exit(code)
+		}
+	case "audit":
+		if code := runAudit(ctx, m, args); code != 0 {
 			os.Exit(code)
 		}
 	case "restore":
@@ -791,6 +800,76 @@ func runGap(ctx context.Context, m *manifest.Manifest, args []string) int {
 			die("write %s: %v", tsv, err)
 		}
 		fmt.Printf("absent files written to %s\n", tsv)
+	}
+	return 0
+}
+
+// runAudit is B38's report: per-type content plausibility of each row's file
+// tail — the torn-write class verify/certify cannot see (a hash of a torn file
+// is still a hash). Report-only (read-only manifest, tails only). Exit 0 with
+// the report by default; --strict exits 1 when any file is SUSPECT or could not
+// be read for auditing.
+func runAudit(ctx context.Context, m *manifest.Manifest, args []string) int {
+	tsv := ""
+	strict := false
+	var pos []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--tsv":
+			if i+1 >= len(args) {
+				die("--tsv needs a value")
+			}
+			tsv = args[i+1]
+			i++
+		case "--strict":
+			strict = true
+		default:
+			if strings.HasPrefix(args[i], "--") {
+				die("unknown flag: %s", args[i])
+			}
+			pos = append(pos, args[i])
+		}
+	}
+	if len(pos) != 2 {
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	disk, dstRoot := pos[0], pos[1]
+
+	var b strings.Builder
+	b.WriteString("verdict\tpath\tsize\treason\n")
+	r, err := audit.Run(ctx, m, disk, dstRoot, func(f audit.Finding) {
+		fmt.Printf("  %-8s %s — %s\n", f.Verdict, f.Rel, f.Reason)
+		fmt.Fprintf(&b, "%s\t%s\t%d\t%s\n", f.Verdict, f.Rel, f.Entry.Size, f.Reason)
+	})
+	if err != nil {
+		die("audit: %v", err)
+	}
+	// The line a script or a person keys on.
+	fmt.Printf("\nAUDIT %s: %d rows — %d plausible, %d suspect, %d review, %d skipped, %d error\n",
+		disk, r.Rows, r.Plausible, r.Suspect, r.Review, r.Skipped, r.Errors)
+	if r.Skipped > 0 {
+		// Announce what was not checked as loudly as what was.
+		fmt.Printf("(%d rows were a type audit does not check — not examined)\n", r.Skipped)
+	}
+	if tsv != "" {
+		// O_EXCL|O_NOFOLLOW: report-only, so --tsv must never truncate an
+		// existing file or follow a symlink into one (review #28).
+		f, err := os.OpenFile(tsv, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
+		if err != nil {
+			die("write %s: %v (refusing to overwrite or follow an existing --tsv target)", tsv, err)
+		}
+		if _, err := f.WriteString(b.String()); err != nil {
+			f.Close()
+			die("write %s: %v", tsv, err)
+		}
+		if err := f.Close(); err != nil {
+			die("write %s: %v", tsv, err)
+		}
+		fmt.Printf("findings written to %s\n", tsv)
+	}
+	if strict && (r.Suspect > 0 || r.Errors > 0) {
+		return 1
 	}
 	return 0
 }

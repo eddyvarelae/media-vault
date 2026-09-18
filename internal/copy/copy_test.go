@@ -86,6 +86,29 @@ func TestFileCopiesAtomicallyAndPreservesMtime(t *testing.T) {
 	noPartials(t, dst)
 }
 
+// TestFileRowHashIsAlwaysTheSourceContent pins the B38 invariant: copy.File is
+// the only path that mints a row, and the row's sha is always the hash of the
+// exact bytes streamed from the source — never derived from a name, size, or a
+// later stat of the destination (the shape that produced the B39 empty-dest
+// rows and the B40 torn write). Even all-zero content records the hash of those
+// zeros, i.e. what copy actually read.
+func TestFileRowHashIsAlwaysTheSourceContent(t *testing.T) {
+	for _, content := range []string{"", "x", "the whole clip", string(make([]byte, 4096))} {
+		src, dst := t.TempDir(), t.TempDir()
+		mtime := time.Date(2024, 3, 9, 10, 0, 0, 0, time.UTC)
+		writeFile(t, filepath.Join(src, "f.bin"), content, mtime)
+		task := scan.FileTask{RelPath: "f.bin", Size: int64(len(content)), MtimeNs: mtime.UnixNano()}
+		e, err := File(context.Background(), src, dst, task, "diskA")
+		if err != nil {
+			t.Fatalf("content %d bytes: %v", len(content), err)
+		}
+		sum := sha256.Sum256([]byte(content))
+		if e.SHA256 == "" || e.SHA256 != hex.EncodeToString(sum[:]) {
+			t.Errorf("content %d bytes: row sha %q, want the source content's %s", len(content), e.SHA256, hex.EncodeToString(sum[:]))
+		}
+	}
+}
+
 func TestFileRemovesPartialOnShortWrite(t *testing.T) {
 	src, dst := t.TempDir(), t.TempDir()
 	mtime := time.Now()

@@ -1658,6 +1658,62 @@ func TestMoveCleanExitsZero(t *testing.T) {
 // TestGap is B22's report through main(): the GAP line with its arithmetic,
 // the TSV, a read-only manifest (byte-identical, no config created when
 // absent), and the exit codes.
+// TestAudit is B38 through main(): a torn archived file (no JPEG EOI) is
+// SUSPECT, a whole one PLAUSIBLE; the report exits 0 by default and 1 under
+// --strict; --tsv is written; the manifest is untouched (report-only).
+func TestAudit(t *testing.T) {
+	cfg, src, dst := t.TempDir(), t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(src, "DCIM", "good.JPG"), "a photo\xff\xd9", t0) // ends in the EOI marker
+	writeFile(t, filepath.Join(src, "DCIM", "torn.JPG"), "the whole image\xff\xd9", t0)
+	if _, _, code := vault(t, cfg, "copy", "cam", src, dst); code != 0 {
+		t.Fatalf("copy: exit %d", code)
+	}
+	if _, _, code := vault(t, cfg, "verify", "cam", dst); code != 0 {
+		t.Fatalf("verify: exit %d", code)
+	}
+	// Simulate the torn write: overwrite the archived copy with zeros (audit
+	// reads the tail, not the row's hash).
+	if err := os.WriteFile(filepath.Join(dst, "DCIM", "torn.JPG"), make([]byte, 200), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dbBefore := readFile(t, filepath.Join(cfg, "manifest.db"))
+
+	out, _, code := vault(t, cfg, "audit", "cam", dst)
+	if code != 0 {
+		t.Fatalf("audit: exit %d, want 0 (report-only)\n%s", code, out)
+	}
+	if !strings.Contains(out, "SUSPECT") || !strings.Contains(out, "DCIM/torn.JPG") {
+		t.Errorf("audit should flag torn.JPG SUSPECT:\n%s", out)
+	}
+	if !strings.Contains(out, "AUDIT cam: 2 rows — 1 plausible, 1 suspect") {
+		t.Errorf("audit summary wrong:\n%s", out)
+	}
+	if readFile(t, filepath.Join(cfg, "manifest.db")) != dbBefore {
+		t.Errorf("audit changed the manifest")
+	}
+
+	_, _, code = vault(t, cfg, "audit", "cam", dst, "--strict")
+	if code != 1 {
+		t.Errorf("audit --strict with a SUSPECT: exit %d, want 1", code)
+	}
+
+	tsv := filepath.Join(t.TempDir(), "findings.tsv")
+	if _, _, code := vault(t, cfg, "audit", "cam", dst, "--tsv", tsv); code != 0 {
+		t.Fatalf("audit --tsv: exit %d", code)
+	}
+	if got := readFile(t, tsv); !strings.Contains(got, "SUSPECT\tDCIM/torn.JPG") {
+		t.Errorf("--tsv missing the suspect row:\n%s", got)
+	}
+
+	// A whole archive is clean: exit 0 even under --strict.
+	if err := os.WriteFile(filepath.Join(dst, "DCIM", "torn.JPG"), []byte("restored\xff\xd9"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, _, code := vault(t, cfg, "audit", "cam", dst, "--strict"); code != 0 || !strings.Contains(out, "0 suspect") {
+		t.Errorf("clean audit --strict: exit %d, want 0\n%s", code, out)
+	}
+}
+
 func TestGap(t *testing.T) {
 	cfg, src, dst, ssd := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
 	writeFile(t, filepath.Join(src, "DCIM", "a.ARW"), "archived raw", t0)
