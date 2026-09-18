@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/eddyvarelae/media-vault/internal/manifest"
+	"github.com/eddyvarelae/media-vault/internal/scan"
 	"github.com/eddyvarelae/media-vault/internal/testguard"
 )
 
@@ -156,12 +157,22 @@ func TestRunRefusesSymlinkLeaf(t *testing.T) {
 	}
 }
 
-// TestReadTailRefusesOpenSubstitution is the open-substitution regression: the
-// path being a symlink is refused by O_NOFOLLOW, and a file swapped for a
-// different inode between Lstat and open is refused by SameFile.
+// TestReadTailRefusesOpenSubstitution is the open-substitution regression at
+// the readTail level: the identity that resolve's Lstat saw must match the
+// opened fd, or readTail refuses. os.Root follows an in-root leaf symlink, so
+// O_NOFOLLOW no longer does the refusing — SameFile does, in both cases: a leaf
+// that is a symlink (the fd is its target, a different file) and a leaf swapped
+// for a different inode after the Lstat. (In production resolve refuses a
+// symlink leaf first, by IsRegular; this pins readTail's own guard.)
 func TestReadTailRefusesOpenSubstitution(t *testing.T) {
 	dir := t.TempDir()
-	// (a) the leaf is a symlink → O_NOFOLLOW open fails.
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	// (a) the leaf is a symlink → the opened fd is its target, not the symlink
+	// resolve Lstat'd → SameFile refuses.
 	real := filepath.Join(dir, "real")
 	if err := os.WriteFile(real, []byte("data"), 0o644); err != nil {
 		t.Fatal(err)
@@ -174,8 +185,8 @@ func TestReadTailRefusesOpenSubstitution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := readTail(link, li); err == nil {
-		t.Errorf("readTail followed a symlink leaf; O_NOFOLLOW should refuse it")
+	if _, _, err := readTail(root, "link", link, li); err == nil {
+		t.Errorf("readTail read through a symlink leaf; SameFile should refuse it")
 	}
 	// (b) the file at the path is swapped for a different inode after Lstat.
 	// Rename the original aside (never Remove): its inode stays live under the
@@ -196,7 +207,7 @@ func TestReadTailRefusesOpenSubstitution(t *testing.T) {
 	if err := os.WriteFile(swap, []byte("second"), 0o644); err != nil { // fresh inode
 		t.Fatal(err)
 	}
-	if _, _, err := readTail(swap, first); err == nil {
+	if _, _, err := readTail(root, "swap", swap, first); err == nil {
 		t.Errorf("readTail read a file that was swapped after Lstat; SameFile should refuse it")
 	}
 }
@@ -377,5 +388,53 @@ func TestRunTwinSymlinkedIsNotATwin(t *testing.T) {
 	}
 	if r.Errors != 1 { // x.MP4 leaf is a symlink → not a regular file → ERROR
 		t.Errorf("symlinked twin file: errors=%d, want 1", r.Errors)
+	}
+}
+
+// TestParentSwapRefused is the B43 escape regression through Run: a seam swaps a
+// parent directory for a symlink pointing out of the root in the window after
+// resolve's component walk. os.Root, anchored to the root fd, refuses the
+// escaping component, so the row is an ERROR and its tail is never read through
+// the escaping path.
+func TestParentSwapRefused(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "sub", "x.JPG"), append([]byte("photo"), 0xFF, 0xD9), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "secret.JPG"), append([]byte("secret"), 0xFF, 0xD9), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	done := false
+	scan.SetTestAfterWalk(func() {
+		if done {
+			return
+		}
+		done = true
+		os.RemoveAll(filepath.Join(root, "sub"))
+		if err := os.Symlink(outside, filepath.Join(root, "sub")); err != nil {
+			t.Fatal(err)
+		}
+	})
+	defer scan.SetTestAfterWalk(nil)
+
+	m, err := manifest.Open(filepath.Join(t.TempDir(), "manifest.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if err := m.Upsert(manifest.Entry{SourceDisk: "cam", SourcePath: "sub/x.JPG", DestPath: "sub/x.JPG",
+		Size: 1, MtimeNs: 1, SHA256: "x", CopiedAt: 1, Status: "verified"}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Run(context.Background(), m, "cam", root, func(Finding) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Errors != 1 || r.Plausible != 0 {
+		t.Errorf("parent swapped to an escaping symlink: errors=%d plausible=%d, want 1 error, 0 plausible", r.Errors, r.Plausible)
 	}
 }

@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/eddyvarelae/media-vault/internal/manifest"
@@ -136,22 +135,42 @@ func describe(fi os.FileInfo) string {
 }
 
 // WriteOutput writes data to out without ever following what is at out.
-// os.WriteFile opens the leaf itself, so a symlink substituted there
-// between CheckOutput and the write would be followed - into a verified
-// photo, or into the tree. Instead the bytes go to a temporary name beside
-// out, created O_CREATE|O_EXCL|O_NOFOLLOW (nothing that exists is truncated
-// and no link at the temp name is followed), fsynced, and renamed over the
-// leaf: rename replaces whatever directory entry is at out, symlink or
-// file, and follows nothing. What this does not bind is the parent
-// directory itself between check and write; binding that needs openat
-// (os.Root, Go 1.25) and is noted in the backlog.
+// os.WriteFile opens the leaf itself, so a symlink substituted there between
+// CheckOutput and the write would be followed - into a verified photo, or into
+// the tree. Instead out's parent directory is opened as an os.Root (B43) and the
+// temp create, fsync and rename are anchored to that directory fd: once opened
+// it is pinned even if the directory is renamed under us, the leaf name is never
+// followed on create (O_EXCL) and the rename replaces whatever entry is at out,
+// symlink or file, following nothing. The bytes go to a sibling
+// <base>.vault-partial, created O_CREATE|O_EXCL (nothing that exists is
+// truncated; a symlink or leftover at the temp name fails the exclusive open),
+// fsynced, and renamed over the leaf. A stale <out>.vault-partial refuses.
+//
+// Residual, narrower than the copy/audit/restore bindings and different in kind:
+// those anchor on a trusted root ARGUMENT and address the leaf relative to it,
+// so every parent below the root is bound. WriteOutput is handed a full out
+// path and opens out's own parent, which os.OpenRoot resolves (following it)
+// when WriteOutput runs — so a swap of that parent in the window between the
+// caller's CheckOutput and this call is still followed. Closing it fully means
+// the caller opening the certs root once and passing the handle with a relative
+// name; the cert directory is a fixed trusted path beside the manifest, so this
+// is a small follow-up, tracked, not a live hole.
 func WriteOutput(out string, data []byte) error {
-	tmp := out + ".vault-partial"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
-	if err != nil {
-		return fmt.Errorf("create %s: %w (a leftover from an interrupted run? look, then remove it by hand)", tmp, err)
+	dir, base := filepath.Split(out)
+	if dir == "" {
+		dir = "."
 	}
-	cleanup := func() { os.Remove(tmp) }
+	root, err := os.OpenRoot(filepath.Clean(dir))
+	if err != nil {
+		return fmt.Errorf("open output directory %s: %w", dir, err)
+	}
+	defer root.Close()
+	tmp := base + ".vault-partial"
+	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return fmt.Errorf("create %s: %w (a leftover from an interrupted run? look, then remove it by hand)", filepath.Join(dir, tmp), err)
+	}
+	cleanup := func() { root.Remove(tmp) }
 	if _, err := f.Write(data); err != nil {
 		f.Close()
 		cleanup()
@@ -166,7 +185,7 @@ func WriteOutput(out string, data []byte) error {
 		cleanup()
 		return fmt.Errorf("close %s: %w", tmp, err)
 	}
-	if err := os.Rename(tmp, out); err != nil {
+	if err := root.Rename(tmp, base); err != nil {
 		cleanup()
 		return fmt.Errorf("rename %s: %w", out, err)
 	}

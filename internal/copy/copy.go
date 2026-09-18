@@ -32,45 +32,63 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 	// root, or an absolute one, names a file the root does not contain, and
 	// every check below would be protecting the wrong tree. Refused here as
 	// well as in the plan, because a manifest row can carry such a spelling
-	// (review #24) and every writer feeds through this function.
+	// (review #24) and every writer feeds through this function. Kept for its
+	// message; os.Root below enforces the same physically.
 	if why := Escapes(dstRoot, dstRel); why != "" {
 		return manifest.Entry{}, fmt.Errorf("refusing to write: %s", why)
 	}
+
+	// Anchor every filesystem operation below to an os.Root handle on dstRoot
+	// (B43): resolution is pinned to this directory fd even if a parent is
+	// renamed under us, and os.Root refuses outright any path component that
+	// escapes the root — the atomic backstop behind the checks, closing the
+	// check-then-write TOCTOU that a component walk alone leaves open. dstRoot
+	// is the archive root the operator gave; created here if missing, exactly
+	// as the old MkdirAll(parent) did.
+	if err := os.MkdirAll(dstRoot, 0o755); err != nil {
+		return manifest.Entry{}, fmt.Errorf("mkdir root: %w", err)
+	}
+	root, err := os.OpenRoot(dstRoot)
+	if err != nil {
+		return manifest.Entry{}, fmt.Errorf("refusing to write: %w", err)
+	}
+	defer root.Close()
+
 	// No directory on the way may be a symlink: through one, this path and
-	// another spelling are the same file, and every check below would be
-	// looking at the wrong name. The plan refused these already; the writer
-	// refuses again on the filesystem it is about to touch.
-	if link, err := scan.SymlinkComponent(dstRoot, dstRel); err != nil {
-		return manifest.Entry{}, err
+	// another spelling are the same file. The walk is re-anchored to the Root
+	// fd (SymlinkComponentRoot) and still refuses an in-root symlinked
+	// component that exists at walk time — os.Root would otherwise follow it.
+	// Residual (documented, B43): a parent swapped to an IN-ROOT symlink in the
+	// window after this walk is followed by os.Root, which only blocks escapes;
+	// an escaping swap is refused atomically by the operations below.
+	if link, err := scan.SymlinkComponentRoot(root, dstRel); err != nil {
+		return manifest.Entry{}, fmt.Errorf("refusing to write: %w", err)
 	} else if link != "" {
 		return manifest.Entry{}, fmt.Errorf("refusing to write through a symlink: %s is a symlink; destination directories must be real", filepath.Join(dstRoot, link))
 	}
 
-	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
-		return manifest.Entry{}, fmt.Errorf("mkdir: %w", err)
-	}
-	// And physically, now that the directory exists: the resolved parent
-	// must lie under the resolved root.
-	if !Under(dstRoot, dstPath) {
-		return manifest.Entry{}, fmt.Errorf("refusing to write: %s resolves outside %s", dstPath, dstRoot)
+	if dir := filepath.Dir(dstRel); dir != "." {
+		if err := root.MkdirAll(dir, 0o755); err != nil {
+			return manifest.Entry{}, fmt.Errorf("mkdir: %w", err)
+		}
 	}
 
-	// Nothing that exists is ever truncated or renamed over except a
-	// recopy's own destination. The plan checked spellings against the
-	// manifest; this is the writer checking the physical paths it is about
-	// to touch, on the filesystem's own terms (case folding included).
-	tmpPath := dstPath + ".vault-partial"
-	if fi, err := os.Lstat(tmpPath); err == nil {
+	// Nothing that exists is ever truncated or renamed over except a recopy's
+	// own destination. The plan checked spellings against the manifest; this is
+	// the writer checking the physical paths it is about to touch through the
+	// Root fd, on the filesystem's own terms (case folding included).
+	tmpRel := dstRel + ".vault-partial"
+	if fi, err := root.Lstat(tmpRel); err == nil {
 		// A leftover partial from a run that died mid-file looks exactly
 		// like an archived file that happens to end in .vault-partial, and
 		// the writer cannot tell them apart - so it refuses both and says
 		// so. A leftover is removed by hand once someone has looked at it.
 		return manifest.Entry{}, fmt.Errorf("refusing to write: %s already exists (%s); if it is a leftover .vault-partial from an interrupted run, remove it by hand and re-run",
-			tmpPath, describe(fi))
+			filepath.Join(dstRoot, tmpRel), describe(fi))
 	} else if !os.IsNotExist(err) {
-		return manifest.Entry{}, err
+		return manifest.Entry{}, fmt.Errorf("refusing to write: %w", err)
 	}
-	if fi, err := os.Lstat(dstPath); err == nil {
+	if fi, err := root.Lstat(dstRel); err == nil {
 		if !task.Replace {
 			return manifest.Entry{}, fmt.Errorf("refusing to write: %s already exists (%s) and this file was planned as new", dstPath, describe(fi))
 		}
@@ -78,7 +96,7 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 			return manifest.Entry{}, fmt.Errorf("refusing to replace: %s is %s, not a regular file", dstPath, describe(fi))
 		}
 	} else if !os.IsNotExist(err) {
-		return manifest.Entry{}, err
+		return manifest.Entry{}, fmt.Errorf("refusing to write: %w", err)
 	}
 
 	in, err := os.Open(srcPath)
@@ -90,11 +108,11 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 	// O_EXCL: the staging file must be created by this call. If it exists
 	// after the Lstat above (a race, or a case alias Lstat missed), the open
 	// fails and nothing is truncated - and nothing is removed either.
-	out, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	out, err := root.OpenFile(tmpRel, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		return manifest.Entry{}, fmt.Errorf("refusing to write: %w", err)
 	}
-	cleanup := func() { os.Remove(tmpPath) }
+	cleanup := func() { root.Remove(tmpRel) }
 
 	hasher := sha256.New()
 	hashed := &byteCounter{}
@@ -141,11 +159,14 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 		return manifest.Entry{}, err
 	}
 	mt := time.Unix(0, task.MtimeNs)
-	if err := os.Chtimes(tmpPath, mt, mt); err != nil {
+	// Caveat (os.Root doc): on Unix Root.Chtimes has a regular-file→symlink
+	// race — but tmpRel is the file we just created O_EXCL through the same
+	// Root fd and have not closed the handle on, so it is not attacker-reachable.
+	if err := root.Chtimes(tmpRel, mt, mt); err != nil {
 		cleanup()
 		return manifest.Entry{}, fmt.Errorf("chtimes: %w", err)
 	}
-	if err := os.Rename(tmpPath, dstPath); err != nil {
+	if err := root.Rename(tmpRel, dstRel); err != nil {
 		cleanup()
 		return manifest.Entry{}, fmt.Errorf("rename: %w", err)
 	}

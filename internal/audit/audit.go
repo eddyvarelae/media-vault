@@ -19,7 +19,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/eddyvarelae/media-vault/internal/copy"
 	"github.com/eddyvarelae/media-vault/internal/manifest"
@@ -134,6 +133,15 @@ func Run(ctx context.Context, m *manifest.Manifest, disk, dstRoot string, onFind
 	if err != nil {
 		return nil, err
 	}
+	// Anchor every read to an os.Root handle on dstRoot (B43): resolution is
+	// pinned to this directory fd and os.Root refuses any component that escapes
+	// the root, closing the check-then-read TOCTOU. dstRoot must exist — it is
+	// the archive being audited.
+	root, err := os.OpenRoot(dstRoot)
+	if err != nil {
+		return nil, fmt.Errorf("cannot open destination root %s: %w", dstRoot, err)
+	}
+	defer root.Close()
 	// A first pass records the stem of every video file that ACTUALLY resolves
 	// to a regular file under the root — so an empty .SRT is judged a twin only
 	// against media that is really archived and readable, not against a mere
@@ -144,7 +152,7 @@ func Run(ctx context.Context, m *manifest.Manifest, disk, dstRoot string, onFind
 		if !videoExts[strings.ToLower(filepath.Ext(rel))] {
 			continue
 		}
-		if _, reason, _ := resolve(dstRoot, rel); reason == "" {
+		if reason, _ := resolve(root, dstRoot, rel); reason == "" {
 			videoStems[stem(rel)] = true
 		}
 	}
@@ -181,12 +189,12 @@ func Run(ctx context.Context, m *manifest.Manifest, disk, dstRoot string, onFind
 			}
 		}
 
-		full, reason, li := resolve(dstRoot, rel)
+		reason, li := resolve(root, dstRoot, rel)
 		if reason != "" {
 			record(ErrorV, reason)
 			continue
 		}
-		tail, size, err := readTail(full, li)
+		tail, size, err := readTail(root, rel, filepath.Join(dstRoot, rel), li)
 		if err != nil {
 			record(ErrorV, fmt.Sprintf("cannot read tail: %v", err))
 			continue
@@ -204,37 +212,33 @@ func relOf(e manifest.Entry) string {
 	return e.SourcePath // verify's rule: an empty dest_path falls back to source_path
 }
 
-// resolve validates rel against dstRoot the way every reader here must: inside
+// resolve validates rel against the root the way every reader here must: inside
 // the root (a row path can be `../x` or absolute — review #24), reached through
-// real directories (no symlinked component), an existing regular file, and
-// physically under the resolved root. It returns the full path and the file's
-// Lstat info on success (empty reason), or a reason for the ERROR/skip.
-//
-// Residual (as in certify): the O_NOFOLLOW open below binds only the leaf, and
-// this component walk is a check-then-use — a PARENT directory swapped to a
-// symlink between the walk and the open is not caught. Closing that needs
-// os.Root (Go 1.25); backlog.
-func resolve(dstRoot, rel string) (full, reason string, li os.FileInfo) {
+// real directories (no symlinked component), an existing regular file. The walk
+// and Lstat go through the os.Root handle (B43), which refuses any escaping
+// component and subsumes the physical containment check. It returns the file's
+// Lstat info on success (empty reason), or a reason for the ERROR/skip. The
+// leaf-symlink policy lives here (not in readTail, since os.Root follows an
+// in-root leaf symlink): an in-root symlink leaf is not a regular file and is
+// refused. Residual (os.Root doc): a parent swapped to an in-root symlink after
+// this walk is followed — os.Root only blocks escapes.
+func resolve(root *os.Root, dstRoot, rel string) (reason string, li os.FileInfo) {
 	if why := copy.Escapes(dstRoot, rel); why != "" {
-		return "", "outside the root: " + why, nil
+		return "outside the root: " + why, nil
 	}
-	if link, err := scan.SymlinkComponent(dstRoot, rel); err != nil {
-		return "", fmt.Sprintf("cannot resolve path: %v", err), nil
+	if link, err := scan.SymlinkComponentRoot(root, rel); err != nil {
+		return fmt.Sprintf("cannot resolve path: %v", err), nil
 	} else if link != "" {
-		return "", "path passes through a symlinked directory (" + link + ")", nil
+		return "path passes through a symlinked directory (" + link + ")", nil
 	}
-	full = filepath.Join(dstRoot, rel)
-	fi, err := os.Lstat(full)
+	fi, err := root.Lstat(rel)
 	if err != nil {
-		return "", fmt.Sprintf("cannot stat: %v", err), nil
+		return fmt.Sprintf("cannot stat: %v", err), nil
 	}
 	if !fi.Mode().IsRegular() {
-		return "", "not a regular file", nil
+		return "not a regular file", nil
 	}
-	if !copy.Under(dstRoot, full) {
-		return "", "resolves outside the root", nil
-	}
-	return full, "", fi
+	return "", fi
 }
 
 // stem is the lowercased basename without its extension, so a .SRT and its
@@ -245,15 +249,17 @@ func stem(rel string) string {
 }
 
 // readTail returns the last TailBytes of the file (or the whole file when it is
-// shorter) and the size read from the OPEN fd. It opens O_NOFOLLOW (the leaf
-// must not be a symlink), confirms via SameFile that the opened file is the one
-// Lstat saw (no swap between stat and open), and sizes the read from the fd.
-// Read-only.
-func readTail(path string, lstatInfo os.FileInfo) ([]byte, int64, error) {
+// shorter) and the size read from the OPEN fd. It opens rel through the os.Root
+// handle (B43 — resolution pinned to the root fd, escapes refused), confirms via
+// SameFile that the opened file is the one resolve's Lstat saw (no swap between
+// stat and open — os.Root follows an in-root leaf symlink, so this identity
+// check, not O_NOFOLLOW, is what refuses a swapped leaf), and sizes the read
+// from the fd. full is the path on disk, used only by the test seams. Read-only.
+func readTail(root *os.Root, rel, full string, lstatInfo os.FileInfo) ([]byte, int64, error) {
 	if hookBeforeOpen != nil {
-		hookBeforeOpen(path)
+		hookBeforeOpen(full)
 	}
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	f, err := root.OpenFile(rel, os.O_RDONLY, 0)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -267,7 +273,7 @@ func readTail(path string, lstatInfo os.FileInfo) ([]byte, int64, error) {
 	}
 	size := fi.Size()
 	if hookAfterStat != nil {
-		hookAfterStat(path)
+		hookAfterStat(full)
 	}
 	tail, err := tailFrom(f, size)
 	return tail, size, err
@@ -275,11 +281,11 @@ func readTail(path string, lstatInfo os.FileInfo) ([]byte, int64, error) {
 
 // hookBeforeOpen and hookAfterStat are test-only seams (nil in production) that
 // reproduce, THROUGH Run, the two races readTail defends against: hookBeforeOpen
-// fires after resolve's Lstat and before the O_NOFOLLOW open, so a test can
-// substitute the leaf (a symlink → O_NOFOLLOW refuses it; a swapped inode →
-// SameFile refuses it); hookAfterStat fires after the size is taken from the fd
-// and before the tail ReadAt, so a test can truncate the file and prove a short
-// read is an ERROR (review #64). Both leave production untouched.
+// fires after resolve's Lstat and before the open, so a test can substitute the
+// leaf for a different inode (→ SameFile refuses it); hookAfterStat fires after
+// the size is taken from the fd and before the tail ReadAt, so a test can
+// truncate the file and prove a short read is an ERROR (review #64). Both leave
+// production untouched.
 var (
 	hookBeforeOpen func(path string)
 	hookAfterStat  func(path string)
