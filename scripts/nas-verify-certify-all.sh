@@ -13,6 +13,18 @@ LOG="${VAULT_LOG:-/volume1/docker/verify-certify.log}"
 # cert inside the tree is a file the next scan finds with no row.
 CERTS="${VAULT_CERTS:-/volume1/docker/vault-certs}"
 
+# One line to $LOG, and to the terminal only when there is one. Launched as
+# `sudo nohup ./nas-verify-certify-all.sh >> $LOG 2>&1 &`, a `tee -a $LOG`
+# wrote every line twice (B27): once itself, once through stdout. Now stdout
+# only gets a copy when someone is watching it.
+log() {
+  if [ -t 1 ]; then
+    echo "$@" | tee -a "$LOG"
+  else
+    echo "$@" >> "$LOG"
+  fi
+}
+
 # (disk, host root) pairs — keep aligned with the migration.
 disks=(
   "media-djiflip:/volume1/media/DJIFlip"
@@ -24,31 +36,31 @@ disks=(
 )
 
 mkdir -p "$CERTS"
-echo "[$(date)] starting verify+certify pass" | tee -a "$LOG"
+log "[$(date)] starting verify+certify pass"
 
 failures=0
 for entry in "${disks[@]}"; do
   disk="${entry%%:*}"
   root="${entry#*:}"
 
-  echo | tee -a "$LOG"
-  echo "[$(date)] === VERIFY $disk at $root ===" | tee -a "$LOG"
+  log ""
+  log "[$(date)] === VERIFY $disk at $root ==="
   if ! docker run --rm -v /volume1:/volume1 -e VAULT_CONFIG=/volume1/docker/vault-nas-config "$IMG" \
       verify "$disk" "$root" >> "$LOG" 2>&1; then
-    echo "[$(date)] VERIFY FAILED for $disk — skipping certify" | tee -a "$LOG"
+    log "[$(date)] VERIFY FAILED for $disk — skipping certify"
     failures=$((failures+1))
     continue
   fi
 
-  echo "[$(date)] === CERTIFY $disk ===" | tee -a "$LOG"
+  log "[$(date)] === CERTIFY $disk ==="
   if ! docker run --rm -v /volume1:/volume1 -e VAULT_CONFIG=/volume1/docker/vault-nas-config "$IMG" \
       certify "$disk" "$CERTS/$disk.cert.json" --root "$root" >> "$LOG" 2>&1; then
-    echo "[$(date)] CERTIFY FAILED for $disk" | tee -a "$LOG"
+    log "[$(date)] CERTIFY FAILED for $disk"
     failures=$((failures+1))
     continue
   fi
-  echo "[$(date)] $disk done — cert at $CERTS/$disk.cert.json" | tee -a "$LOG"
+  log "[$(date)] $disk done — cert at $CERTS/$disk.cert.json"
 done
 
-echo | tee -a "$LOG"
-echo "[$(date)] all done — $failures failures across ${#disks[@]} disks" | tee -a "$LOG"
+log ""
+log "[$(date)] all done — $failures failures across ${#disks[@]} disks"

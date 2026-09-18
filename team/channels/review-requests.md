@@ -6,6 +6,80 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #24 - B40 `vault restore` (branch `restore`, code tip `b70f35e`)
+
+**PM (2026-09-17T22:29:15-07:00):** Review `git diff 88d75d7..b70f35e -- . ':!team'` (8 files, +692/-29: new `internal/restore/{restore.go,restore_test.go}`, `cmd/vault/main.go` + test, `internal/manifest/manifest.go` (`AllRows` replaces `AllDestPaths`), `internal/repair/repair.go` + test, `CLAUDE.md`). Base `88d75d7` is `main`'s code tip when the branch merged it; `f4-tests` landed on `main` after (`7672b04`) and is independent. Design as approved in `team/channels/dev-questions.md` (Dev 2026-09-17T22:01 proposal, PM 22:03 GO with two additions). Context: one `verified` NAS file is a torn write (Tester #24); this command replaces a named destination deliberately, the one thing the v0.2.1 guard exists to forbid. PM at `b70f35e`: vet/gofmt clean, 8 packages ok.
+
+**Claims:**
+1. `vault restore <disk> <source-path> <replacement-file> <dest-root> --expect-sha <sha> [--dry-run]` refuses, exit 1, nothing written, at the first failure of: row exists; destination physically clean (no symlink component, regular file); no other row of any disk claims the same physical file (rows with empty `dest_path` claim `root/source_path`); `--expect-sha` present and equal to the replacement's hash; replacement ≠ current bytes (else exit 0, nothing written).
+2. `--dry-run` prints everything including `claimants: none`, writes nothing.
+3. The write goes through `copy.File` with `Replace: true` (O_EXCL staging, rename over the checked path; the writer re-walks); the landed sha must equal `--expect-sha` or the command dies after the rename (stated as the last check).
+4. The row is upserted with new sha/size/mtime, `copied_at = now`, `verified_at = 0`, `status = copied`; `source_disk`/`source_path`/`dest_path` unchanged; the `RESTORED` log line carries old and new sha:size, `expect=`, the prior `status`/`verified_at`, and the replacement path.
+5. The `AllRows` fold: `repair-dest`'s claim index now treats an empty-`dest_path` row as owning `root/source_path` (safe direction); `TestEmptyDestPathRowsClaimTheirSourcePath`.
+6. Tests cover the full B40 shape end to end (copy → verify → certify → corrupt tail → dry-run → restore → row `copied` → `verify --only-unverified` promotes only it → certify passes) and every refusal.
+
+**This is wrong if:** any refusal can be bypassed by argument order or a flag (`--force` must not exist); the claimants check misses a `deduped` row of another disk; the write can happen with `--dry-run`; the post-rename sha check can be skipped; the row can end `verified`; `repair-dest`'s behavior changed beyond claim 5; or the restore path can be used to write outside `dest-root` (symlink component, `..` in `source-path`).
+
+Verdict goes below this line.
+
+### #22 - `f4-tests` merge resolution only, second attempt (branch tip `846c958`; approved content `dc36e5f` #13, resolution verified once #17) - **resolved: APPROVE → merged**
+
+**PM (2026-09-17T22:25:15-07:00):** Base pinned this time: `main`'s code tip is `88d75d7` (later `main` commits are team files only). Review `git diff 88d75d7..846c958 -- . ':!team'` - it must be exactly the approved `dc36e5f` content (F4 tests, B27 helper + shell test, `reports/` skip, docs) re-expressed on top of `88d75d7`, plus nothing. Dev's two conflict resolutions (`scripts/test/scripts_test.go`: `TestVerifyCertifyAllLogsEachLineOnce` beside `TestKippCopyAllShape`; `cmd/vault/main_test.go`: `TestVerifyOnlyUnverified` beside `TestRepairDest`) reconstruct both functions whole. PM at `846c958`: vet/gofmt/bash -n clean, 8 packages ok.
+
+**This is wrong if:** the diff touches any file outside the nine approved feature files; any function from `main` (`TestKippCopyAllShape`, `TestRepairDest`, the repair-dest/kipp code) is altered or missing; or any `dc36e5f` test body differs.
+
+Verdict goes below this line.
+
+**Reviewer (2026-09-17):** APPROVE — request #22, merge resolution only, exactly `git diff 88d75d7..846c958 -- . ':!team'`, compared with the approved `73c52ae..dc36e5f` content.
+
+- Exactly the nine approved feature files change. Programmatic comparison of all added/deleted source lines confirms the seven non-documentation files carry exactly the approved changes, including every test body, the B27 helper and shell test, and the `reports/` skip.
+- Both conflicted Go test files contain additions only relative to `88d75d7`; every existing line is retained. `TestRepairDest` and `TestKippCopyAllShape` each remain whole, unchanged, and present once, alongside the approved `TestVerifyOnlyUnverified` and `TestVerifyCertifyAllLogsEachLineOnce`. Repair-dest and Kipp production files are unchanged.
+- Documentation preserves main's existing content: CLAUDE adds the approved F4/B20 descriptions while retaining the expanded plan fields, copy protection, and Kipp documentation; README combines the approved reports exclusion with the existing verified-destination protection, with only paragraph reflow and no duplicated or contradictory text.
+
+Validation: source and diff comparison only; no build, Go tests, vet, or shell tests run. Only `team/channels/review-requests.md` was modified.
+
+
+### #21 - re-review of #16's fix only (branch `certs-out`, code tip `b0dccb9`) - **resolved: APPROVE → merge (after f4-tests)**
+
+**PM (2026-09-17T22:25:15-07:00):** Check #16's one finding is closed. Review `git show b0dccb9 -- . ':!team'` (4 files, +154/-2). Dev's note: Dev 2026-09-17T22:13 (commit `0f3ae2f` on that branch). PM at `b0dccb9`: vet/gofmt/bash -n clean, 8 packages ok.
+
+**Claims:** `certify.WriteOutput` opens `<out>.vault-partial` with `O_WRONLY|O_CREATE|O_EXCL|O_NOFOLLOW`, writes, fsyncs, closes, renames over `out` (rename replaces the directory entry, follows nothing); temp removed on failure after create; a stale temp name refuses. `runCertify` uses it instead of `os.WriteFile`. Regression substitutes the leaf between check and write (link to a verified photo; dangling link into the tree), stale temp, link at the temp name; a demonstration that `os.WriteFile` fails the same case. Stated limitation: the parent directory is not bound (needs `openat`/`os.Root`, Go 1.24+; toolchain pinned 1.23) - B43.
+
+**This is wrong if:** `os.Rename` on this platform can follow a symlink at `out` (state the semantics you rely on); the temp name is predictable *and* the open lacks `O_EXCL` on any path; the temp is left behind on a rename failure; or the parent-directory limitation is understated (can a swapped parent redirect the rename target into the archive?).
+
+Verdict goes below this line.
+
+**Reviewer (2026-09-17):** APPROVE — request #21, fix only, exactly `git show b0dccb9 -- . ':!team'`. The leaf-substitution finding is closed by source trace; parent-directory binding remains the explicitly deferred B43 limitation.
+
+- `internal/certify/certify.go:150` has one temporary-file open, always with `O_WRONLY|O_CREATE|O_EXCL|O_NOFOLLOW`. An existing regular file or symlink at the predictable temporary name refuses without truncating its target or removing the pre-existing entry. Successful creation is followed by write, fsync, close, then rename; every subsequent error branch invokes cleanup, including rename failure at lines 169–171. Cleanup is best-effort (`os.Remove` errors are ignored), not a guarantee against changed permissions, I/O errors, or a moved parent.
+- The Darwin/POSIX rename semantics relied on here replace the destination directory entry rather than dereferencing a destination leaf symlink; a dangling leaf link likewise gets replaced. The local macOS SDK `rename(2)` manual confirms replacement of an existing destination and directory-entry rename semantics. This does not prevent resolution of symlinks in ancestor components. `cmd/vault/main.go:604` now calls `certify.WriteOutput`, closing the former plain-write window.
+- The added regressions substitute the leaf after `CheckOutput` for both a verified-photo link and a dangling archive link, assert the protected target is unchanged/absent, and check certificate contents. They also cover stale temporary files and temporary-name links. The plain-write demonstration shows the old mechanism; it can skip and is not independent mutation evidence. Rename-failure cleanup is traced in source, not exercised by the added tests.
+
+B43's concrete consequence: after checking `/safe/certs/a.JPG`, replacing `/safe/certs` with a symlink to `/archive/DCIM` before temporary creation makes both temporary creation and rename occur in the archive. If `/archive/DCIM/a.JPG` exists, rename replaces that verified photo with certificate bytes. Thus this approval covers the leaf fix with stable, trusted ancestors, not race-proof archive containment. Root ownership of the certificate directory alone does not prevent its replacement by someone who can modify its containing directory; ancestor permissions also matter. A parent moved after temporary creation can also defeat pathname-based cleanup. These are consequences of the explicitly deferred parent binding, not protections supplied by `O_NOFOLLOW` on the leaf.
+
+Validation: source review and local system-call documentation only; no Go build/test, vet, runtime tests, or mutation tests run. Only `team/channels/review-requests.md` was modified by this review; pre-existing edits were preserved.
+
+
+**PM (2026-09-17T22:28:28-07:00):** #22 APPROVE accepted - merging `f4-tests` (`846c958`). #21 APPROVE accepted - merging `certs-out` (`0f3ae2f`, code `b0dccb9`) after it; B43's concrete consequence (a swapped `certs/` parent) is recorded in the backlog item verbatim. If `certs-out` conflicts with `f4-tests` in code (both add a `scripts/test/nas-verify-certify-all.sh`), it goes back to Dev for the merge.
+
+### #23 - acceptance: B24 live run may proceed (Tester #26 dry-run evidence vs the original finding #7) - **resolved: APPROVE → live run gated only on Eddy naming the executor**
+
+**PM (2026-09-17T22:13:58-07:00):** Not code. Before the PM runs `vault repair-dest` against the **live** NAS manifest (runbook `team/context/runbook-b24.md`), confirm the evidence proves each of the 195 rewrites points at the file whose bytes the row attests. Inputs on `/Volumes/Scratch1/tester/b24-dryrun/` (read-only): `manifest.db` (snapshot, sha `9db9b01a…`), `plan.txt` (the dry-run output, 195 `REPAIR` lines), `compare.txt` + the comparison script (independent re-hash of each row's file at `CLIP|DCIM|THMBNL/<basename>` over SMB), and Tester #7's `check195b.py` result from earlier today. Claims: (1) the 195 `copied` rows in the snapshot are exactly the rows in `plan.txt`; (2) for every plan line, the `→` path's file size and sha256 equal the row's; (3) no plan line targets a path that is any other row's `dest_path` in the snapshot; (4) the plan's counts add up (38,809 = 38,614 + 195; 39,414 = 39,219 + 195). **This is wrong if:** any row in the plan is not `copied`; any `→` path's recorded hash in `compare.txt` differs from the row; you can find a second candidate for any basename the plan did not report as `AMBIGUOUS`; or the snapshot's sha differs from the NAS file's current sha (`shasum -a 256 ~/mounts/docker/vault-nas-config/manifest.db`, read-only over SMB - note it opens nothing).
+
+Verdict goes below this line.
+
+**Reviewer (2026-09-17):** APPROVE — request #23, acceptance of the 195-row B24 repair plan. Independently queried the snapshot using SQLite `?mode=ro&immutable=1`, parsed `plan.txt`, and re-hashed the NAS candidates read-only; no vault command or live database connection was run.
+
+- The plan contains exactly 195 unique source rows, equal to the snapshot's entire `media-sonya6700` `copied` set. Every old path equals its row's `dest_path`; all 195 old paths are absent on disk. Targets split as 10 `CLIP/` + 185 `DCIM/` = 195.
+- Enumerated every immediate real subdirectory of `~/mounts/media/SonyA6700` (`CLIP`, `DCIM`, `THMBNL`) and checked each row's basename in all three. Exactly 195 candidate files exist, one per row; each is regular, has the row's size, and its full SHA-256 equals the row's. Every matching path equals the plan's arrow target: 195 matches, 0 disagreements, 0 second candidates. Sum of row sizes = bytes independently hashed = **1,154,361,035** (about 1.075 GiB, consistent with the plan's rounded 1.1 GiB).
+- Across all snapshot disks and statuses, no other row claims any planned target, including after path normalization and case folding. The 195 planned targets are also mutually unique.
+- Recomputed counts: **38,809 = 38,614 + 195** rows with destinations; **39,414 = 39,219 verified + 195 copied = 38,809 + 605** total Sony rows. The 605 empty-destination rows are verified, as Tester #26 already notes; the plan's `inventoried` label is inaccurate but does not change the repair set. Parsed outcomes are 195 REPAIR and zero other outcomes.
+- Snapshot and current NAS manifest have identical full SHA-256, checked both before and after the independent media hashing: `9db9b01ae77cec245e6b3c79b1a83a7f01d795d9d357542d87b2db6f0864eb1a`. No live `manifest.db-wal` or `manifest.db-shm` was present in the directory listing.
+
+Evidence qualification: `compare.txt` records aggregate results, not per-file hashes, and the stated comparison script is not in `b24-dryrun/`. Those artifacts alone would not prove claim 2; the independent full-file hashing above supplies that evidence and reproduces its totals and Tester #7's result. Read `check195b.py` and the earlier report; did not execute that script. Approval covers this snapshot's repair plan, not a completed live repair or verification of all previously verified footage. The runbook's executor designation, single-writer lock, backup, live dry-run stop gate, and post-run verification/witness remain required. Only this review-channel file was modified.
+
+**PM (2026-09-17T22:16:43-07:00):** APPROVE accepted; the Reviewer re-hashed all 195 files itself and confirmed snapshot = NAS manifest. Runbook `team/context/runbook-b24.md` may run once Eddy names the executor and `v0.2.2` is published (CI in progress). Tester: keep the comparison script in `b24-dryrun/` next time - the Reviewer noted it was missing.
+
 ### #17 - `f4-tests` merge resolution only (branch `f4-tests`, tip `f54eb59`; approved content = `dc36e5f`, #13) - **resolved: resolution verified (finding = PM's stale diff base) → merge**
 
 **PM (2026-09-17T22:03:19-07:00):** #13 approved `dc36e5f`; merging it into `main` conflicted with the `overwrite-guard` merge in `CLAUDE.md`, `README.md`, `cmd/vault/main_test.go`. Dev resolved in merge commit `d9c900a`, then re-merged `main` (team-only) as `f54eb59`. Review **only the resolution**: `git diff main..f54eb59 -- . ':!team'` must equal what `dc36e5f` added to its base, re-expressed on top of `main` - i.e. the F4 tests, the B27 logging helper, the `reports/` skip, and their docs, with nothing from `overwrite-guard` lost or duplicated. `git show d9c900a` (combined diff) shows the conflict hunks Dev decided. PM at `f54eb59`: vet/gofmt clean, 7 packages ok.

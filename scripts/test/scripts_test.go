@@ -36,7 +36,7 @@ func TestKippCopyAllShape(t *testing.T) {
 	}
 }
 
-func TestVerifyCertifyAllWritesCertsBesideTheManifest(t *testing.T) {
+func TestVerifyCertifyAllCertsBesideManifestAndLogsOnce(t *testing.T) {
 	cmd := exec.Command("bash", "./nas-verify-certify-all.sh")
 	cmd.Env = append(os.Environ(), "TMPDIR="+t.TempDir())
 	out, err := cmd.CombinedOutput()

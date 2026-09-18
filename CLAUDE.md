@@ -20,7 +20,9 @@ fixtures calls `testguard.Require()` from its `TestMain`
 (`internal/testguard`): it resolves the temp root (`Abs` + symlinks) and exits
 1 if it is under `/volume1` or `/mnt`. A new test package that writes files
 gets the same three-line `TestMain`. Never point a test at either root.
-`scripts/test/` holds bash tests of the NAS scripts (Docker shadowed by a
+`internal/verify` has package-level F4 tests (incremental pass over every
+non-verified status, verified rows untouched, bytes read as proof) and
+`cmd/vault` the CLI ones. `scripts/test/` holds bash tests of the NAS scripts (Docker shadowed by a
 stub on `PATH`, logs redirected via `VAULT_LOG`); `go test ./scripts/test/`
 runs them, so `go test ./...` is still the one command.
 
@@ -30,7 +32,7 @@ runs them, so `go test ./...` is still the one command.
 |---|---|
 | `cmd/vault/main.go` | Hand-rolled arg parsing (`parseScanFlags` style — no flag frameworks), one `runX` per command, `die()` for fatal errors |
 | `internal/manifest` | SQLite schema + queries. Single writer per config dir (WAL, `busy_timeout`). Rows keyed `(source_disk, source_path)` |
-| `internal/scan` | Walk source, diff against manifest and destination → `Plan{ToCopy, ToRecopy, SkipCount, Deduped, DstCollisions, VerifiedChanged, Retouched, DstOwned, DstThroughLink}` |
+| `internal/scan` | Walk source (skipping dev junk and, at any depth, the tagger's `reports/` directories — B20), diff against manifest and destination → `Plan{ToCopy, ToRecopy, SkipCount, Deduped, DstCollisions, VerifiedChanged, Retouched, DstOwned, DstThroughLink}` |
 | `internal/copy` | One file: `Lstat` both targets, stream + sha256 → `<dst>.vault-partial` (`O_EXCL`), fsync, chtimes, rename. A failed copy leaves no partial; a refused one touches nothing |
 | `internal/verify` | Re-hash destination rows → `verified` / `mismatch`; missing rows counted, not touched |
 | `internal/certify` | Refuses unless every row is `verified`; signs with `$VAULT_CONFIG/key.pem` (created on first use, mode 600) |
