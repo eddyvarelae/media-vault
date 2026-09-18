@@ -45,28 +45,33 @@ size no row has. A disk whose content is entirely archived is therefore
 fully hashed to prove it - the Tester measured ~800 MB/s on the Mini, i.e.
 ~26 min for 1.3 TB. The report says how many bytes were hashed.
 
-The `<hexname>` in the output paths is a **bounded** slug: the hex of the
-disk name's first 24 bytes then 16 hex of its whole sha256 (~65 chars,
-`[0-9a-f]` only - so `Disk` and `disk` never share a file on a
-case-folding state dir, and a long name never overruns the filename limit).
-It is collision-resistant, **not injective**: two names collide only if their
-24-byte heads match *and* their sha256 clashes in 16 hex (64 bits) - about
-1 in 1.8e19, negligible but not impossible. So **line 1 of every slug-keyed
-file is the full name** - the report (`disk: <name>`), the TSV
-(`disk: <name>`) and the unknown-volume marker (`volume: <name>`).
+The `<hexname>` in the output paths is an **assigned, persisted** slug, kept in
+`$STATE_DIR/slugs.tsv` (`name<TAB>slug`, append-only via temp + rename). On a
+volume's first sight it is assigned a **base** - the hex of the name's first 24
+bytes then 16 hex of its whole sha256 (`[0-9a-f-]` only, so `Disk`/`disk` never
+share a file on a case-folding state dir, and a long name never overruns the
+filename limit) - and if any *other* name already holds that base it becomes
+`base-2`, `base-3`, … until free. Every report, TSV and marker path uses the
+assigned slug, for known and unknown volumes alike, so **two names can never
+share a slug** however their bases hash (the earlier probabilistic-collision
+worry is gone). The mapping persists across ticks and re-attaches.
 
-**Collision detection runs first.** Before anything is written, pruned or
-recorded, the tick checks every slug-keyed file it would touch - each due
-disk's report and TSV, each unknown volume's marker - for a foreign owner on
-line 1. If *any* names a different volume, it logs every collision
-(`SLUG COLLISION: <file> names "<owner>", not "<expected>" …`), **touches
-nothing** (the colliding files stay, no report or marker is written, no state
-is appended), and **exits 1**. Only a wholly collision-free tick goes on to
-write reports/markers/state and to prune. Pruning is by **owner**: a marker
-is removed when the volume named on its line 1 is no longer
-mounted-and-unknown. (Because a collision fails the tick before pruning, a
-slug clash can never let owner-pruning drop the wrong marker.) A `--force`
-re-report of the *same* disk matches its own line 1 and is replaced normally.
+Two guards remain, run before anything is written, pruned or recorded:
+
+- **Corrupt registry → abort.** If `slugs.tsv` maps one name to two slugs, or
+  one slug to two names (only a hand-edit can do this), the tick logs
+  `REFUSING: … slugs.tsv is corrupt …`, touches nothing, and **exits 1**.
+- **Foreign owner → abort (defense in depth).** Every slug-keyed file carries
+  its owner on line 1 - the report/TSV `disk: <name>`, the marker
+  `volume: <name>`. If an existing file at a volume's assigned path names a
+  *different* volume (corruption or a hand-placed file), the tick logs
+  `FOREIGN OUTPUT: <file> names "<owner>", not "<expected>" …`, leaves it, and
+  **exits 1**. This is now a corruption detector, not the primary mechanism.
+
+Only a clean tick writes reports/markers/state and prunes. Pruning is by
+**owner**: a marker is removed when the volume named on its line 1 is no longer
+mounted-and-unknown. A `--force` re-report of the *same* disk matches its own
+line 1 and is replaced normally.
 
 A configured `BACKUP_DISKS` name longer than 255 bytes - which no mount point
 can be - is refused at discovery (exit 2), before any report path is built and

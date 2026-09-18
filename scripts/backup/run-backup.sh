@@ -55,6 +55,7 @@ managed_bin=0
 if [[ -z "${VAULT_BIN:-}" ]]; then VAULT_BIN="$STATE_DIR/bin/vault"; managed_bin=1; fi
 HELPER="$here/../tagging/tagging-helper.py"
 STATE_FILE="$STATE_DIR/backup-state.tsv"     # name <TAB> attach-identity <TAB> date, one line per reported disk
+SLUGS_FILE="$STATE_DIR/slugs.tsv"            # name <TAB> slug, append-only: the assigned, persisted output identifier
 LOCK_DIR="$STATE_DIR/backup.lock"
 SNAP_DIR="$STATE_DIR/gap-manifest"            # the snapshot lives here as manifest.db, so VAULT_CONFIG can point at it
 
@@ -78,28 +79,58 @@ today() { date +%Y-%m-%d; }
 # point. A re-attach mounts a new device, so the identity changes; a report
 # is owed once per identity and once per day while it stays attached.
 attach_id() { stat -f '%d:%i:%B' "$1"; }
-# slug maps a volume name to a bounded, filesystem-safe report slug: the hex
-# of the first 24 bytes (a short name stays legible in the filename) then 16
-# hex of the whole name's sha256 (names that share that 24-byte head - or run
-# past it - almost always differ, since the hash is of the whole name; the
-# residual chance they do not is the probabilistic collision below). A single-
-# case alphabet [0-9a-f] throughout, on purpose: a percent/underscore scheme
-# keeps letter case, so "Disk" and "disk" would collide on a case-insensitive
-# $STATE_DIR and one report would delete the other (review #41). Bounded
-# because hex of an entire long name overran the filename limit and the report
-# - the whole point - never landed (review #43); ~65 chars now, whatever the
-# name's length. It is NOT injective: two names could share a slug if their
-# 24-byte heads match AND their sha256 collides in 16 hex (64 bits) - about
-# 1 in 1.8e19, negligible but not impossible - so every slug-keyed file
-# carries its full name on line 1 and the collision detection below catches it
-# (review #50/#51). BACKUP_SLUG_HOOK is a test seam: when set to a command, it
-# computes the slug instead, so a test can force two names to one slug and
-# exercise the guard for real.
+# slug seeds a BASE identifier for a volume name: the hex of the first 24 bytes
+# (a short name stays legible in the filename) then 16 hex of the whole name's
+# sha256. A single-case alphabet [0-9a-f-] on purpose: a percent/underscore
+# scheme keeps letter case, so "Disk" and "disk" would collide on a
+# case-insensitive $STATE_DIR (review #41). Bounded, so a long name never
+# overran the filename limit and lost its report (review #43); ~65 chars. This
+# is only a FIRST CHOICE - assign_slug turns it into a guaranteed-unique,
+# persisted slug (review #52), so the base need not be injective. BACKUP_SLUG_HOOK
+# is a test seam: set to a command, it computes the base instead, so a test can
+# force two names onto one base and exercise the -N disambiguation for real.
 slug() {
   if [[ -n "${BACKUP_SLUG_HOOK:-}" ]]; then "$BACKUP_SLUG_HOOK" "$1"; return; fi
   printf '%s-%s' \
     "$(printf '%s' "$1" | head -c 24 | od -An -v -tx1 | tr -d ' \n')" \
     "$(printf '%s' "$1" | shasum -a 256 | cut -c1-16)"
+}
+
+# The slug is ASSIGNED and PERSISTED, not derived, so two names can never share
+# a slug however their bases hash (review #52). $SLUGS_FILE maps name<TAB>slug,
+# append-only. recorded_slug returns a name's stored slug (empty if none).
+recorded_slug() { [[ -f "$SLUGS_FILE" ]] && awk -F'\t' -v n="$1" '$1==n{print $2; exit}' "$SLUGS_FILE"; }
+# assign_slug returns a name's slug, assigning and recording one on first sight:
+# the base, else base-2, base-3, … until no OTHER name holds it; recorded via a
+# temp file + rename so the append is atomic. Idempotent: a recorded name is
+# returned without touching the file.
+assign_slug() {
+  local name="$1" existing base cand n tmp
+  existing=$(recorded_slug "$name"); [[ -n "$existing" ]] && { printf '%s' "$existing"; return; }
+  base=$(slug "$name"); cand="$base"; n=1
+  while [[ -n "$(awk -F'\t' -v s="$cand" -v me="$name" '$2==s && $1!=me{print $1; exit}' "$SLUGS_FILE" 2>/dev/null)" ]]; do
+    n=$((n + 1)); cand="$base-$n"
+  done
+  tmp="$SLUGS_FILE.tmp.$$"
+  { [[ -f "$SLUGS_FILE" ]] && cat "$SLUGS_FILE"; printf '%s\t%s\n' "$name" "$cand"; } > "$tmp" && mv "$tmp" "$SLUGS_FILE"
+  printf '%s' "$cand"
+}
+# check_slugs aborts (touching nothing) if the registry is corrupt - a name
+# mapped to two different slugs, or a slug to two different names. assign_slug
+# never creates either; only a hand-edit can (review #52).
+check_slugs() {
+  [[ -f "$SLUGS_FILE" ]] || return 0
+  local bad
+  bad=$(awk -F'\t' '
+    NF>=2 {
+      if (($1 in nm) && nm[$1]!=$2) nbad[$1]=1
+      if (($2 in sl) && sl[$2]!=$1) sbad[$2]=1
+      nm[$1]=$2; sl[$2]=$1
+    }
+    END { for (k in nbad) print "name \"" k "\" maps to multiple slugs"
+          for (k in sbad) print "slug \"" k "\" maps to multiple names" }
+  ' "$SLUGS_FILE")
+  [[ -z "$bad" ]] || { log "REFUSING: $SLUGS_FILE is corrupt — $bad — nothing written, pruned or recorded this tick; clear it by hand"; exit 1; }
 }
 boot_dev=$(df -P / | awk 'NR==2 {print $1}')
 scratch_dev=""; [[ -n "$SCRATCH_DIR" && -d "$SCRATCH_DIR" ]] && scratch_dev=$(df -P "$SCRATCH_DIR" | awk 'NR==2 {print $1}')
@@ -155,50 +186,52 @@ if (( dry_run )); then
   echo "  due now: ${due[*]-(none)}"
   exit 0
 fi
-# ── 1a. collision detection FIRST, over every slug-keyed output (review #51) ──
-# The slug is probabilistic, not injective, so before ANYTHING is written,
-# pruned or appended, check every output this tick would touch for a foreign
-# owner on line 1: each due disk's report and TSV, and each unknown volume's
-# marker. Any collision → log every one, touch nothing (the colliding files
-# stay), exit 1. Only a wholly collision-free tick goes on to prune and write.
+# ── 1a. assign slugs, then a defense-in-depth foreign-owner check (review #52) ─
+# Slugs are assigned and persisted (assign_slug), so distinct names never share
+# an output path - the #51 planned-collision cases cannot arise. Two guards
+# remain, run before ANYTHING is written, pruned or appended: a corrupt
+# registry aborts (check_slugs), and any existing output whose line-1 header
+# names a volume other than the one the registry assigns is a corruption/tamper
+# signal - log each, touch nothing, exit 1. Only a clean tick prunes and writes.
 mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"   # so the diagnostic can be logged; writes nothing else
+check_slugs                                       # a hand-corrupted registry aborts, touching nothing
 d=$(today)
-collided=0
+foreign=0
 for name in "${due[@]+"${due[@]}"}"; do
-  slug=$(slug "$name")
+  slug=$(assign_slug "$name")
   for f in "$STATE_DIR/gap-$slug-$d.txt" "$STATE_DIR/gap-$slug-$d.tsv"; do
     [[ -e "$f" ]] || continue
     if [[ "$(head -1 "$f" 2>/dev/null)" != "disk: $name" ]]; then
-      log "SLUG COLLISION: $f names \"$(head -1 "$f" 2>/dev/null)\", not \"disk: $name\" (slug $slug shared) — leaving it untouched; clear it by hand"
-      collided=1
+      log "FOREIGN OUTPUT: $f names \"$(head -1 "$f" 2>/dev/null)\", not \"disk: $name\" (slug $slug) — the registry or the file is corrupt; leaving it untouched"
+      foreign=1
     fi
   done
 done
 for u in "${unknown[@]+"${unknown[@]}"}"; do
-  slug=$(slug "$u")
+  slug=$(assign_slug "$u")
   marker="$STATE_DIR/backup.unknown-$slug"
   [[ -e "$marker" ]] || continue
   if [[ "$(head -1 "$marker" 2>/dev/null)" != "volume: $u" ]]; then
-    log "SLUG COLLISION: unknown-volume marker $marker names \"$(head -1 "$marker" 2>/dev/null)\", not \"volume: $u\" (slug $slug shared) — leaving it untouched; clear it by hand"
-    collided=1
+    log "FOREIGN OUTPUT: unknown-volume marker $marker names \"$(head -1 "$marker" 2>/dev/null)\", not \"volume: $u\" (slug $slug) — the registry or the file is corrupt; leaving it untouched"
+    foreign=1
   fi
 done
-(( collided )) && { log "REFUSING: slug collision(s) above — nothing written, pruned or recorded this tick"; exit 1; }
+(( foreign )) && { log "REFUSING: foreign output(s) above — nothing written, pruned or recorded this tick"; exit 1; }
 
 # ── 1b. a clean tick: log new unknown volumes, prune stale markers ────────────
 # Unknown mounted volumes get logged once, independent of whether any known
-# disk is due (review #28). The marker is keyed by the name's slug; a mount
-# generation is not observable from /Volumes (device/inode/birth can survive a
-# remount), so a re-attach is logged again only when a tick in between observed
-# the volume gone and pruned its marker (review #38; stated in README); a
-# detach/remount entirely between two ticks is not detected. Pruning is by
+# disk is due (review #28). The marker is keyed by the volume's assigned slug; a
+# mount generation is not observable from /Volumes (device/inode/birth can
+# survive a remount), so a re-attach is logged again only when a tick in between
+# observed the volume gone and pruned its marker (review #38; stated in README);
+# a detach/remount entirely between two ticks is not detected. Pruning is by
 # OWNER: a marker is stale when the volume named on its line 1 is no longer
 # mounted-and-unknown (review #50).
 for u in "${unknown[@]+"${unknown[@]}"}"; do
-  slug=$(slug "$u")
+  slug=$(assign_slug "$u")
   marker="$STATE_DIR/backup.unknown-$slug"
   [[ -f "$marker" ]] || {
-    printf 'volume: %s\n' "$u" > "$marker"   # line 1 names the volume, for the collision check
+    printf 'volume: %s\n' "$u" > "$marker"   # line 1 names the volume, for the foreign-owner check
     log "mounted volume '$u' is not in BACKUP_DISKS — ignored (add it to report it)"
   }
 done
@@ -297,12 +330,12 @@ log "manifest snapshot: $rows rows, newest copied_at $newest, NAS file modified 
 
 for name in "${due[@]}"; do
   mp="$VOLUMES_DIR/$name"; id=$(attach_id "$mp"); d=$(today)
-  slug=$(slug "$name")   # bounded hex+sha, case-safe, any name length (review #38/#41/#43)
+  slug=$(assign_slug "$name")   # the volume's assigned, persisted slug (review #52)
   report="$STATE_DIR/gap-$slug-$d.txt"; tsv="$STATE_DIR/gap-$slug-$d.tsv"; tsvtmp="$tsv.building"
-  # Phase 1a proved no foreign owner sits at this disk's slug, so the only file
-  # that can be here is our own from an earlier tick today; a --force re-report
-  # replaces it. Line 1 records the full disk name so the next tick's collision
-  # detection can prove ownership (review #43/#50/#51).
+  # The assigned slug is this disk's alone, and Phase 1a proved no foreign owner
+  # sits at it, so the only file that can be here is our own from an earlier tick
+  # today; a --force re-report replaces it. Line 1 records the full disk name so
+  # the next tick's foreign-owner check can prove ownership (review #43/#50/#52).
   header="disk: $name"
   rm -f "$report" "$tsv" "$tsvtmp"   # our own dated output; a --force re-report replaces it
   log "GAP $name: report starting ($mp, attach $id)"
