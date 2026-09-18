@@ -30,7 +30,7 @@ runs them, so `go test ./...` is still the one command.
 |---|---|
 | `cmd/vault/main.go` | Hand-rolled arg parsing (`parseScanFlags` style — no flag frameworks), one `runX` per command, `die()` for fatal errors |
 | `internal/manifest` | SQLite schema + queries. Single writer per config dir (WAL, `busy_timeout`). Rows keyed `(source_disk, source_path)` |
-| `internal/scan` | Walk source, diff against manifest and destination → `Plan{ToCopy, ToRecopy, SkipCount, Deduped, DstCollisions, VerifiedChanged, Retouched}` |
+| `internal/scan` | Walk source, diff against manifest and destination → `Plan{ToCopy, ToRecopy, SkipCount, Deduped, DstCollisions, VerifiedChanged, Retouched, DstOwned}` |
 | `internal/copy` | One file: stream + sha256 → `<dst>.vault-partial`, fsync, chtimes, rename. A failed copy leaves no partial |
 | `internal/verify` | Re-hash destination rows → `verified` / `mismatch`; missing rows counted, not touched |
 | `internal/certify` | Refuses unless every row is `verified`; signs with `$VAULT_CONFIG/key.pem` (created on first use, mode 600) |
@@ -58,6 +58,18 @@ with `--on-collision rename-mtime-year` and they land beside the originals.
 Same size with a new mtime is hashed first: identical content is
 `Retouched` and skipped like an unchanged file, no row written.
 
+That check is by source row; the second one is by **destination**. Before
+a task is admitted to `ToCopy` or `ToRecopy`, both paths `copy.File` would
+write — the final `dest_path` and its `.vault-partial` staging name — are
+looked up in the manifest (`VerifiedOwner`): if a `verified` row of **any**
+disk records that path, the task goes to `DstOwned` and is never written,
+under any policy. This is what stops a `deduped` row's recopy (its own
+route lands on another disk's certified file), a new file whose staging
+name is an archived file, and a new file at a verified row's *missing*
+destination. `dest_path` is relative to a root the manifest does not
+record, so a hit from another disk under another root is a false refusal
+— accepted: it is the safe direction, and the output names the owning row.
+
 The one invariant: the manifest never silently holds content it has no row
 for, and never claims a row it cannot back with a hash.
 
@@ -84,7 +96,7 @@ command:
 | Command | Exits 1 when | Exits 0 even though |
 |---|---|---|
 | `scan` | scan error (unreadable source, cancelled) | collisions/recopies/verified-changed are predicted — it only reports |
-| `copy` | run finished `INCOMPLETE:` — any file failed, any unresolved destination collision, any file whose verified archive copy holds different content (kept, never overwritten), any intra-run duplicate left unarchived (stderr names which); interrupted between files; `die` on scan or manifest-write error | no-op (including only retouched files), `--dry-run` (even with predicted collisions or verified-changed files) |
+| `copy` | run finished `INCOMPLETE:` — any file failed, any unresolved destination collision, any file whose verified archive copy holds different content (kept, never overwritten), any file whose destination or staging path a verified row owns, any intra-run duplicate left unarchived (stderr names which); interrupted between files; `die` on scan or manifest-write error | no-op (including only retouched files), `--dry-run` (even with predicted collisions, verified-changed or owned files). `--dry-run` writes **no archive file and no manifest row**; it does still create the config dir and open/initialize `manifest.db` (pre-existing, every command does — B31) |
 | `verify` | any mismatch, missing, or read error; `die` on cancel | — |
 | `certify` | any row not `verified` (`Cannot certify: …`); no rows for the disk; key/sign/marshal/write error | — |
 | `inventory` | `die` on walk error | per-file hash errors — counted in `Errors:`, exit 0 |
@@ -119,8 +131,10 @@ number nobody can recompute is a finding, not a fact.
 - Never write to a source disk. Containers mount `/sources` read-only.
 - Atomic destination writes only (`.vault-partial` → fsync → rename).
 - A `verified` destination is never overwritten. Not by recopy, not by any
-  collision policy. The check lives in `scan.Build`, so `scan` and `copy`
-  agree.
+  collision policy, not through another row's route, not as a staging file.
+  Both checks — by source row and by destination path — live in
+  `scan.Build`, so `scan` and `copy` agree and every write `copy.File`
+  makes was admitted there.
 - One `vault` process per config dir; read-only queries need `?mode=ro`.
 - Nothing secret in the repo. `vault-config/` is gitignored.
 - Comments explain *why*, not what. Match the surrounding style; no new frameworks.
