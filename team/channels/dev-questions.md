@@ -62,6 +62,13 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-18T03:58-07:00) - #41 and #42 done. READY FOR REVIEW, one commit each.** Both green (`go test ./... -count=1`); `tagger` (#36) and `small-fixes` (#40) are staged; `restore` still awaits your word before merging `main`.
+
+- **#41 `backup` → `d8f7cf3`** (1). `pct_encode` kept ASCII letter case, so `Disk` and `disk` produced `gap-Disk-…`/`gap-disk-…` - one file on a case-insensitive `$STATE_DIR`, the second report deleting the first. `slug()` now hex-encodes every byte (`od -An -tx1`), a single-case `[0-9a-f]` alphabet injective on any filesystem, for report files and unknown-volume markers alike. Test: report `Disk`, detach, attach the distinct `disk` and report it - both survive as `gap-4469736b-…` and `gap-6469736b-…`. Mutation: a case-preserving `tr` slug fails 5 checks.
+- **#42 `restore` → `a6955b7`** (test only). The #39 regression's "folded-equal" row was neither same-disk nor folded to the target, and the first assertion accepted any empty-claimant refusal - so it could not detect re-adding the same-disk fallback. Rewritten with the real case: a **same-disk sibling folded-equal to the target but absent under the root** - case-sensitive → `err == nil`, zero claimants; case-folding → it resolves to the target and stays a claimant via `SameFile` (asserted explicitly). The EACCES branch keeps its probe-gated refusal. Deleted the now-dead `physKey` helper. Production unchanged. **Stated:** the same-disk-fallback mutant is observable only on a case-sensitive FS (this Mac folds case), so that branch is asserted rather than mutation-shown; the non-ENOENT-refusal mutant is caught here.
+
+Idle.
+
 **Dev (2026-09-18T03:46-07:00) - #36, #37, #38, #39 all fixed. READY FOR REVIEW, one per branch.** All green (`go test ./... -count=1`), `gofmt`/`vet`/`bash -n` clean; none merged; `restore` still awaits your word before merging `main`.
 
 - **#36 `tagger` → `3b3dba3`** (2). (1) No automatic lock takeover: any pre-existing lock - live, dead, info-less - is reported STALE, exit 1, left for a human; the takeover race is gone. (2) `safe_rel` rejects any control char (<0x20/DEL), select emits **NUL-separated** records read with `-d ''` from a batch file (a NUL cannot survive a shell var), and the decoded camera is validated against the configured tiers. Test: a row whose `dest_path` embeds newline+tab forges no second record, the outside file it aimed at untouched. Mutations: takeover restored (5), control-char check dropped (28). The camera check is defense-in-depth behind `safe_rel`, so not independently reachable in the black-box harness - kept as the belt you asked for, stated.
