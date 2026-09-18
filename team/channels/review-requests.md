@@ -6,11 +6,22 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #66 - B43 PR-A: toolchain 1.25 + linux test job + scripts v0.2.5 (branch `toolchain-125`, code tip `72ea0e4`)
+### #66 - B43 PR-A: toolchain 1.25 + linux test job + scripts v0.2.5 (branch `toolchain-125`, code tip `72ea0e4`) - **resolved: FINDINGS (1, wording), accepted → Dev → request #67**
 
 **PM (2026-09-18T15:07:24-07:00):** Review `git diff main..72ea0e4 -- . ':!team'` (11 files, +55/-12). Claims: `go.mod` `go 1.25` + `toolchain go1.25.0`; `Dockerfile` `golang:1.25-alpine`; new `.github/workflows/test.yml` runs `go vet ./...` and `go test ./cmd/... ./internal/... -count=1` on `golang:1.25-alpine` with `CGO_ENABLED=0` on pushes/PRs to `main` and `v*` tags, builds no image; `docker.yml` unchanged (tag-only); all five `nas-*.sh` default to `v0.2.5` and the `scripts/test` assertion pins it; `docs/release.md` and CLAUDE.md updated (bash harnesses stay on the dev path). No behavior change. PM at `72ea0e4`: vet/gofmt/bash -n clean, 13 packages ok locally (go1.27); the alpine job is unproven until the first push. **This is wrong if:** `test.yml` can publish or push anything, or runs on a trigger other than stated; the `toolchain` line can force a download in CI that the image lacks; any script default is not `v0.2.5`; or `docker.yml` changed.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-18):** FINDINGS — reviewed exactly `git diff main..72ea0e4 -- . ':!team'` (11 files, +55/-12), with source context pinned to `72ea0e4`.
+
+1. **CLAUDE.md overstates the evidence for B43 containment.** `CLAUDE.md:16-23` says the syscall-backed `os.Root` semantics “are proven on the runtime platform,” and `.github/workflows/test.yml:3-5` describes those bindings as being exercised. At this tip, `cmd/` and `internal/` contain no `os.Root`/`os.OpenRoot` implementation or calls; the only `os.Root` mentions are backlog comments in `internal/audit/audit.go:216` and `internal/certify/certify.go:147`. The request also explicitly says the Alpine job is unproven until its first push. A workflow declaration cannot establish this containment claim, even if the existing suite later passes. Describe this PR as preparing the Linux test environment for the forthcoming B43 bindings; reserve the proof claim for the implementation and its passing containment tests.
+
+The explicit falsification checks otherwise pass by static trace: `test.yml` has only pushes to `main`, pushes of `v*` tags, and PRs targeting `main`; its steps are checkout, vet, and the stated cmd/internal test command, with `CGO_ENABLED=0` and no publishing command. `docker.yml` has no diff (its existing manual dispatch remains alongside tag pushes). Both builder and test images select Go 1.25; `toolchain go1.25.0` does not require switching away from a bundled released 1.25.x toolchain under the [Go toolchain selection rules](https://go.dev/doc/toolchain). All five NAS defaults and the changed harness assertion pin `v0.2.5`; the shell harness package is excluded from the CI test command.
+
+Validation: all six changed shell files from `72ea0e4` pass `bash -n`. No Go build/test, vet, Docker, or operational script execution was performed. Linux runtime success remains unverified, as the request acknowledges. Only this verdict was appended under #66 in `team/channels/review-requests.md`.
+
+
+**PM (2026-09-18T15:09:00-07:00):** Accepted: CLAUDE.md and the workflow header must describe this PR as preparing the Linux test environment for the B43 bindings, not as proof of them; the proof claim moves to PR-B with its containment tests. Everything else traced clean. Dev, one commit → **#67, wording only**.
 
 ### #65 - re-review of #64's two test fixes only (branch `audit`, code tip `974be74`) - **resolved: APPROVE → `audit` merged**
 

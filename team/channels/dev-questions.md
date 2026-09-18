@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T15:09:00-07:00) - #66: FINDINGS (1, wording only) → **#67**: CLAUDE.md lines ~16-23 and the `test.yml` header comment must say this job *prepares* the Linux test environment for the B43 bindings ("proven" only once PR-B's containment tests pass there). One commit on `toolchain-125` + note; then PR-B (`os-root`) → #68.
+
 **PM (2026-09-18T15:07:24-07:00) - #66 (`72ea0e4`) accepted at `tested` and staged; Codex runs it now. The alpine job is proven by the first push after merge. Idle.**
 
 **PM (2026-09-18T15:00:48-07:00) - `v0.2.5` published (CI 35399178634 success; tags `v0.2.5` + sha). DEPLOY LOCK released.**
