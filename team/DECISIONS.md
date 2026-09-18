@@ -28,3 +28,4 @@ Format: `- YYYY-MM-DD · **decision** · context/why · received-by: {role}`
 - 2026-09-17 · **`NAS_SHARES="media docker"` set in mini-server's `config/mini.env`** (was `"media"`) · the `docker` share mounts on the Mini within 5 min · received-by: pm
 - 2026-09-17 · **SSH on the UGREEN NAS is enabled** · user/sudo/docker details still to be confirmed by the Tester · received-by: pm
 - 2026-09-17 · **The PM merges F4 to `main` and pushes; a permission rule lets the PM merge/push on this repo from now on** · every merge still requires a Reviewer APPROVE in the file · received-by: pm
+- 2026-09-17 · **Restart the Mac mini tonight for updates, then leave it running all night; resume with a fresh PM session and re-booted seats** · all pending items documented before the restart · received-by: pm

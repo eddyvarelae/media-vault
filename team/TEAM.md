@@ -71,12 +71,14 @@ Branch policy: Dev works in its own worktree (`~/Projects/media-vault-dev`) on a
 4. Skim `BACKLOG.md` and the `DECISIONS.md` tail.
 5. Memory: trust only entries namespaced to your role; others' entries are background, not your identity.
 
-## Current state (2026-09-16 - PM-verified, don't re-derive)
+## Current state (2026-09-17 18:30 - PM-verified, don't re-derive)
 
-- `main` tip = `7cca025` = **F4 merged** (2026-09-17, Reviewer APPROVE #1); builds and vets clean. Still zero test files on `main` - B3 is on `tests-and-pinning`, review #2 returned FINDINGS, Dev on rev 3 fixes.
-- `verify-incremental` (`f964b60`) is merged; branch can be deleted after push.
-- Production: 6 camera disks in the NAS manifest (`media-djiflip`, `media-djimini2`, `media-iphone`, `media-sonya6700`, `media-sonyzve10`, `media-gopro`), 3.3 TiB, 195 `copied` rows awaiting verification (per handoff), 831 collision-renames. Full verify ≈ 11 h; F4 is what makes an incremental pass possible.
-- Source SSDs: `tars`, `kipp`, one unnamed, `case` (certified, unwiped) per mini-server's records - Tester confirms (B7). A 5th is now "Scratch1" on the Mini.
-- NAS: DXP2800 at `192.168.1.167`, SMB user `figmaboi`, `~/mounts/media` mounted. `~/mounts/docker` pending Eddy (B2a). SSH never existed (B2b, Eddy).
-- **Scope grew 2026-09-17:** every scheduled batch against the archive is ours - the nightly tagger (mini-server `dev/wo1-run-tagging`, tested at `d9d677d`, not merged anywhere) transfers in as B17.
-- Seats booted 2026-09-16: PM (this), Dev (`~/Projects/media-vault-dev`), Tester (detached checkout `~/Projects/media-vault-tester`). Reviewer = `codex exec`, run by the PM.
+**Resuming after a restart? Read `team/archive/2026-09-17-pm-handoff.md` first - it has the boot lines and the in-flight table.**
+
+- `main` tip = see `git log -1`; last code merge = `7cca025` (**F4 merged**, Reviewer APPROVE #1). Builds and vets clean. Zero test files on `main` until review #3 lands.
+- `tests-and-pinning` (Dev's worktree `~/Projects/media-vault-dev`): review #2 = FINDINGS (5); Dev rev 3 in progress - its last channel note says where it stopped.
+- Tester (`~/Projects/media-vault-tester`, detached): B2/B7 in progress from a manifest snapshot; last item says where it stopped.
+- NAS: DXP2800 `192.168.1.167`, SMB `figmaboi`; `~/mounts/media` and `~/mounts/docker` mount via `com.varela.mount-nas`. SSH enabled 2026-09-17, details unconfirmed.
+- Scope since 2026-09-17: every scheduled batch against the archive is ours (nightly tagger = B17, after rev 3).
+- Source SSDs: `tars`, `kipp`, `case` (certified, unwiped), plus `noahsarc`? - Tester confirms (B7). A 5th is now "Scratch1".
+- Reviewer = `codex exec`, run by the PM. Seats boot in visible Terminal windows with `--remote-control`; nudges need a trailing empty `do script`.

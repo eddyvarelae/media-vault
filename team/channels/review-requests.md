@@ -6,6 +6,22 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #3 - re-review of #2's fixes only (branch `tests-and-pinning`, code tip `c1f7fbd`)
+
+**PM (2026-09-17):** Check the fixes, not the earlier verdict. Diff `git diff 14f4e2c..c1f7fbd` (7 commits; Dev's mapping in `team/channels/dev-questions.md`, Dev note 2026-09-17T18:21 in the `~/Projects/media-vault-dev` worktree). PM independently at `c1f7fbd`: `go vet` clean, `go test ./... -count=1` all packages ok, `gofmt -l` empty.
+
+**Claims, one per #2 finding:**
+1. (#2-1) A shared guard refuses to run when the *resolved* temp root is under `/volume1` or `/mnt`, applied in all four writing test packages (`cmd/vault`, `internal/certify`, `internal/scan`, `internal/copy`), symlink-resolved.
+2. (#2-2) The round-trip test reopens the manifest after `certify` and asserts rows (path, hash, status, `verified_at`); the missing-file case asserts the row is unchanged.
+3. (#2-3) A shell test runs `nas-tars-copy-all.sh` with a stubbed `docker` on `PATH` and a temp `VAULT_LOG`, asserting `FAILED` is logged; it runs under `go test ./...`.
+4. (#2-4) `CLAUDE.md` no longer claims a full-sweep date; it describes the newest single-row `verified_at`.
+5. (#2-5) The exit-code table matches `cmd/vault/main.go`: 2 = wrong positional arity only; 1 = `INCOMPLETE:` runs, every `die`, and interrupt.
+6. (rev-2 items) CI publishes on `v*` tags and manual dispatch only, no `:latest`; `ugos.md` no longer says `latest`; gofmt commit is whitespace-only; README steps 3-4 are present tense.
+
+**This is wrong if:** any writing test package lacks the guard or the guard compares unresolved paths; the shell test can pass with the `FAILED` branch removed; a script still hard-codes `/volume1/docker/tars-copy.log` without the `VAULT_LOG` override; `docker.yml` still has a `branches:` push trigger or a `latest` tag line; the gofmt commit changes any non-whitespace token; any claim in `CLAUDE.md`'s exit table contradicts a `die`/`os.Exit` site in `main.go`.
+
+Verdict goes below this line.
+
 ### #2 - B3/B4/B5: tests, CLAUDE.md, image-tag pinning (branch `tests-and-pinning`, code tip `14f4e2c`)
 
 **PM (2026-09-17):** Review `git diff 5a92286..14f4e2c` (merge-base with `main` is `5a92286`; ignore `team/` ancestry noise). 12 files, +1043: `cmd/vault/main.go`, four new `_test.go` files (909 lines), `CLAUDE.md`, `docs/release.md`, five `scripts/*.sh`. Dev's evidence note with the full claim list is at `team/channels/dev-questions.md` in the `~/Projects/media-vault-dev` worktree (Dev, 2026-09-16T12:18). PM independently ran `go vet ./...` and `go test ./... -count=1` at `a2da6a3` (same code as `14f4e2c`): 4 packages ok. You may run `go build`, `go vet`, `go test ./... -count=1` and `bash -n scripts/*.sh` in a scratch worktree (`git worktree add --detach /tmp/mv-review 14f4e2c`, `git worktree remove /tmp/mv-review` after) - read-only with respect to the repo.

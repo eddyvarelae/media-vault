@@ -44,6 +44,60 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-17T18:31-07:00) - STOP for restart.** Nothing in flight: all rev-3 work is committed (code tip `c1f7fbd`, note `f764a75`), worktree clean apart from the PM's own unstaged `BACKLOG.md`/`review-requests.md`. Stopped at: READY FOR REVIEW, waiting on review #3. Next: whatever #3 returns, else B9 (F4 tests) on a fresh branch once `verify-incremental` is on `main`.
+
+**Dev (2026-09-17T18:21-07:00) - rev 3 done. READY FOR REVIEW.** **Code tip `c1f7fbd`** on `tests-and-pinning` - seven new commits on top of `14f4e2c`/`a2da6a3`, no rewrite (`git merge-base --is-ancestor 14f4e2c HEAD` holds). Worktree live but idle. **Rung: `tested`.** `internal/verify` and `verify-incremental` untouched (one local mutation of `verify.go` for a check, reverted, `git status` clean there). The PM's uncommitted `team/BACKLOG.md` / `review-requests.md` edits sit in my worktree unstaged - PM paths, left alone.
+
+Finding → commit, in order:
+1. **F1 → `71bb5c5`** - chose the **shared package** `internal/testguard` over four copied `TestMain`s: one resolver to review, one test of the guard, nothing to drift. `Require()` resolves `os.TempDir()` (`Abs` + `EvalSymlinks`; a dangling symlink followed by `Readlink`; a non-existent tail re-appended to its longest existing ancestor) and exits 1 if under `/volume1` or `/mnt` (roots compared in literal and resolved spellings). Called first thing in `TestMain` of `cmd/vault`, `internal/{certify,scan,copy}` (+ `testguard` itself, `scripts/test`). `cmd/vault`'s private guard and `safeDir` are gone. **Tested safely** via `CheckUnder(dir, roots)` against a fake root under `t.TempDir()`: exact root, child, symlink, relative symlink, dangling symlink, non-existent tail, `..` spelling all refuse; sibling, `volume10`, and a deeper dir merely *named* `volume1` pass (root-anchored, not substring - which is also why the PM's "symlink to a temp dir named `.../volume1/...`" must NOT trip the real guard). CLAUDE.md test paragraph now states the suite-wide mechanism.
+2. **F2 → `55a28a9`** - `rowsOf()` reopens the manifest fresh at each stage. Asserted: rows after copy (dest, sha256-of-content, size, `copied`, `verified_at` 0); after verify (all `verified`, `verified_at` set, sha/`copied_at` unchanged); **across certify: `reflect.DeepEqual` before/after**, and every cert file ref = its row on dest/sha/size/`verified_at`, counts equal; after recopy (new sha + mtime, `copied`, `verified_at` 0, the two other rows DeepEqual their prior state, re-verify advances `verified_at`); after corruption (row keeps the sha the file *had*, `mismatch`, stamped; others still `verified`); **missing file: row snapshot DeepEqual after**. Mutation: making verify's missing branch call `MarkMismatch` fails `missing-file verify touched the row`.
+3. **F3 → `15ccdd5`** - `nas-tars-copy-all.sh`: `LOG="${VAULT_LOG:-/volume1/docker/tars-copy.log}"`, nothing else (the test greps for that exact default line). `scripts/test/nas-tars-copy-all.sh` runs the real script with a `docker` stub on `PATH` that records argv and exits 1 / 0: stub-1 → all four cards log `<card> FAILED`, none `done`, exactly 4 FAILED lines, pass runs to the end, stub saw the real `copy media-djiflip /usb/sdc1/DJIFlip /volume1/media/DJIFlip … --on-collision rename-mtime-year` argv (so it was the thing invoked); stub-0 → four `done`, zero FAILED. `scripts/test/scripts_test.go` runs it under `go test ./...` (guarded, `TMPDIR=t.TempDir()`). Mutation: `FAILED`→`done` in the script fails 8 checks.
+4. **F4 → `50fc0d2`** - CLAUDE.md "announce" rule: newest **single-row** `verified_at`, labeled as one row's date, explicitly not a full sweep; "no command records when a disk was last fully verified; per-row timestamps cannot prove it, so never claim it."
+5. **F5 → `50fc0d2`** - exit-code contract rewritten from every `os.Exit`/`die` site: **2** = wrong positional arity / no or unknown command, nothing else; **1** = every `die` (bad flag value or missing value, config dir / manifest open, scan/plan, manifest write, sign/marshal/write, empty manifest) + interrupt + per-command conditions; flags parse *before* arity for `scan`/`copy`/`move` so bad-flag-with-wrong-arity is 1. One table, all 15 commands, with an honest "exits 0 even though" column - see "noticed" below.
+6. **Former rev 2 → `d007744` (B16), `d146091` (B15), `c1f7fbd` (B14).** B16: `on:` block below; `type=ref,event=branch` and `type=raw,value=latest` dropped, `sha-` + semver kept; `ugos.md` two `latest` → `v0.2.0` + one sentence on where the current tag lives; `docs/release.md` step 1-2 and CLAUDE.md deploy line updated in the same commit; only remaining `latest` in the repo is `runs-on: ubuntu-latest`. B15: `git diff -w` empty for the three files. B14: steps 3-4 present tense, `--only-unverified` example with the not-an-integrity-sweep warning; also dropped the "(soon)" in "Why not rsync" - same stale fact, same doc, saying so here.
+
+```yaml
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+```
+
+Evidence (Mac mini, `2026-09-17T18:20:23-07:00`, go1.27.0 darwin/arm64):
+```
+$ gofmt -l .                      → (empty)
+$ go vet ./...                    → clean
+$ bash -n scripts/*.sh scripts/test/*.sh   → clean
+$ go test ./... -count=1
+ok  	github.com/eddyvarelae/media-vault/cmd/vault	0.467s
+ok  	github.com/eddyvarelae/media-vault/internal/certify	0.489s
+ok  	github.com/eddyvarelae/media-vault/internal/copy	0.677s
+ok  	github.com/eddyvarelae/media-vault/internal/scan	1.045s
+ok  	github.com/eddyvarelae/media-vault/internal/testguard	0.845s
+ok  	github.com/eddyvarelae/media-vault/scripts/test	1.474s
+(dedup, importer, inventory, manifest, move, verify: no test files)
+$ CGO_ENABLED=0 go test ./... -count=1     → same 6 ok
+44 PASS lines (tests + subtests)
+```
+
+Guard refusal, from compiled test binaries (`go test -c`) run by hand - nothing created, `/volume1` and `/mnt` still absent on this host afterwards:
+```
+$ TMPDIR=/volume1/review-tmp ./vault.test        (same for certify/scan/copy .test)
+testguard: refusing to run: temp dir "/volume1/review-tmp" resolves to "/volume1/review-tmp", under forbidden root /volume1
+exit 1
+$ TMPDIR=$SCRATCH/innocent-link ./copy.test      (innocent-link -> /volume1/review-tmp, dangling)
+testguard: refusing to run: temp dir ".../scratchpad/guard/innocent-link" resolves to "/volume1/review-tmp", under forbidden root /volume1
+exit 1
+$ cd /usr && TMPDIR=../mnt/@usb/x ./copy.test
+testguard: refusing to run: temp dir "../mnt/@usb/x" resolves to "/mnt/@usb/x", under forbidden root /mnt
+exit 1
+$ TMPDIR=$SCRATCH/guard/ok ./copy.test           → PASS
+```
+
+Noticed, not acted on (PM to triage):
+- While tracing F5: `inventory`, `move`, `symlinks`/`hardlinks`, `import-tags` **exit 0 with per-file errors** (counted in the summary only). Documented as-is in CLAUDE.md's last column. `nas-verify-certify-all.sh` doesn't call them, `nas-inventory.sh` does call `inventory` - a walk-level error is 1, a per-file hash error is 0. Same class of gap F2/F3 closed for `copy`; proposing a backlog item, not touching it.
+- `scan`'s F5 row is honest but thin: it has no non-zero for "collisions predicted". By design (it only reports); noting so nobody reads the table as a bug list.
+
 **Dev (2026-09-16T12:18-07:00) - rev 1 done. READY FOR REVIEW.** Worktree `~/Projects/media-vault-dev` still live but idle; **code tip `14f4e2c`** on `tests-and-pinning` (3 commits off `main` @ `5a92286`, fast-forwardable; this note is one further commit touching only `team/`). Not pushed - PM's call. **Rung: `tested`** (author ceiling). `verify-incremental` and `internal/verify` untouched.
 
 Commits, in work-order order:
