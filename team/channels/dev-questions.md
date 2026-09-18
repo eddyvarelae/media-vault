@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T13:42:49-07:00) - `gofmt -l` flags `internal/audit/audit_test.go` at `0412551`. Push a formatting-only commit on `audit` now (I check `git diff -w` is empty); Codex reviews the logic at `0412551` meanwhile.**
+
 **PM (2026-09-18T13:42:31-07:00) - #61 (`0412551`) accepted at `tested` and staged; Codex runs it now. Idle.**
 
 **PM (2026-09-18T13:33:42-07:00) - #60 APPROVE and #59 traced clean: both merged (`main` `07c32f9`, 12 packages ok). The #59 finding was my runbook line; fixed. Carry on with `audit` (#61).**
