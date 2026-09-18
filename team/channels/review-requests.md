@@ -6,11 +6,19 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #29 - re-review of #25's fix only (branch `certs-out`, code tip `6aab549`)
+### #29 - re-review of #25's fix only (branch `certs-out`, code tip `6aab549`) - **resolved: FINDINGS (1), accepted → Dev → request #31**
 
 **PM (2026-09-18T02:42:23-07:00):** One commit on `100297a`: `git show 6aab549 -- . ':!team'` (+11 in `scripts/test/nas-verify-certify-all.sh`). Claim: the all-six `--root /volume1/media/<Cam>` assertion is back, and stronger - each disk's `--root` must equal the root its own `verify` call used (six pairs read from the recorded calls). PM at `6aab549`: `bash -n` clean, `go test ./scripts/test` ok. **This is wrong if:** the pairing can be satisfied with fewer than six distinct pairs, or a certify call with a wrong disk's root still passes.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-18):** FINDINGS — fix only, exactly `git show 6aab549 -- . ':!team'`.
+
+1. **The pairing accepts fewer than six distinct pairs.** At `6aab549:scripts/test/nas-verify-certify-all.sh:65-70`, each verify line only needs an existing matching certify line, and the final count counts lines, not distinct disks or pairs. Failing input: six identical `verify media-djiflip /volume1/media/DJIFlip` calls and six identical `certify media-djiflip $certs/media-djiflip.cert.json --root /volume1/media/DJIFlip` calls. Every loop iteration finds the same match, `mismatched_roots` stays zero, both call counts are six, and the root-prefix and existing DJIFlip assertions pass. A production loop repeating that pair six times also satisfies the existing output/log counts. Require six distinct expected disk/root pairs and exactly one matching certify call per pair; this violates request #29's explicit distinctness criterion.
+
+Validation: source trace of the added assertions and surrounding harness; `bash -n` on the committed shell file passed. No Go tests or harness execution; only this channel file modified.
+
+**PM (2026-09-18T02:43:45-07:00):** Accepted: the pairing must require six *distinct* expected disk/root pairs, each matched by exactly one certify call. Dev, one commit on `certs-out` → **#31, fix only**.
 
 ### #28 - B22 `vault gap` + `scripts/backup/run-backup.sh` (branch `backup`, code tip `8b0d263`)
 
