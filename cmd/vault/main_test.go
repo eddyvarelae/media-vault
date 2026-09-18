@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -1132,5 +1133,110 @@ func TestRepairDest(t *testing.T) {
 	}
 	if out, _, code := vault(t, cfg, "repair-dest", "nobody", dst); code != 0 || !strings.Contains(out, "0 rows with a dest_path") {
 		t.Errorf("unknown disk: exit %d\n%s", code, out)
+	}
+}
+
+// TestVerifyOnlyUnverified is the F4 "done when" list through main(): the
+// flag anywhere among the positionals, wrong arity still 2, the skip
+// announced with the newest single-row date (labeled as such), a bare
+// verify still reading everything, and the incremental pass as the route
+// to certify.
+func TestVerifyOnlyUnverified(t *testing.T) {
+	cfg, src, dst := t.TempDir(), t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(src, "a.mov"), "clip a", t0)
+	writeFile(t, filepath.Join(src, "b.mov"), "clip bee", t0)
+	if _, _, code := vault(t, cfg, "copy", "cam", src, dst); code != 0 {
+		t.Fatalf("copy: exit %d", code)
+	}
+	// First pass with the flag on an all-copied disk: a full sweep, and
+	// it says so.
+	out, _, code := vault(t, cfg, "--only-unverified", "cam", dst)
+	if code != 2 {
+		t.Errorf("flag before the command name is not a command: exit %d, want 2", code)
+	}
+	out, _, code = vault(t, cfg, "verify", "--only-unverified", "cam", dst)
+	if code != 0 || !strings.Contains(out, "(no verified rows to skip — this is a full sweep)") || !strings.Contains(out, "Verified: 2   Mismatch: 0   Missing: 0   Errors: 0   Bytes read: 14 B") {
+		t.Fatalf("first incremental pass: exit %d\n%s", code, out)
+	}
+	first := rowsOf(t, cfg, "cam")
+	newest := first["a.mov"].VerifiedAt
+	if first["b.mov"].VerifiedAt > newest {
+		newest = first["b.mov"].VerifiedAt
+	}
+
+	// New files arrive one at a time; each incremental pass reads only the
+	// new one, and names what it skipped with the newest single row's
+	// date, not a sweep date. The flag is accepted after or between the
+	// positionals.
+	writeFile(t, filepath.Join(dst, "a.mov"), "clip A", t0) // rot under a verified row, invisible to the incremental pass
+	skipped := 2
+	for i, args := range [][]string{
+		{"verify", "cam", dst, "--only-unverified"},
+		{"verify", "cam", "--only-unverified", dst},
+	} {
+		name := []string{"c.mov", "d.mov"}[i]
+		writeFile(t, filepath.Join(src, name), "clip "+name[:1], t0)
+		if _, _, code := vault(t, cfg, "copy", "cam", src, dst); code != 0 {
+			t.Fatalf("copy %s: exit %d", name, code)
+		}
+		out, _, code := vault(t, cfg, args...)
+		if code != 0 || !strings.Contains(out, "Verified: 1   Mismatch: 0   Missing: 0   Errors: 0   Bytes read: 6 B") {
+			t.Fatalf("%v: exit %d\n%s", args, code, out)
+		}
+		for _, want := range []string{
+			"Re-hashing ONLY unverified rows",
+			fmt.Sprintf("skipping %d already-verified row(s) — NOT an integrity check.", skipped),
+			"newest verified row: " + time.Unix(0, newest).Format("2006-01-02 15:04") + " (the newest single row, not a full-sweep date)",
+			"verified   " + name,
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%v: output missing %q:\n%s", args, want, out)
+			}
+		}
+		if strings.Contains(out, "a.mov") || strings.Contains(out, "b.mov") {
+			t.Errorf("%v: a verified row was listed:\n%s", args, out)
+		}
+		skipped++
+		rows := rowsOf(t, cfg, "cam")
+		for _, src := range []string{"a.mov", "b.mov"} {
+			if !reflect.DeepEqual(rows[src], first[src]) {
+				t.Errorf("incremental pass touched verified row %s", src)
+			}
+		}
+		if rows[name].VerifiedAt > newest {
+			newest = rows[name].VerifiedAt
+		}
+	}
+	// The incremental pass promoted the last row: certify succeeds - and
+	// attests a.mov's old hash, which is the documented cost of skipping.
+	if _, _, code := vault(t, cfg, "certify", "cam"); code != 0 {
+		t.Errorf("certify after the incremental pass: exit %d, want 0", code)
+	}
+
+	// Arity is still enforced with the flag present.
+	if _, _, code := vault(t, cfg, "verify", "--only-unverified", "cam"); code != 2 {
+		t.Errorf("wrong arity with the flag: exit %d, want 2", code)
+	}
+	if _, _, code := vault(t, cfg, "verify", "cam", dst, "extra", "--only-unverified"); code != 2 {
+		t.Errorf("three positionals with the flag: exit %d, want 2", code)
+	}
+
+	// A bare verify reads all four and finds the rot.
+	out, _, code = vault(t, cfg, "verify", "cam", dst)
+	if code != 1 || !strings.Contains(out, "Re-hashing destination files") || !strings.Contains(out, "Verified: 3   Mismatch: 1   Missing: 0   Errors: 0   Bytes read: 26 B") || !strings.Contains(out, "MISMATCH   a.mov") {
+		t.Fatalf("bare verify: exit %d\n%s", code, out)
+	}
+	if strings.Contains(out, "skipping") {
+		t.Errorf("bare verify claimed to skip something:\n%s", out)
+	}
+	// The mismatch row is in the next incremental pass (it is not
+	// verified), so a fixed file gets promoted without a full sweep.
+	writeFile(t, filepath.Join(dst, "a.mov"), "clip a", t0)
+	out, _, code = vault(t, cfg, "verify", "cam", dst, "--only-unverified")
+	if code != 0 || !strings.Contains(out, "skipping 3 already-verified row(s)") || !strings.Contains(out, "verified   a.mov") || !strings.Contains(out, "Bytes read: 6 B") {
+		t.Fatalf("incremental pass over a mismatch row: exit %d\n%s", code, out)
+	}
+	if _, _, code := vault(t, cfg, "certify", "cam"); code != 0 {
+		t.Errorf("certify after repairing the mismatch incrementally: exit %d", code)
 	}
 }
