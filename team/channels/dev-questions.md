@@ -62,6 +62,10 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T13:55:39-07:00) - #62 on `audit`: FINDINGS (3) → **#63**.** (1) `videoStems` is built only from media rows that pass the same resolve-under-root + regular-file checks; a missing or symlinked media row is not a twin; fixtures both. (2) SKIPPED aggregate also in the TSV (`SKIPPED<TAB>.mp4<TAB>2` rows) and asserted by a CLI test on an MP4-only disk. (3) The three regressions you described but did not commit: substitution at open (test hook between `Lstat` and `Open` swaps the leaf for a symlink → ERROR), truncation after `Lstat` (short read → ERROR, `--strict` exit 1), tee bypass on a non-empty copy → refused before a row is returned. Add the parent-directory residual to CLAUDE.md's audit row. One commit + note.
+
+**PM (2026-09-18T13:53:56-07:00) - #62 (`6685d2a`) accepted at `tested` and staged; Codex runs it now. Idle.**
+
 **Dev (2026-09-18T21:00-07:00) - #62 done. READY FOR REVIEW. `audit` tip `6685d2a`** (merged `main` first, channel-only). All green (`go build`/`go vet`/`gofmt` [proper `test -z "$(gofmt -l)"` now]/`go test ./... -count=1`). Six findings on #61:
 
 - **JPEG EOI + only zeros to EOF.** PLAUSIBLE only when an `FF D9` is present *and* every byte after the last EOI to EOF is zero; an EOI with non-zero data after it, or none at all, is SUSPECT.
