@@ -1384,6 +1384,27 @@ func TestMoveNeverLandsOnAVerifiedDestination(t *testing.T) {
 // TestDryRunFlagAfterAValueFlag is review #27-1: a literal --dry-run where a
 // flag value is expected is that value, not a mode switch. main must open
 // read-write and the command must run for real, recording the copy.
+// TestDedupMinSizeNotADryRun is review #33/#37: `dedup --min-size --dry-run`
+// reads --dry-run as --min-size's value (dedup has no dry-run and is never
+// opened read-only), so the manifest open and the command agree. It fails
+// on the bad number, not by opening read-only behind the command's back.
+func TestDedupMinSizeNotADryRun(t *testing.T) {
+	cfg := t.TempDir()
+	// Seed a manifest so an accidental read-only open would be observable.
+	src, dst := t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(src, "a.mov"), "clip", t0)
+	if _, _, code := vault(t, cfg, "copy", "cam", src, dst); code != 0 {
+		t.Fatalf("copy: exit %d", code)
+	}
+	_, errOut, code := vault(t, cfg, "dedup", "--min-size", "--dry-run")
+	if code != 1 || !strings.Contains(errOut, "invalid --min-size") {
+		t.Errorf("dedup --min-size --dry-run: exit %d, stderr %q; want 1 invalid --min-size", code, errOut)
+	}
+	if strings.Contains(errOut, "planning against an empty one") {
+		t.Errorf("dedup was wrongly treated as a dry run:\n%s", errOut)
+	}
+}
+
 func TestDryRunFlagAfterAValueFlag(t *testing.T) {
 	cfg, src, dst := t.TempDir(), t.TempDir(), t.TempDir()
 	// --prefix --dry-run means prefix="--dry-run": the file lives under that.

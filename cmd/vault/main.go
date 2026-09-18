@@ -984,12 +984,15 @@ func human(n int64) string {
 // by, so a literal --dry-run sitting where a flag VALUE is expected (e.g.
 // --prefix --dry-run) is a prefix, not a mode switch (review #27). The
 // per-command sets below are exactly the value-taking flags each parser
-// consumes; keep them in step with the parsers.
+// consumes (scan/copy/move: --prefix/--rule/--on-collision; dedup:
+// --min-size; the rest none); keep them in step with the parsers.
 func dryRunRequested(cmd string, args []string) bool {
 	var valueFlags map[string]bool
 	switch cmd {
 	case "scan", "copy", "move":
 		valueFlags = map[string]bool{"--prefix": true, "--rule": true, "--on-collision": true}
+	case "dedup":
+		valueFlags = map[string]bool{"--min-size": true}
 	}
 	for i := 0; i < len(args); i++ {
 		if valueFlags[args[i]] {
