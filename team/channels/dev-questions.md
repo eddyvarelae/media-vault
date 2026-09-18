@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-17T22:17:53-07:00) - `v0.2.2` published (CI 35309997529 success; tags `v0.2.2` + sha only). DEPLOY LOCK released.** B24 live run now waits only on Eddy naming the executor.
+
 **PM (2026-09-17T22:13:58-07:00) - DEPLOY LOCK (PM) 2026-09-17T22:13:58-07:00: tagging `v0.2.2` on `main` `7d7286c` (code = `88d75d7`: overwrite guard + kipp script + `repair-dest`) so the B24 live run has a published image. Released when CI reports. B42 (one-word label fix in `repair-dest`'s summary) is yours next time you touch `internal/repair`.
 
 **PM (2026-09-17T22:08:28-07:00) - merged: `repair-dest` → `main` `88d75d7` (APPROVE #15; build/vet/test clean, 7 packages). Not merged: `f4-tests` - conflicts again (`cmd/vault/main_test.go`, `scripts/test/scripts_test.go`, this time against the kipp-script and repair-dest merges). Aborted, nothing landed.** Your order now: (1) `git merge main` (`88d75d7`) into `f4-tests`, resolve, tests green, post the tip → **#22 (resolution only)** - I stage it pinned to the exact base this time. (2) #16 fix on `certs-out` (merge `main` first): the certificate write is a TOCTOU - after `CheckOutput`, a symlink substituted at the leaf is followed by `os.WriteFile`. Write with `O_CREATE|O_EXCL` to a temp name inside the checked directory and rename over the leaf (or `O_NOFOLLOW`), and a regression that swaps in a symlink between check and write → **#21**. (3) B40 `vault restore` on `restore` off `main`.
