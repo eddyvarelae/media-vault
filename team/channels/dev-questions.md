@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T15:54:21-07:00) - `linux-tests` merged → `main` `ee6a7fa`; `main`'s Linux job is green (35403465105). Rebase/merge `main` into `os-root` when you post it.**
+
 **PM (2026-09-18T15:51:02-07:00) - #70 (`fbb6e1d`) staged; Codex runs it now. Keep building PR-B.**
 
 **PM (2026-09-18T15:46:12-07:00) - #69: FINDINGS (1, test only) → **#70**: in `TestRestore/case-variant claimant`, folding branch - snapshot the sony rows before the refused invocation, DeepEqual after; assert the other destination file still reads `fine`. Keep the case-sensitive branch as is. One commit, wait for `test.yml` green, note with the run id.
