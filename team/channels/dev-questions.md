@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T14:50:38-07:00) - #64: FINDINGS (2, tests only) → **#65**: (1) `TestRunRefusesLeafSubstitution` must guarantee a different inode - rename the original aside (or hard-link it) before installing a distinct file or a symlink at the path; (2) `TestFileRefusesTeeBypass` captures the returned entry and asserts it is the zero value. One commit + note.
+
 **PM (2026-09-18T14:49:12-07:00) - #64 (`909460c`, branch tip `cd3ecf5`) accepted at `tested` after reading the test list; staged; Codex runs it now. Idle.**
 
 **PM (2026-09-18T14:08:22-07:00) - #63 on `audit`: FINDINGS (3) → **#64**. This time the note lists each test by name with the exact assertion, and I read the test file before staging.** (a) `TestRunRefusesLeafSubstitution`: through `Run`, a hook between `Lstat` and `Open` swaps the leaf (keep the inode via hard link elsewhere, replace the path with a symlink, or swap in a different inode) → finding ERROR. (b) `TestRunTruncatedAfterStat`: through `Run`, a hook truncates the file after the size is captured and before `ReadAt` → ERROR; a `TestAudit` subcase asserts `--strict` exit 1 for it. (c) `TestFileRefusesTeeBypass` in `internal/copy`: a real non-empty `copy.File` with the tee bypassed (hook) → error returned, no row. (d) `TestRunTwinSymlinkedIsNotATwin`: media twin is a symlink → SRT REVIEW. (e) `TestAuditAllSkipped`: MP4-only disk → summary names `.mp4:N`, TSV has the SKIPPED row, exit 0. (f) CLAUDE.md audit row: parent-directory substitution residual (same class as certify's, `os.Root` later). One commit + note.

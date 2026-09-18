@@ -6,11 +6,23 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #64 - re-review of #63's fixes only (branch `audit`, code tip `909460c`; branch tip `cd3ecf5` = + merge of `main`)
+### #64 - re-review of #63's fixes only (branch `audit`, code tip `909460c`; branch tip `cd3ecf5` = + merge of `main`) - **resolved: FINDINGS (2, tests only), accepted → Dev → request #65**
 
 **PM (2026-09-18T14:49:12-07:00):** `git show 909460c -- . ':!team'`. The PM read the diff's test list before staging: it adds `TestRunRefusesLeafSubstitution`, `TestRunTruncatedAfterStat`, `TestRunTwinSymlinkedIsNotATwin` (`internal/audit`), `TestFileRefusesTeeBypass` (`internal/copy`), `TestAuditAllSkipped` and a `--strict`-on-ERROR subcase (`cmd/vault`), each through the real path via a seam that is nil in production (`hookBeforeOpen`, `hookAfterStat`, `teeBypass`); CLAUDE.md's audit row states the parent-directory residual. PM at `cd3ecf5`: vet/gofmt clean, 13 packages ok. **This is wrong if:** any seam can be set outside tests; any of the five tests does not reach the operation it names (substitution after `Lstat`, truncation after the size is taken, tee bypass on a non-empty copy, symlinked twin, MP4-only disk); or CLAUDE.md still lacks the residual.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-18):** FINDINGS — reviewed exactly `git show 909460c -- . ':!team'`, with source context pinned to `909460c`; fixes only against the three #63 findings.
+
+1. **The leaf-substitution regression still does not guarantee a different inode (#63-1).** `internal/audit/audit_test.go:271-278` removes the original file and immediately creates another at the same path. No open descriptor or hard link preserves the original inode, so the filesystem can reuse it; `os.SameFile` can then accept the replacement and Run can report PLAUSIBLE, making this test filesystem-dependent. This is the removal/recreation problem explicitly identified in #63. Rename the original aside or preserve it with a hard link before installing a distinct file, or substitute a symlink as requested. The hook is correctly positioned after resolve's Lstat and before open, but the fixture does not guarantee the identity change it claims.
+
+2. **The tee-bypass regression omits the requested no-populated-row assertion (#63-1).** `internal/copy/copy_test.go:370` discards the returned entry and checks only the error. Returning a populated entry alongside the refusal error would still pass this test. Capture the entry and assert it is empty, in addition to the existing error and cleanup checks. Static tracing confirms the current implementation returns `manifest.Entry{}` at `internal/copy/copy.go:141`; the missing piece is the explicitly requested regression assertion.
+
+The remaining fixes trace correctly: truncation occurs after the fd size is captured and forces a short read through Run to ERROR; the CLI subcase checks ERROR causes strict exit 1 with no remaining SUSPECT. The nonempty tee-bypass fixture reaches the byte-count guard. The symlinked-twin and MP4-only fixtures exercise their named cases, and CLAUDE.md's audit row now states the parent-directory residual. All three seams are unexported, nil by default, and assigned only in tests in the reviewed source; no production setter is present. #63-2 and #63-3 are addressed.
+
+Validation: static source review only; no Go build or tests run, no fixtures created. Only this verdict was appended under #64 in `team/channels/review-requests.md`.
+
+**PM (2026-09-18T14:50:38-07:00):** Both accepted, tests only: the substitution fixture must guarantee a different inode (rename the original aside or hard-link it first, then install a distinct file or a symlink); the tee-bypass fixture must assert the returned entry is empty. Production traced correct; seams confirmed unset outside tests. → **#65**.
 
 ### #63 - re-review of #62's fixes only (branch `audit`, code tip `6c00b39`) - **resolved: FINDINGS (3), accepted → Dev → request #64**
 
