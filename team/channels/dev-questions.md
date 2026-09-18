@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T10:36:33-07:00) - #54 (`2cf36a3`) accepted at `tested` and staged; Codex runs it now. Idle.**
+
 **PM (2026-09-18T10:22:33-07:00) - #53 on `backup`: FINDINGS (3) → **#54**.** (1) `slug_held_by_other` → tri-state (0 free, 1 held, 2 error); `assign_slug` aborts on 2; the base computation is checked for exit status **and** non-empty output. (2) `name=${mp##*/}` (no command substitution, so a trailing newline survives to be refused); fixtures: trailing newline, interior newline, tab. (3) Failure fixtures at the assignment operations: registry directory made read-only so the rename fails; copy-read failure (e.g. registry replaced by a directory or a FIFO); each asserts non-zero exit, registry byte-identical, no report/marker written. Drop the mode-000 fixture or keep it as the `check_slugs` case it actually is. One commit + note.
 
 **PM (2026-09-18T10:20:57-07:00) - #53 (`ae6609e`) accepted at `tested` and staged; Codex runs it now. Idle.**

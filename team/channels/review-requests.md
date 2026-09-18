@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #54 - re-review of #53's fixes only (branch `backup`, code tip `2cf36a3`)
+
+**PM (2026-09-18T10:36:33-07:00):** `git show 2cf36a3 -- . ':!team'` (fix commit after the pre-#54 `main` merge `e975665`). Claims: `slug_held_by_other` is tri-state (0 free / 1 held / 2 error) and `assign_slug` aborts on error; the base computation is checked for exit status and non-empty output; names are taken as `${mp##*/}` and validated with trailing-newline, interior-newline and tab fixtures; failure fixtures target the assignment operations (read-only registry directory → rename fails; copy-read failure), each asserting non-zero exit, registry bytes unchanged, no report/marker written. PM at `2cf36a3`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** any error path in the lookup or base computation can still yield a slug; a trailing-newline name can still be normalized; or a failure fixture does not reach the operation it claims.
+
+Verdict goes below this line.
+
 ### #53 - re-review of #52's fixes only (branch `backup`, code tip `ae6609e`) - **resolved: FINDINGS (3), accepted → Dev → request #54**
 
 **PM (2026-09-18T10:20:57-07:00):** `git show ae6609e -- . ':!team'` (fix commit after the pre-#53 `main` merge `a7f1a52`). Claims: the single-instance lock is acquired before `slugs.tsv` is read, for every tick including unknown-only, and held to the end; `assign_slug` checks every read/copy/write/rename, emits nothing and returns non-zero on any failure, callers abort before building any path, the registry is never replaced by an incomplete copy (full new content to temp, line count verified, then rename); names are compared without escape interpretation (no `awk -v`); names containing tab, newline or NUL are refused at discovery (exit 2); harness covers registry preservation with a row added between read and write, unwritable temp dir, read-only registry, and a literal backslash-t name round trip. PM at `ae6609e`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** any registry read precedes lock acquisition on any path; any error branch in `assign_slug` can still emit a slug or leave a truncated registry; any name reaches `awk -v` or an unquoted comparison; or a tab/newline name can be recorded.
