@@ -29,3 +29,7 @@ Format: `- YYYY-MM-DD · **decision** · context/why · received-by: {role}`
 - 2026-09-17 · **SSH on the UGREEN NAS is enabled** · user/sudo/docker details still to be confirmed by the Tester · received-by: pm
 - 2026-09-17 · **The PM merges F4 to `main` and pushes; a permission rule lets the PM merge/push on this repo from now on** · every merge still requires a Reviewer APPROVE in the file · received-by: pm
 - 2026-09-17 · **Restart the Mac mini tonight for updates, then leave it running all night; resume with a fresh PM session and re-booted seats** · all pending items documented before the restart · received-by: pm
+- 2026-09-17 · **All source SSDs are attached to the Mini (`tars`, `kipp`, `case`, `Eddy's Media Vault`, `Scratch1`); agents read them only - never wipe, format, or edit** · Eddy, after the restart; `noahsarc` is not mounted under that name · received-by: pm
+- 2026-09-17 · **SSH key installed on the NAS for `figmaboi`; Eddy logged in successfully** · unblocks B2 · received-by: pm
+- 2026-09-17 · **The Tester runs NAS commands as `figmaboi`, read-only - it may not delete anything** · anything that writes the manifest or the archive stays with Eddy · received-by: pm
+- 2026-09-17 · **The 2026-09-13 verify pass: Eddy does not know who ran it** · stays unattributed; treated as a real pass with a real result (1 failure, sonya6700) · received-by: pm
