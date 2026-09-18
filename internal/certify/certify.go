@@ -37,6 +37,49 @@ type FileRef struct {
 	VerifiedAt time.Time `json:"verified_at"`
 }
 
+// ErrInsideArchive is returned when the certificate would be written into
+// the tree it certifies.
+var ErrInsideArchive = errors.New("certificate output is inside the archive it certifies")
+
+// InsideArchive reports the ancestor directory of out under which one of
+// the disk's archived files physically exists - i.e. the destination root,
+// or a directory below it - or "" when out is clear of the tree. certify
+// takes no destination root, so the tree is recognised by its contents:
+// every ancestor of out is tried as a root for every row's dest_path,
+// Lstat only, regular file, size equal. The check stops at the first hit.
+//
+// Why it matters (B25): a certificate written into its own tree is a file
+// the next scan finds with no row - it once blocked 39,219 files as a
+// collision - and a cert row would then attest itself. Certificates live
+// beside the manifest, not beside the footage.
+func InsideArchive(out string, rows []manifest.Entry) (string, error) {
+	abs, err := filepath.Abs(out)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Dir(abs)
+	// Physical, not spelled: resolve the directory the file would land in
+	// (it must exist for the write to succeed; if it does not, the lexical
+	// ancestors are the best available and the write fails anyway).
+	if r, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = r
+	}
+	for anc := dir; ; anc = filepath.Dir(anc) {
+		for _, e := range rows {
+			if e.DestPath == "" {
+				continue
+			}
+			fi, err := os.Lstat(filepath.Join(anc, e.DestPath))
+			if err == nil && fi.Mode().IsRegular() && fi.Size() == e.Size {
+				return anc, nil
+			}
+		}
+		if filepath.Dir(anc) == anc {
+			return "", nil
+		}
+	}
+}
+
 // ErrNotCertifiable is returned when at least one file in the manifest is not
 // in 'verified' state. The certificate is *not* generated.
 var ErrNotCertifiable = errors.New("not certifiable: some files are unverified or mismatched")

@@ -470,6 +470,25 @@ func runCertify(m *manifest.Manifest, configDir string, args []string) {
 		out = args[1]
 	}
 
+	if out != "" {
+		// Before signing anything: a certificate never lands in the tree it
+		// certifies (B25). The tree is found by its contents, since certify
+		// takes no destination root.
+		rows, err := m.ListByDisk(disk)
+		if err != nil {
+			die("certify: %v", err)
+		}
+		root, err := certify.InsideArchive(out, rows)
+		if err != nil {
+			die("certify: %v", err)
+		}
+		if root != "" {
+			fmt.Fprintf(os.Stderr, "Cannot certify: %v: %s is under %s, which holds this disk's archived files.\n", certify.ErrInsideArchive, out, root)
+			fmt.Fprintln(os.Stderr, "Write certificates beside the manifest (e.g. $VAULT_CONFIG/../vault-certs/), never beside the footage.")
+			os.Exit(1)
+		}
+	}
+
 	cert, err := certify.Build(m, disk, configDir)
 	if err != nil {
 		if errors.Is(err, certify.ErrNotCertifiable) {
