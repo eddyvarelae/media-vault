@@ -380,3 +380,71 @@ func TestFileRefusesTeeBypass(t *testing.T) {
 	}
 	noPartials(t, dst)
 }
+
+// TestParentSwapRefused is the B43 escape regression at the writer, through the
+// real File: a seam swaps a parent directory for a symlink pointing OUT of the
+// root in the window after the component walk and before the write. os.Root,
+// anchored to the root fd, refuses the escaping component atomically, so nothing
+// is written and nothing lands outside the archive.
+func TestParentSwapRefused(t *testing.T) {
+	src, dst, outside := t.TempDir(), t.TempDir(), t.TempDir()
+	mtime := time.Now()
+	writeFile(t, filepath.Join(src, "x.mov"), "new clip", mtime)
+	if err := os.MkdirAll(filepath.Join(dst, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(outside, "precious"), "precious", mtime)
+	scan.SetTestAfterWalk(func() { // sub was a real dir at the walk; now escape through it
+		os.RemoveAll(filepath.Join(dst, "sub"))
+		if err := os.Symlink(outside, filepath.Join(dst, "sub")); err != nil {
+			t.Fatal(err)
+		}
+	})
+	defer scan.SetTestAfterWalk(nil)
+
+	task := scan.FileTask{RelPath: "x.mov", DstRel: "sub/x.mov", Size: 8, MtimeNs: mtime.UnixNano()}
+	if _, err := File(context.Background(), src, dst, task, "B"); err == nil {
+		t.Fatal("File wrote through a parent swapped to an escaping symlink after the walk; os.Root must refuse it")
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 1 {
+		t.Errorf("something landed through the escaping parent: %v", entries)
+	}
+}
+
+// TestInRootAliasSwapRefused states the honest outcome of the narrower B43
+// residual: os.Root refuses only ESCAPING symlinks; a parent swapped for an
+// in-root (relative) symlink in the window after the walk is followed, so the
+// write lands through the alias — inside the archive, never outside it. The
+// STATIC in-root alias (present at walk time) is still refused by
+// SymlinkComponentRoot; only this post-walk swap slips, and it needs
+// os.OpenInRoot with no-symlink resolution (a later Go) to close. This test
+// pins the behavior so a future tightening is noticed.
+func TestInRootAliasSwapRefused(t *testing.T) {
+	src, dst := t.TempDir(), t.TempDir()
+	mtime := time.Now()
+	writeFile(t, filepath.Join(src, "x.mov"), "new clip", mtime)
+	if err := os.MkdirAll(filepath.Join(dst, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dst, "real"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	scan.SetTestAfterWalk(func() { // relative, in-root: os.Root follows it
+		os.RemoveAll(filepath.Join(dst, "sub"))
+		if err := os.Symlink("real", filepath.Join(dst, "sub")); err != nil {
+			t.Fatal(err)
+		}
+	})
+	defer scan.SetTestAfterWalk(nil)
+
+	task := scan.FileTask{RelPath: "x.mov", DstRel: "sub/x.mov", Size: 8, MtimeNs: mtime.UnixNano()}
+	_, err := File(context.Background(), src, dst, task, "B")
+	// Honest outcome: the in-root alias is followed, so the write succeeds and
+	// lands at real/x.mov — within the archive. Not an endorsement; the residual.
+	if err != nil {
+		t.Fatalf("in-root alias swap: File errored (%v); the documented residual is that os.Root follows it", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dst, "real", "x.mov")); string(got) != "new clip" {
+		t.Errorf("expected the write to land through the in-root alias at real/x.mov, got %q", got)
+	}
+}

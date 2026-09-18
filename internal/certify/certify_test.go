@@ -8,8 +8,50 @@ import (
 	"testing"
 
 	"github.com/eddyvarelae/media-vault/internal/manifest"
+	"github.com/eddyvarelae/media-vault/internal/scan"
 	"github.com/eddyvarelae/media-vault/internal/testguard"
 )
+
+// TestParentSwapRefused is the B43 trusted-dir regression at certify's write.
+// name is one component, so the only parent is the trusted certs dir itself; the
+// seam swaps THAT dir for a symlink pointing outside, after WriteOutput has
+// opened it as an os.Root. Because the Root is pinned to the original directory
+// fd, the write lands in the original dir (renamed aside here so it stays
+// reachable), never through the swapped-in escape — nothing reaches outside.
+func TestParentSwapRefused(t *testing.T) {
+	certs, outside := t.TempDir(), t.TempDir()
+	real := certs + ".real"
+	scan.SetTestAfterWalk(func() { // after OpenRoot pinned certs' fd, swap the name for an escape
+		if err := os.Rename(certs, real); err != nil { // keep the original inode alive under a new name
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, certs); err != nil {
+			t.Fatal(err)
+		}
+	})
+	defer scan.SetTestAfterWalk(nil)
+
+	if err := WriteOutput(certs, "cert.json", []byte(`{"cert":1}`)); err != nil {
+		t.Fatalf("pinned write to the original dir should succeed: %v", err)
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Errorf("a certificate reached outside the trusted dir through the swap: %v", entries)
+	}
+	if got, _ := os.ReadFile(filepath.Join(real, "cert.json")); string(got) != `{"cert":1}` {
+		t.Errorf("the certificate did not land in the pinned original dir: %q", got)
+	}
+}
+
+// TestWriteOutputRejectsMultiComponentName pins the one-component rule: a name
+// with a separator, "..", or an absolute path is refused before any open.
+func TestWriteOutputRejectsMultiComponentName(t *testing.T) {
+	certs := t.TempDir()
+	for _, name := range []string{"sub/cert.json", "../cert.json", "..", ".", filepath.Join(certs, "cert.json")} {
+		if err := WriteOutput(certs, name, []byte("x")); err == nil || !strings.Contains(err.Error(), "single path component") {
+			t.Errorf("name %q: err = %v, want a single-component refusal", name, err)
+		}
+	}
+}
 
 func TestMain(m *testing.M) {
 	testguard.Require() // never write fixtures under /volume1 or /mnt
@@ -267,7 +309,7 @@ func TestWriteOutputNeverFollowsASubstitutedLeaf(t *testing.T) {
 		if err := os.Symlink(photo, out); err != nil {
 			t.Fatal(err)
 		}
-		if err := WriteOutput(out, []byte(`{"cert":1}`)); err != nil {
+		if err := WriteOutput(filepath.Dir(out), filepath.Base(out), []byte(`{"cert":1}`)); err != nil {
 			t.Fatalf("write: %v", err)
 		}
 		if got, _ := os.ReadFile(photo); string(got) != "a verified photo" {
@@ -291,7 +333,7 @@ func TestWriteOutputNeverFollowsASubstitutedLeaf(t *testing.T) {
 		if err := os.Symlink(inside, out); err != nil {
 			t.Fatal(err)
 		}
-		if err := WriteOutput(out, []byte(`{"cert":2}`)); err != nil {
+		if err := WriteOutput(filepath.Dir(out), filepath.Base(out), []byte(`{"cert":2}`)); err != nil {
 			t.Fatalf("write: %v", err)
 		}
 		if _, err := os.Lstat(inside); err == nil {
@@ -307,7 +349,7 @@ func TestWriteOutputNeverFollowsASubstitutedLeaf(t *testing.T) {
 		if err := os.WriteFile(out+".vault-partial", []byte("stale"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := WriteOutput(out, []byte("x")); err == nil || !strings.Contains(err.Error(), "leftover") {
+		if err := WriteOutput(filepath.Dir(out), filepath.Base(out), []byte("x")); err == nil || !strings.Contains(err.Error(), "leftover") {
 			t.Errorf("stale temp: %v, want refusal that names the leftover", err)
 		}
 		if got, _ := os.ReadFile(out + ".vault-partial"); string(got) != "stale" {
@@ -321,7 +363,7 @@ func TestWriteOutputNeverFollowsASubstitutedLeaf(t *testing.T) {
 		if err := os.Symlink(photo, out+".vault-partial"); err != nil {
 			t.Fatal(err)
 		}
-		if err := WriteOutput(out, []byte("x")); err == nil {
+		if err := WriteOutput(filepath.Dir(out), filepath.Base(out), []byte("x")); err == nil {
 			t.Errorf("link at the temp name: want refusal")
 		}
 		if got, _ := os.ReadFile(photo); string(got) != "a verified photo" {

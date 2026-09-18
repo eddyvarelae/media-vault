@@ -10,10 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/eddyvarelae/media-vault/internal/manifest"
+	"github.com/eddyvarelae/media-vault/internal/scan"
 )
 
 // Certificate is the signed proof that a source disk's contents are present
@@ -135,23 +135,46 @@ func describe(fi os.FileInfo) string {
 	}
 }
 
-// WriteOutput writes data to out without ever following what is at out.
-// os.WriteFile opens the leaf itself, so a symlink substituted there
-// between CheckOutput and the write would be followed - into a verified
-// photo, or into the tree. Instead the bytes go to a temporary name beside
-// out, created O_CREATE|O_EXCL|O_NOFOLLOW (nothing that exists is truncated
-// and no link at the temp name is followed), fsynced, and renamed over the
-// leaf: rename replaces whatever directory entry is at out, symlink or
-// file, and follows nothing. What this does not bind is the parent
-// directory itself between check and write; binding that needs openat
-// (os.Root, Go 1.25) and is noted in the backlog.
-func WriteOutput(out string, data []byte) error {
-	tmp := out + ".vault-partial"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
-	if err != nil {
-		return fmt.Errorf("create %s: %w (a leftover from an interrupted run? look, then remove it by hand)", tmp, err)
+// WriteOutput writes data to name under certsRoot without ever following a
+// symlink on the way. os.WriteFile opens the leaf itself, so a symlink
+// substituted there between CheckOutput and the write would be followed - into a
+// verified photo, or into the tree. Instead certsRoot - the directory the caller
+// has already checked, a fixed trusted path beside the manifest - is opened as
+// an os.Root (B43) and every operation is anchored to that directory fd: it is
+// pinned even if a parent is renamed under us, os.Root refuses any component of
+// name that escapes the root, the component walk refuses an in-root symlinked
+// directory, and the leaf name is never followed on create (O_EXCL). The bytes
+// go to a sibling <name>.vault-partial, created O_CREATE|O_EXCL (nothing that
+// exists is truncated; a symlink or leftover at the temp name fails the
+// exclusive open), fsynced, and renamed over the leaf - the rename replaces
+// whatever entry is at name, symlink or file, following nothing. A stale
+// <name>.vault-partial refuses. Residual (os.Root doc, as at the other sites): a
+// parent swapped to an in-root symlink after the walk is followed - os.Root
+// blocks only escapes.
+func WriteOutput(certsRoot, name string, data []byte) error {
+	// name is one component under the trusted root - runCertify passes
+	// filepath.Base(out). Reject anything else (a separator, "..", "." or an
+	// absolute path) so a caller can never smuggle a subdirectory or an escape
+	// past the single OpenRoot below.
+	if name == "" || name == "." || name == ".." || filepath.Base(name) != name || filepath.IsAbs(name) {
+		return fmt.Errorf("certificate name %q must be a single path component", name)
 	}
-	cleanup := func() { os.Remove(tmp) }
+	root, err := os.OpenRoot(certsRoot)
+	if err != nil {
+		return fmt.Errorf("open certificate directory %s: %w", certsRoot, err)
+	}
+	defer root.Close()
+	if link, err := scan.SymlinkComponentRoot(root, name); err != nil {
+		return fmt.Errorf("refusing to write certificate: %w", err)
+	} else if link != "" {
+		return fmt.Errorf("refusing to write certificate through a symlink: %s is a symlink", filepath.Join(certsRoot, link))
+	}
+	tmp := name + ".vault-partial"
+	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return fmt.Errorf("create %s: %w (a leftover from an interrupted run? look, then remove it by hand)", filepath.Join(certsRoot, tmp), err)
+	}
+	cleanup := func() { root.Remove(tmp) }
 	if _, err := f.Write(data); err != nil {
 		f.Close()
 		cleanup()
@@ -166,9 +189,9 @@ func WriteOutput(out string, data []byte) error {
 		cleanup()
 		return fmt.Errorf("close %s: %w", tmp, err)
 	}
-	if err := os.Rename(tmp, out); err != nil {
+	if err := root.Rename(tmp, name); err != nil {
 		cleanup()
-		return fmt.Errorf("rename %s: %w", out, err)
+		return fmt.Errorf("rename %s: %w", filepath.Join(certsRoot, name), err)
 	}
 	return nil
 }
