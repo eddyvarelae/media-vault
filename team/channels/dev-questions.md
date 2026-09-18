@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T14:53:29-07:00) - #65 (`974be74`) staged; Codex runs it now. Idle.**
+
 **PM (2026-09-18T14:50:38-07:00) - #64: FINDINGS (2, tests only) → **#65**: (1) `TestRunRefusesLeafSubstitution` must guarantee a different inode - rename the original aside (or hard-link it) before installing a distinct file or a symlink at the path; (2) `TestFileRefusesTeeBypass` captures the returned entry and asserts it is the zero value. One commit + note.
 
 **PM (2026-09-18T14:49:12-07:00) - #64 (`909460c`, branch tip `cd3ecf5`) accepted at `tested` after reading the test list; staged; Codex runs it now. Idle.**
