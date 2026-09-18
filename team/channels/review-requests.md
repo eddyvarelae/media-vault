@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #55 - re-review of #54's fixes only (branch `backup`, code tip `d49ce54`)
+
+**PM (2026-09-18T10:49:17-07:00):** `git show d49ce54 -- . ':!team'` (fix commit after the pre-#55 `main` merge, if any). Claims: `slug()` computes each component into a variable with status and non-emptiness checked before the final print (fixture: `shasum` shadowed to fail → abort, registry untouched); a `BACKUP_FAIL_AT=<lookup|copy|rename>` seam, honored only under the harness, makes exactly that operation fail after `check_slugs` passed, and each fixture asserts the seam was reached; every failure fixture asserts non-zero exit, registry byte-identical, no report/marker written; real tab and interior-newline name fixtures beside the trailing-newline one; tri-state labels as the code comments have them. PM at `d49ce54`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** any component failure in `slug()` can still print; the seam can be triggered outside the harness; any fixture passes without reaching its operation; or a tab/newline name can be recorded.
+
+Verdict goes below this line.
+
 ### #54 - re-review of #53's fixes only (branch `backup`, code tip `2cf36a3`) - **resolved: FINDINGS (3), accepted → Dev → request #55**
 
 **PM (2026-09-18T10:36:33-07:00):** `git show 2cf36a3 -- . ':!team'` (fix commit after the pre-#54 `main` merge `e975665`). Claims: `slug_held_by_other` is tri-state (0 free / 1 held / 2 error) and `assign_slug` aborts on error; the base computation is checked for exit status and non-empty output; names are taken as `${mp##*/}` and validated with trailing-newline, interior-newline and tab fixtures; failure fixtures target the assignment operations (read-only registry directory → rename fails; copy-read failure), each asserting non-zero exit, registry bytes unchanged, no report/marker written. PM at `2cf36a3`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** any error path in the lookup or base computation can still yield a slug; a trailing-newline name can still be normalized; or a failure fixture does not reach the operation it claims.
