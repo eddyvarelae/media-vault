@@ -6,6 +6,30 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #32 - re-review of #26's fixes only (branch `tagger`, code tip `3e3fd5a`)
+
+**PM (2026-09-18T03:23:59-07:00):** One commit on `6b061f3`: `git show 3e3fd5a -- . ':!team'`. Dev's note: Dev 2026-09-18T03:22 (commit `c7d3d23`). PM at `3e3fd5a`: vet/gofmt/bash -n clean, 8 packages ok. **Claims:** (1) `safe_rel` refuses absolute/climbing/junk-component paths for manifest rows (both `dest_path` and the empty-dest `source_path` fallback) and walked files; the shell re-checks each selected file's NAS path component by component (`path_is_unsafe`) at pull time, refusing symlinked dir or leaf. (2) Junk filter covers manifest rows. (3) Lock: cleanup trap before the state db opens; info-less lock = being acquired; dead-lock takeover by atomic rename. (4) `errf` inside the trapped temp dir. (+) the previous snapshot is removed before rsync so a same-size stale copy is never rsync-skipped. **This is wrong if:** a path can reach `rsync`/`xattr` without passing both `safe_rel` and `path_is_unsafe`; a takeover can leave two owners; or the snapshot removal can race a concurrent run (the lock should make that impossible - state it).
+
+Verdict goes below this line.
+
+### #33 - re-review of #27's fixes only (branch `small-fixes`, code tip `d84c7cf`)
+
+**PM (2026-09-18T03:23:59-07:00):** One commit on `92e1a51`: `git show d84c7cf -- . ':!team'`. PM at `d84c7cf`: vet/gofmt/bash -n clean, 9 packages ok. **Claims:** (1) `dryRunRequested` skips the value after `--prefix`/`--rule`/`--on-collision`, so the manifest open and the command agree; (2) `move`'s `guardDest` runs at the top of the per-file loop, before `MkdirAll` and before the duplicate branch's delete, and again after a collision rename. **This is wrong if:** any command's flag parser consumes a value for a flag `dryRunRequested` does not skip (list every value-taking flag per command); or `move` can still mutate before `guardDest` on any path.
+
+Verdict goes below this line.
+
+### #34 - re-review of #28's fixes only (branch `backup`, code tip `bc89f6f`)
+
+**PM (2026-09-18T03:23:59-07:00):** One commit on `8b0d263`: `git show bc89f6f -- . ':!team'`. PM at `bc89f6f`: vet/gofmt/bash -n clean, 10 packages ok. **Claims:** (1) `--tsv` opened `O_CREATE|O_EXCL|O_NOFOLLOW`; the script removes only its own dated output before a `--force` re-report. (2) Lock discipline as #32-3. (3) Unknown volumes: once per attach identity, independent of due reports, markers pruned on detach. (4) Snapshot failures throttled hourly, cleared on a usable snapshot. (5) Managed build with `GOCACHE`/`GOMODCACHE`/`GOTMPDIR` under `$STATE_DIR`; harness asserts the boundary. **This is wrong if:** the `--force` pre-removal can delete anything but the script's own `gap-<disk>-<date>.tsv`; the unknown-volume marker can be keyed so a re-attach is missed; or any build artifact still lands outside `$STATE_DIR`.
+
+Verdict goes below this line.
+
+### #35 - re-review of #30's fix only (branch `restore`, code tip `5f48636`)
+
+**PM (2026-09-18T03:23:59-07:00):** One commit on `d831dcc`: `git show 5f48636 -- . ':!team'`. PM at `5f48636`: vet/gofmt clean, 8 packages ok. **Claim:** the ENOENT→spelling fallback applies only to rows of the same `source_disk` as the target; other disks claim by identity only (`stat` + `SameFile`). Dev states the case-sensitive-only false-positive mutant is not observable on this Mac (case-folding FS). **This is wrong if:** a same-disk row under a different root can still be falsely flagged (is that possible - same disk, two roots?), or a real alias of another disk is now missed because its stat fails for a reason other than ENOENT.
+
+Verdict goes below this line.
+
 ### #30 - re-review of #24's fixes only (branch `restore`, code tip `d831dcc`) - **resolved: FINDINGS (1), accepted → Dev → request #35**
 
 **PM (2026-09-18T02:48:04-07:00):** One commit on `b70f35e`: `git show d831dcc -- . ':!team'`. Dev's note: Dev 2026-09-18T02:47 (commit `b8e1aee` on that branch). PM at the branch tip: vet/gofmt/bash -n clean, 8 packages ok.

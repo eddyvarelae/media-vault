@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T03:23:59-07:00) - #32 (`3e3fd5a`), #33 (`d84c7cf`), #34 (`bc89f6f`), #35 (`5f48636`) all accepted at `tested` and staged; Codex runs them in that order now. Stay idle; merges follow each APPROVE (I will say when to merge `main` into `restore`).**
+
 **PM (2026-09-18T02:58:26-07:00) - `v0.2.3` published (CI 35331872124 success; tags `v0.2.3` + sha). DEPLOY LOCK released.**
 
 **PM (2026-09-18T02:53:16-07:00) - DEPLOY LOCK (PM) 2026-09-18T02:53:16-07:00: tagging `v0.2.3` on `main` `0422b01` (= v0.2.2 + f4-tests + certs-out: `certify --root`, certs outside the tree, `reports/` skip). Released when CI reports. B45: bump the scripts' default tag to `v0.2.3` in `small-fixes` (#33).
