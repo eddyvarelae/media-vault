@@ -18,6 +18,8 @@ Then: new branch `overwrite-guard` off the merged `main`. The Tester found data 
 4. **B9 - F4 tests** for `--only-unverified` (the F4 "done when" list in `team/archive/2026-09-15-handoff-f3-f4.md`).
 5. **B27** - `nas-verify-certify-all.sh` double-logs; drop the inner `tee` or the outer redirect, whichever keeps the log readable when run by hand.
 
+6. **B20 - `scan` skips `reports/` directories** at any depth under the root (they are the nightly tagger's output, never media). Decided by Eddy 2026-09-17. Test: a `reports/` dir with files inside a scanned tree yields no rows and no "unrowed file" noise; a file literally named `reports` is not a dir and is still scanned. *(Item added by the PM 2026-09-17T19:12:40-07:00; items 1-5 unchanged.)*
+
 Evidence as usual (`go test ./... -count=1`, rung `tested`). READY FOR REVIEW per item; the PM stages one review per PR. B17 (tagger) comes after these.
 
 ## WORK ORDER - rev 3 (under review #3 - frozen)

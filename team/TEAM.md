@@ -80,6 +80,6 @@ Branch policy: Dev works in its own worktree (`~/Projects/media-vault-dev`) on a
 - Tester (`~/Projects/media-vault-tester`, detached): B2 done (SSH as `figmaboi`, `sudo docker` works); B23(a) exhausted on attached disks; waiting on Dev for the B24 dry-run.
 - NAS: DXP2800 `192.168.1.167`, SMB + SSH as `figmaboi` (key); `~/mounts/media` and `~/mounts/docker` mount via `com.varela.mount-nas`. NAS clock is UTC-6 (Mini is UTC-7). `sudo docker` is password-less; so is `sudo bash` (B28).
 - Scope since 2026-09-17: every scheduled batch against the archive is ours (nightly tagger = B17, after rev 3).
-- **P0 (Tester, 2026-09-17): 2,668 SonyA6700 photos overwritten on Sep 1, not found on any attached SSD - B23. Nothing gets wiped.** 195 rows need a dest_path fix before verify can pass - B24. Archive is 8.20 TiB (not 3.3).
+- **P0 (2026-09-17): 2,668 SonyA6700 photos overwritten on Sep 1 are LOST - every disk Eddy owns was searched (B23a closed); the defect fix is Dev's current item (B23b).** 195 rows need a dest_path fix before verify can pass - B24. Archive is 8.20 TiB (not 3.3). Agents never wipe or write an SSD.
 - Source SSDs (B7 done): `tars`, `case`, `Eddy's Media Vault`, `kipp` (never copied, B26), and `Scratch1` = the former `noahsarc`, device-erased 2026-09-02 (Tester #17). The 2026-04-26 SonyA6700 source disk is unidentified. All five attached; agents read only.
 - Reviewer = `codex exec`, run by the PM. Seats boot in visible Terminal windows with `--remote-control`; nudges need a trailing empty `do script`.
