@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #73 - re-review of #72's two fixes only (branch `os-root`, code tip `d07e45b`; merged tip `13d2911`)
+
+**PM (2026-09-18T16:43:30-07:00):** `git show d07e45b -- . ':!team'`. Claims: the `copy.go` Chtimes comment states facts only (handle closed, name re-resolved, `O_EXCL` creation-only) plus the assumption that nothing else writes the destination directory; CLAUDE.md's residual list gains the staging-path/Chtimes item; the audit and restore escape fixtures assert `done` after the operation. `test.yml` run 35406625317 on `13d2911` green (PM confirmed). PM at `13d2911`: vet/gofmt clean, 13 packages ok on darwin. **This is wrong if:** the comment still dismisses the swap, CLAUDE.md lacks the item, or either fixture lacks the assertion.
+
+Verdict goes below this line.
+
 ### #72 - re-review of #71's fixes only (branch `os-root`, code tip `854a7d8`; merged tip `866e0c8`) - **resolved: FINDINGS (2), accepted → Dev → request #73**
 
 **PM (2026-09-18T16:36:44-07:00):** `git show 854a7d8 -- . ':!team'`. Claims: `WriteOutput` validates `name` before any fs work (non-empty, single component, not `.`/`..`), with rejection tests; the certify swap fixture uses a valid leaf and swaps the trusted directory itself; the audit and restore escape fixtures seed a readable `outside/x.JPG`, require the containment error (not ENOENT) and assert the seam ran; the Chtimes comment states the residual correctly (creation-only `O_EXCL`, closed fd, `Root.Chtimes` re-resolves; directory ownership assumed) and CLAUDE.md lists it; the seam is honored only when `testing.Testing()` is true. `test.yml` run 35406187611 on `866e0c8` green (PM confirmed). PM at `866e0c8`: vet/gofmt clean, 13 packages ok on darwin. **This is wrong if:** any of the four #71 cases still holds.
