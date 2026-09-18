@@ -51,28 +51,53 @@ for, and never claims a row it cannot back with a hash.
 
 ## Exit-code contract
 
-Scripts branch on exit status; a silent 0 is a data-loss path.
+Scripts branch on exit status; a silent 0 is a data-loss path. This table is
+`cmd/vault/main.go` as it is — three codes, and the same rules for every
+command:
 
-| Command | 0 | 1 | 2 |
-|---|---|---|---|
-| `copy` | every planned file archived; also no-op and `--dry-run` | run finished `INCOMPLETE:` — any file failed, any unresolved destination collision, any intra-run duplicate left unarchived. stderr names which | usage |
-| `verify` | all rows hashed and matched | any mismatch, missing, or read error | usage |
-| `certify` | certificate written/printed | any row not `verified` (`Cannot certify: …`) | usage |
+- **2** — wrong positional arity (`len(args)`/`len(pos)` checks), no command,
+  or an unknown command. Prints usage. Nothing else exits 2.
+- **1** — everything fatal: every `die(...)` (bad flag value or a flag missing
+  its value, config dir or manifest open failure, scan/plan error, manifest
+  write error, signing/marshal/output-file error, empty manifest), an
+  interrupt (`interrupted` on stderr), and the per-command conditions below.
+  Flags are parsed **before** arity for `scan`/`copy`/`move`, so a bad flag
+  value with wrong arity is 1, not 2.
+- **0** — the command ran to the end. For several commands that is *not* the
+  same as "nothing went wrong" — see the last column.
+
+| Command | Exits 1 when | Exits 0 even though |
+|---|---|---|
+| `scan` | scan error (unreadable source, cancelled) | collisions/recopies are predicted — it only reports |
+| `copy` | run finished `INCOMPLETE:` — any file failed, any unresolved destination collision, any intra-run duplicate left unarchived (stderr names which); interrupted between files; `die` on scan or manifest-write error | no-op, `--dry-run` (even with predicted collisions) |
+| `verify` | any mismatch, missing, or read error; `die` on cancel | — |
+| `certify` | any row not `verified` (`Cannot certify: …`); no rows for the disk; key/sign/marshal/write error | — |
+| `inventory` | `die` on walk error | per-file hash errors — counted in `Errors:`, exit 0 |
+| `dedup` | unknown arg or bad `--min-size` (`die`, not usage); query error | — |
+| `unique`, `tag`, `untag`, `tagged`, `tags` | query error | no matches (`No files tagged …`) |
+| `symlinks`, `hardlinks` | malformed `<disk>=<path>`; query or mkdir error | individual links that FAIL or SKIP — counted, exit 0 |
+| `move` | bad `--on-collision`/`--rule`; plan or execute error | per-file `Errors:`/`Skipped:` in the summary — exit 0; `--dry-run` |
+| `import-tags` | import error | ambiguous / not-found reports — counted, exit 0 |
 
 A collision counts against `copy` only after the policy ran: under
 `--on-collision rename-mtime-year` a successful rename lands in `ToCopy`; a
 task reaches `DstCollisions` only if the renamed path also exists. The exit
 code must not depend on `--dedupe-content` (settled, see `team/BACKLOG.md →
 Deferred`). `runCopy` returns its status; `main` applies it — keep new
-commands on that pattern so the decision stays testable.
+commands on that pattern so the decision stays testable. The "exits 0 even
+though" column is documented behavior, not endorsed behavior: a script
+that needs to branch on those outcomes cannot today.
 
 ## Announce what you skipped
 
 Any partial pass prints what it did **not** check as loudly as what it did:
 dedupe prints eligible-row counts and says when cross-disk dedupe was
 impossible; `INCOMPLETE:` lists every reason that fired; an incremental verify
-must say how many rows it skipped and when the disk was last fully verified.
-A number nobody can recompute is a finding, not a fact.
+(`--only-unverified`) states how many `verified` rows it skipped and the
+**newest single-row `verified_at`** among them — explicitly labeled as one
+row's date, **not** a full-sweep date. No command records when a disk was last
+fully verified; per-row timestamps cannot prove it, so never claim it. A
+number nobody can recompute is a finding, not a fact.
 
 ## Hard rules
 
