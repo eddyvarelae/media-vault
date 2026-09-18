@@ -6,11 +6,23 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #50 - re-review of #49's fixes only (branch `backup`, code tip `c95fb41`)
+### #50 - re-review of #49's fixes only (branch `backup`, code tip `c95fb41`) - **resolved: FINDINGS (3), accepted → Dev → request #51**
 
 **PM (2026-09-18T09:25:54-07:00):** Fix commit(s) after the last `main` merge: `git diff 42e3c64..c95fb41 -- . ':!team'` minus what `main` already has - practically `git show c95fb41 -- . ':!team'` (and any commit between the `main` merge and the tip). Claims: a marker collision carries a non-zero status to the final exit and appends no state; pruning validates the recorded owner on line 1, never the slug; a marker whose header names another volume is left alone; the harness forces two names to one slug and exercises report-only, TSV-only and marker-only conflicts separately with bytes/diagnostic/status/state assertions; README and comments say "bounded, probabilistic; collisions detected by the full-name header". PM at `c95fb41`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** any of the three conflict cases can pass with its guard removed; a colliding marker can still exit 0; pruning can delete a marker owned by a live volume with a colliding slug; or any "injective" wording remains.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-18):** FINDINGS — request #50, fixes only: `git show c95fb41 -- . ':!team'`. References below are to pinned commit `c95fb41`.
+
+1. **A marker collision still permits success-state appends when a known disk is due.** `scripts/backup/run-backup.sh:174-176,198,241` carries the collision into `rc`, but does not prevent the successful-report path at line 315 from appending to `backup-state.tsv`. Failing input: unknown `Random` with a mismatching marker header, plus due known `tars`, usable preconditions, and a successful gap report. The tick exits 1 but appends tars' state, contradicting #50's “appends no state” claim. Gate state recording on the marker collision, and cover a collision with a known disk due; the current marker test has no due disk.
+
+2. **Pruning deletes a foreign marker during the collision tick despite the promised preservation.** At `scripts/backup/run-backup.sh:187-192`, `Random` mounted with its marker headed `volume: Ghost` and Ghost absent first triggers the collision guard, then has that same marker removed because Ghost is not in `unknown`. This is also the exact input and expected deletion in `scripts/test/run-backup.sh:265-269`. It contradicts #50's “a marker whose header names another volume is left alone”, the guard's leave/clear-by-hand message, and README's leave-file promise. Preserve markers encountered as collisions during that tick; distinguish ordinary stale-owner pruning from collision preservation. The new owner comparison does preserve a correctly headed marker whose owner is still mounted-and-unknown, irrespective of the filename slug; that narrower liveness fix passes static trace.
+
+3. **The harness still does not isolate the TSV guard or force two names to one slug.** `scripts/test/run-backup.sh:234-250` mounts only tars and relabels both report and TSV to kipp. Production checks the report first and breaks (`scripts/backup/run-backup.sh:297-301`), so removing the TSV check still passes all these assertions. Only report content is compared, using command substitution that strips trailing newlines, rather than exact bytes. The added `tslug` helper does not force a collision. The marker case at test lines 256-272 mounts only Random, relabels its marker to Ghost, asserts deletion rather than preservation, and has no state assertion or live foreign-owner case. Add separate report-only, TSV-only, and marker-only conflicts with two names forced to the same slug; assert exact foreign bytes, diagnostic, nonzero exit, and unchanged state independently. Include both live-owner retention and ordinary stale-owner pruning.
+
+The nonzero-exit fix passes static trace: no-due collisions exit 1 at line 198; due-disk runs initialize `rc` from the collision and do not reset it to zero. Documentation now explicitly denies injectivity and describes header collision detection. Its numerical estimate is consistent with 16 hex digits × 4 = 64 bits, 2^64 = 18,446,744,073,709,551,616 (approximately 1.8e19), for a fixed pair with matching heads under the uniform-hash assumption. The slug comment's remaining “still differ” at lines 81-82 should also be qualified to agree with that probabilistic description.
+
+Validation: complete specified diff and relevant committed source/assertions reviewed; `bash -n` passed for both committed shell files. No Go tests or scripts executed. Only this channel file modified.
 
 ### #48 - re-review of #46's fixes only (branch `small-fixes`, code tip `3779db9`) - **resolved: APPROVE → merged**
 
@@ -26,6 +38,8 @@ The updated `CLAUDE.md:139` row and `cmd/vault/main.go:693` comment match the B3
 
 Validation: committed-source and regression-assertion review only; no Go build, test, vet, or runtime reproduction run. Only this channel file modified.
 
+
+**PM (2026-09-18T09:27:35-07:00):** All three accepted. The rule, stated once so it stops drifting: **any collision (report, TSV, or marker) aborts the tick before any state or report write** - no report for any disk, no state append, exit 1, every existing file untouched, including the colliding marker, which is left for a human. Pruning of stale-owner markers happens only on a tick with no collision. The harness forces two names to one slug through a real hook and proves each of the three guards in isolation. → **#51**.
 
 ### #49 - re-review of #47's fixes only (branch `backup`, code tip `7ae9343`; carries `small-fixes` `3779db9`) - **resolved: FINDINGS (3), accepted → Dev → request #50**
 
