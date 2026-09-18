@@ -15,44 +15,44 @@ import (
 )
 
 type Result struct {
-	Hashed     int
-	Skipped    int
-	BytesRead  int64
-	Errors     int
+	Hashed    int
+	Skipped   int
+	BytesRead int64
+	Errors    int
 }
 
 // junk file names we never inventory
 var junkNames = map[string]bool{
-	".DS_Store":     true,
-	".localized":    true,
-	".AppleDouble":  true,
-	".fseventsd":    true,
+	".DS_Store":       true,
+	".localized":      true,
+	".AppleDouble":    true,
+	".fseventsd":      true,
 	".Spotlight-V100": true,
 	".TemporaryItems": true,
-	".Trashes":      true,
+	".Trashes":        true,
 }
 
 // directory names whose entire subtree we skip — these blow up inventory
 // time with millions of tiny files and never belong in a media archive.
 var skipDirs = map[string]bool{
-	"node_modules":   true,
-	".git":           true,
-	".svn":           true,
-	".hg":            true,
-	"__pycache__":    true,
-	".pytest_cache":  true,
-	".tox":           true,
-	".venv":          true,
-	"venv":           true,
-	".gradle":        true,
-	".m2":            true,
-	"target":         true, // Rust / Java
-	".next":          true,
-	".nuxt":          true,
-	".turbo":         true,
-	".pnpm-store":    true,
+	"node_modules":     true,
+	".git":             true,
+	".svn":             true,
+	".hg":              true,
+	"__pycache__":      true,
+	".pytest_cache":    true,
+	".tox":             true,
+	".venv":            true,
+	"venv":             true,
+	".gradle":          true,
+	".m2":              true,
+	"target":           true, // Rust / Java
+	".next":            true,
+	".nuxt":            true,
+	".turbo":           true,
+	".pnpm-store":      true,
 	"bower_components": true,
-	".terraform":     true,
+	".terraform":       true,
 }
 
 func isJunk(name string) bool {

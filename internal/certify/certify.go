@@ -17,24 +17,24 @@ import (
 // Certificate is the signed proof that a source disk's contents are present
 // at a destination, hashed, and verified.
 type Certificate struct {
-	Version       int       `json:"version"`
-	IssuedAt      time.Time `json:"issued_at"`
-	SourceDisk    string    `json:"source_disk"`
-	FileCount     int       `json:"file_count"`
-	TotalBytes    int64     `json:"total_bytes"`
-	OldestVerify  time.Time `json:"oldest_verification"`
-	NewestVerify  time.Time `json:"newest_verification"`
-	PublicKeyHex  string    `json:"public_key_hex"`
-	Files         []FileRef `json:"files"`
-	SignatureHex  string    `json:"signature_hex,omitempty"`
+	Version      int       `json:"version"`
+	IssuedAt     time.Time `json:"issued_at"`
+	SourceDisk   string    `json:"source_disk"`
+	FileCount    int       `json:"file_count"`
+	TotalBytes   int64     `json:"total_bytes"`
+	OldestVerify time.Time `json:"oldest_verification"`
+	NewestVerify time.Time `json:"newest_verification"`
+	PublicKeyHex string    `json:"public_key_hex"`
+	Files        []FileRef `json:"files"`
+	SignatureHex string    `json:"signature_hex,omitempty"`
 }
 
 type FileRef struct {
-	SourcePath  string    `json:"source_path"`
-	DestPath    string    `json:"dest_path"`
-	Size        int64     `json:"size"`
-	SHA256      string    `json:"sha256"`
-	VerifiedAt  time.Time `json:"verified_at"`
+	SourcePath string    `json:"source_path"`
+	DestPath   string    `json:"dest_path"`
+	Size       int64     `json:"size"`
+	SHA256     string    `json:"sha256"`
+	VerifiedAt time.Time `json:"verified_at"`
 }
 
 // ErrNotCertifiable is returned when at least one file in the manifest is not
