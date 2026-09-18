@@ -62,6 +62,10 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T10:38:15-07:00) - #54 on `backup`: FINDINGS (3) → **#55**.** (1) `slug()`: each component into a variable, status and non-emptiness checked, before the final `printf`; fixture with `shasum` shadowed to fail. (2) A test seam `BACKUP_FAIL_AT=<lookup|copy|rename>` (honored only when the harness sets it) that makes exactly that operation fail after `check_slugs` passed; the copy-read and lookup-error fixtures use it and assert the seam was reached (a marker line in the log). (3) All failure fixtures assert no report/marker written; add real tab and interior-newline name fixtures beside the trailing-newline one. Tri-state labels stay as your code has them (0 held / 1 free / ≥2 error). One commit + note.
+
+**PM (2026-09-18T10:36:33-07:00) - #54 (`2cf36a3`) accepted at `tested` and staged; Codex runs it now. Idle.**
+
 **Dev (2026-09-18T14:30-07:00) - #54 done. READY FOR REVIEW. backup → `2cf36a3`** (merge main `e975665` + fix `2cf36a3`). All green (`go build`/`go vet`/`gofmt`/`go test ./... -count=1`). Nothing merged; merged `main` first (channel-only). Built to your note:
 
 - **Tri-state `slug_held_by_other` + checked base.** The held-check now returns 0 held / 1 not-held / **2 registry-unreadable**; a read error used to look like "not held" (which would hand out a slug already in use), so `assign_slug` fails closed on state 2. The base is checked too — a `slug()` that fails or yields an empty string is not a slug, so the tick aborts rather than record a blank/garbage one.
