@@ -41,11 +41,16 @@ check "script exits 0 when every docker call succeeds" test $? -eq 0
 check "certs dir was created" test -d "$certs"
 check "six certify calls" test "$(grep -c ' certify ' "$calls")" -eq 6
 check "every certify output is under CERTS" \
-  test "$(grep ' certify ' "$calls" | grep -c " $certs/media-[a-z0-9]*\.cert\.json\$")" -eq 6
-check "no certify output under a camera root" \
-  ! grep ' certify ' "$calls" | grep -q '/volume1/media/'
-check "certify for media-djiflip names its cert" \
-  grep -q " certify media-djiflip $certs/media-djiflip.cert.json\$" "$calls"
+  test "$(grep ' certify ' "$calls" | grep -c " $certs/media-[a-z0-9]*\.cert\.json --root /volume1/media/")" -eq 6
+# Negations and pipelines are computed first, then asserted: `check ! a | b`
+# would hand `!` to check as a command and run check inside a subshell,
+# where its failure count is lost (review #12).
+outs=$(grep ' certify ' "$calls" | sed -E 's/.* certify [^ ]+ ([^ ]+) --root .*/\1/')
+under_media=$(printf '%s\n' "$outs" | grep -c '^/volume1/media/' || true)
+check "six certify output paths extracted" test "$(printf '%s\n' "$outs" | grep -c .)" -eq 6
+check "no certify output under a camera root" test "$under_media" -eq 0
+check "certify for media-djiflip names its cert and its root" \
+  grep -q " certify media-djiflip $certs/media-djiflip.cert.json --root /volume1/media/DJIFlip\$" "$calls"
 check "log reports the cert location under CERTS" \
   grep -q "media-djiflip done — cert at $certs/media-djiflip.cert.json" "$log"
 check "verify still runs against the camera roots" \

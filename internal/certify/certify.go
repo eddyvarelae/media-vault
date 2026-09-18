@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/eddyvarelae/media-vault/internal/manifest"
@@ -41,6 +42,98 @@ type FileRef struct {
 // the tree it certifies.
 var ErrInsideArchive = errors.New("certificate output is inside the archive it certifies")
 
+// ErrOutputNotAFile is returned when something other than a regular file
+// already sits at the output path.
+var ErrOutputNotAFile = errors.New("certificate output path is not a regular file")
+
+// CheckOutput is every placement check a certificate output path must pass
+// before anything is signed. Physical, in this order:
+//
+//  1. The leaf itself: os.WriteFile follows a symlink, so a link at the
+//     output name - dangling or not - would write wherever it points
+//     (a verified photo, a path inside the tree). Lstat; a symlink, a
+//     directory or anything but a regular file or nothing is refused.
+//  2. Containment under root when the caller knows it (--root): resolved
+//     paths, component-wise. This is the real check; a tree whose files
+//     have all been damaged is still the tree.
+//  3. Otherwise the tree is recognised by its contents (InsideArchive) -
+//     a fallback for callers that do not pass --root, and only as good as
+//     the files still matching their rows.
+//
+// The returned string names the root the output was found inside, "" if
+// clear.
+func CheckOutput(out, root string, rows []manifest.Entry) (string, error) {
+	if fi, err := os.Lstat(out); err == nil {
+		if !fi.Mode().IsRegular() {
+			return "", fmt.Errorf("%w: %s is %s", ErrOutputNotAFile, out, describe(fi))
+		}
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	if root != "" {
+		in, err := under(root, out)
+		if err != nil {
+			return "", err
+		}
+		if in {
+			r, _ := filepath.Abs(root)
+			return r, nil
+		}
+	}
+	return InsideArchive(out, rows)
+}
+
+// under reports whether path lies under root, both made absolute and
+// resolved (path by its longest existing ancestor), compared with
+// filepath.Rel so "." and "/" roots work.
+func under(root, path string) (bool, error) {
+	r, err := filepath.Abs(root)
+	if err != nil {
+		return false, err
+	}
+	if rr, err := filepath.EvalSymlinks(r); err == nil {
+		r = rr
+	}
+	p, err := filepath.Abs(path)
+	if err != nil {
+		return false, err
+	}
+	p = resolveExisting(p)
+	rel, err := filepath.Rel(r, p)
+	if err != nil {
+		return false, nil
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)), nil
+}
+
+// resolveExisting resolves symlinks in the longest existing ancestor of p
+// and re-appends the rest, so a path that does not exist yet still gets
+// the physical directory it would land in.
+func resolveExisting(p string) string {
+	dir, rest := p, ""
+	for {
+		if r, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(r, rest)
+		}
+		if filepath.Dir(dir) == dir {
+			return p
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
+		dir = filepath.Dir(dir)
+	}
+}
+
+func describe(fi os.FileInfo) string {
+	switch {
+	case fi.Mode()&os.ModeSymlink != 0:
+		return "a symlink"
+	case fi.IsDir():
+		return "a directory"
+	default:
+		return fi.Mode().String()
+	}
+}
+
 // InsideArchive reports the ancestor directory of out under which one of
 // the disk's archived files physically exists - i.e. the destination root,
 // or a directory below it - or "" when out is clear of the tree. certify
@@ -57,21 +150,9 @@ func InsideArchive(out string, rows []manifest.Entry) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// Physical, not spelled: resolve the directory the file would land in.
-	// If it does not exist yet, resolve its longest existing ancestor and
-	// re-append the rest, so a link into the tree is seen either way.
-	dir, rest := filepath.Dir(abs), ""
-	for {
-		if r, err := filepath.EvalSymlinks(dir); err == nil {
-			dir = filepath.Join(r, rest)
-			break
-		}
-		if filepath.Dir(dir) == dir {
-			break
-		}
-		rest = filepath.Join(filepath.Base(dir), rest)
-		dir = filepath.Dir(dir)
-	}
+	// Physical, not spelled: the directory the file would land in, with
+	// symlinks in its existing part resolved.
+	dir := filepath.Dir(resolveExisting(abs))
 	for anc := dir; ; anc = filepath.Dir(anc) {
 		for _, e := range rows {
 			if e.DestPath == "" {

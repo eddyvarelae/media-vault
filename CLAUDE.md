@@ -123,7 +123,7 @@ command:
 | `scan` | scan error (unreadable source, cancelled); a `--rule` whose subdir is absolute or has a `..` component (`invalid rule`, `die`) — same for `copy` and `move`, B34 | collisions/recopies/verified-changed are predicted — it only reports |
 | `copy` | run finished `INCOMPLETE:` — any file failed, any unresolved destination collision, any file whose verified archive copy holds different content (kept, never overwritten), any file whose destination or staging path a verified row owns, any file whose destination path passes through a symlinked directory, any intra-run duplicate left unarchived (stderr names which); interrupted between files; `die` on scan or manifest-write error | no-op (including only retouched files), `--dry-run` (even with predicted collisions, verified-changed or owned files). `--dry-run` writes **no archive file and no manifest row**; it does still create the config dir and open/initialize `manifest.db` (pre-existing, every command does — B31) |
 | `verify` | any mismatch, missing, or read error; `die` on cancel | — |
-| `certify` | output path inside the tree it certifies (`Cannot certify: certificate output is inside the archive …` — before signing, before the key is created; the tree is recognised by its own files: an ancestor of the output path under which a row's `dest_path` exists as a regular file of the row's size, `certify.InsideArchive`); any row not `verified` (`Cannot certify: …`); no rows for the disk; key/sign/marshal/write error | — |
+| `certify` | output path not a regular file or absent (a symlink at the output name — dangling or not — a directory: `Cannot certify: certificate output path is not a regular file`); output path inside the tree it certifies (`Cannot certify: certificate output is inside the archive …`) — with `--root <dest-dir>` by physical containment (resolved paths, `filepath.Rel`), without it by recognising the tree from its own files (`certify.InsideArchive`: an ancestor of the output path under which a row's `dest_path` exists as a regular file of the row's size — a fallback that a damaged tree defeats, so the scripts always pass `--root`); all before signing and before the key is created; `--root` without a value or an unknown flag (`die`); any row not `verified` (`Cannot certify: …`); no rows for the disk; key/sign/marshal/write error | — |
 | `inventory` | `die` on walk error | per-file hash errors — counted in `Errors:`, exit 0 |
 | `dedup` | unknown arg or bad `--min-size` (`die`, not usage); query error | — |
 | `unique`, `tag`, `untag`, `tagged`, `tags` | query error | no matches (`No files tagged …`) |
@@ -156,8 +156,10 @@ number nobody can recompute is a finding, not a fact.
 - Never write to a source disk. Containers mount `/sources` read-only.
 - Certificates live beside the manifest (`/volume1/docker/vault-certs/` on
   the NAS, `VAULT_CERTS` in `nas-verify-certify-all.sh`), never inside the
-  tree they certify; `certify` refuses. A `--rule` never routes outside the
-  destination root.
+  tree they certify; `certify --root <dest-dir>` refuses (always pass
+  `--root` from scripts — without it the tree is only recognised by files
+  that still match their rows), and never writes through a symlink at the
+  output name. A `--rule` never routes outside the destination root.
 - Atomic destination writes only (`.vault-partial` created `O_EXCL` → fsync
   → rename). The staging path must be empty; the writer never truncates.
 - A `verified` destination is never overwritten. Not by recopy, not by any

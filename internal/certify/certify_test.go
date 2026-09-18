@@ -174,3 +174,65 @@ func TestInsideArchiveFindsTheTreeByItsFiles(t *testing.T) {
 		t.Errorf("size mismatch should not identify the tree, got %q", got)
 	}
 }
+
+// Review #12: CheckOutput's three layers directly, including --root with
+// "." and "/" and a tree whose files no longer match their rows.
+func TestCheckOutputLayers(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "archive")
+	if err := os.MkdirAll(filepath.Join(root, "DCIM"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "DCIM", "a.JPG"), []byte("eight!!!"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stale := []manifest.Entry{{DestPath: "DCIM/a.JPG", Size: 7}} // the file is 8 bytes now
+	certs := filepath.Join(base, "certs")
+	if err := os.MkdirAll(certs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "DCIM", "a.JPG"), filepath.Join(certs, "leaf-link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(root, filepath.Join(certs, "dir-link")); err != nil {
+		t.Fatal(err)
+	}
+	// Leaf symlink: refused regardless of root.
+	for _, r := range []string{"", root} {
+		if _, err := CheckOutput(filepath.Join(certs, "leaf-link"), r, stale); !errors.Is(err, ErrOutputNotAFile) {
+			t.Errorf("root %q: leaf symlink: %v, want ErrOutputNotAFile", r, err)
+		}
+	}
+	// Without --root and stale rows: the heuristic cannot see the tree.
+	if got, err := CheckOutput(filepath.Join(root, "c.json"), "", stale); err != nil || got != "" {
+		t.Errorf("fallback with stale rows = %q, %v (expected clear: the heuristic is only as good as the files)", got, err)
+	}
+	// With --root: containment, whatever the files say.
+	for _, out := range []string{filepath.Join(root, "c.json"), filepath.Join(root, "DCIM", "c.json"), filepath.Join(root, "new", "c.json"), filepath.Join(certs, "dir-link", "c.json")} {
+		got, err := CheckOutput(out, root, stale)
+		if err != nil || got == "" {
+			t.Errorf("--root: %s = %q, %v; want the root", out, got, err)
+		}
+	}
+	if got, err := CheckOutput(filepath.Join(certs, "c.json"), root, stale); err != nil || got != "" {
+		t.Errorf("--root, beside: %q, %v; want clear", got, err)
+	}
+	if got, _ := CheckOutput(filepath.Join(base, "c.json"), root, stale); got != "" {
+		t.Errorf("--root, the parent of the root: %q; want clear", got)
+	}
+	// Roots "." and "/".
+	wd, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(wd) })
+	if got, err := CheckOutput("DCIM/c.json", ".", stale); err != nil || got == "" {
+		t.Errorf("root \".\": %q, %v; want inside", got, err)
+	}
+	if got, err := CheckOutput(filepath.Join(certs, "c.json"), ".", stale); err != nil || got != "" {
+		t.Errorf("root \".\", outside: %q, %v; want clear", got, err)
+	}
+	if got, err := CheckOutput(filepath.Join(certs, "c.json"), "/", stale); err != nil || got == "" {
+		t.Errorf("root \"/\": %q, %v; everything is inside /", got, err)
+	}
+}

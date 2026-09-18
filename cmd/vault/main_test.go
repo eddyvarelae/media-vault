@@ -1088,3 +1088,118 @@ func TestRulesRefuseEscapes(t *testing.T) {
 		t.Errorf("routed file missing: %v", err)
 	}
 }
+
+// TestCertifyOutputLeafAndRoot is review #12: a symlink at the output name
+// is refused whatever it points at (os.WriteFile would follow it), --root
+// refuses by containment even when the tree's files no longer match their
+// rows, and the content heuristic remains the fallback without --root.
+func TestCertifyOutputLeafAndRoot(t *testing.T) {
+	setup := func(t *testing.T) (cfg, dst, certs string) {
+		cfg, src, dst, certs := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(src, "DCIM", "a.JPG"), "a photo", t0)
+		if _, _, code := vault(t, cfg, "copy", "sony", src, dst); code != 0 {
+			t.Fatalf("copy: exit %d", code)
+		}
+		if _, _, code := vault(t, cfg, "verify", "sony", dst); code != 0 {
+			t.Fatalf("verify: exit %d", code)
+		}
+		return cfg, dst, certs
+	}
+
+	t.Run("symlink leaf to a verified photo", func(t *testing.T) {
+		cfg, dst, certs := setup(t)
+		out := filepath.Join(certs, "out.json")
+		if err := os.Symlink(filepath.Join(dst, "DCIM", "a.JPG"), out); err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range [][]string{
+			{"certify", "sony", out},
+			{"certify", "sony", out, "--root", dst},
+		} {
+			_, errOut, code := vault(t, cfg, args...)
+			if code != 1 || !strings.Contains(errOut, "Cannot certify: certificate output path is not a regular file") || !strings.Contains(errOut, "is a symlink") {
+				t.Errorf("%v: exit %d, stderr %q", args[3:], code, errOut)
+			}
+		}
+		if got := readFile(t, filepath.Join(dst, "DCIM", "a.JPG")); got != "a photo" {
+			t.Fatalf("verified photo overwritten through the output symlink: %q", got)
+		}
+		if _, _, code := vault(t, cfg, "verify", "sony", dst); code != 0 {
+			t.Errorf("verify afterwards: exit %d", code)
+		}
+	})
+
+	t.Run("symlink leaf into the tree, and dangling", func(t *testing.T) {
+		cfg, dst, certs := setup(t)
+		into := filepath.Join(certs, "into.json")
+		if err := os.Symlink(filepath.Join(dst, "new.cert.json"), into); err != nil { // dangling, would create inside the tree
+			t.Fatal(err)
+		}
+		_, errOut, code := vault(t, cfg, "certify", "sony", into)
+		if code != 1 || !strings.Contains(errOut, "is a symlink") {
+			t.Errorf("exit %d, stderr %q", code, errOut)
+		}
+		if _, err := os.Lstat(filepath.Join(dst, "new.cert.json")); err == nil {
+			t.Errorf("certificate created inside the tree through the link")
+		}
+		dir := filepath.Join(certs, "dir.json")
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if _, errOut, code := vault(t, cfg, "certify", "sony", dir); code != 1 || !strings.Contains(errOut, "is a directory") {
+			t.Errorf("directory at out: exit %d, stderr %q", code, errOut)
+		}
+		// An existing regular file is fine: a previous certificate is superseded.
+		out := filepath.Join(certs, "prev.json")
+		writeFile(t, out, "old cert", t0)
+		if _, errOut, code := vault(t, cfg, "certify", "sony", out); code != 0 {
+			t.Errorf("existing regular file: exit %d, stderr %q", code, errOut)
+		}
+	})
+
+	t.Run("--root refuses by containment even with stale rows", func(t *testing.T) {
+		cfg, dst, certs := setup(t)
+		// Every archived file changes size: the content heuristic no longer
+		// recognises the tree, --root still does.
+		writeFile(t, filepath.Join(dst, "DCIM", "a.JPG"), "a photo, longer", t0)
+		for _, out := range []string{filepath.Join(dst, "c.json"), filepath.Join(dst, "DCIM", "c.json"), filepath.Join(dst, "notyet", "c.json")} {
+			_, errOut, code := vault(t, cfg, "certify", "sony", out, "--root", dst)
+			if code != 1 || !strings.Contains(errOut, "certificate output is inside the archive it certifies") {
+				t.Errorf("%s: exit %d, stderr %q", out, code, errOut)
+			}
+			if _, err := os.Lstat(out); err == nil {
+				t.Errorf("%s written", out)
+			}
+		}
+		// Through a directory symlink into the tree, with --root.
+		link := filepath.Join(certs, "link")
+		if err := os.Symlink(dst, link); err != nil {
+			t.Fatal(err)
+		}
+		if _, errOut, code := vault(t, cfg, "certify", "sony", filepath.Join(link, "c.json"), "--root", dst); code != 1 || !strings.Contains(errOut, "inside the archive") {
+			t.Errorf("via directory link: exit %d, stderr %q", code, errOut)
+		}
+		// Beside the manifest, with --root: allowed. (Rows are stale, so
+		// certify itself still signs - certification trusts verify's record;
+		// only placement is decided here.)
+		if _, errOut, code := vault(t, cfg, "certify", "sony", filepath.Join(certs, "ok.json"), "--root", dst); code != 0 {
+			t.Errorf("beside the manifest with --root: exit %d, stderr %q", code, errOut)
+		}
+	})
+
+	t.Run("flags", func(t *testing.T) {
+		cfg, dst, certs := setup(t)
+		if _, _, code := vault(t, cfg, "certify", "sony", filepath.Join(certs, "x.json"), "--root"); code != 1 {
+			t.Errorf("--root without a value: exit %d, want 1", code)
+		}
+		if _, _, code := vault(t, cfg, "certify", "sony", filepath.Join(certs, "x.json"), "--bogus"); code != 1 {
+			t.Errorf("unknown flag: exit %d, want 1", code)
+		}
+		if _, _, code := vault(t, cfg, "certify", "--root", dst, "sony", filepath.Join(certs, "x.json")); code != 0 {
+			t.Errorf("--root before the positionals: exit %d, want 0", code)
+		}
+		if _, _, code := vault(t, cfg, "certify", "--root", dst); code != 2 {
+			t.Errorf("no disk: exit %d, want 2", code)
+		}
+	})
+}

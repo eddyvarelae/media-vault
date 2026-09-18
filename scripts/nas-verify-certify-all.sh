@@ -42,7 +42,7 @@ for entry in "${disks[@]}"; do
 
   echo "[$(date)] === CERTIFY $disk ===" | tee -a "$LOG"
   if ! docker run --rm -v /volume1:/volume1 -e VAULT_CONFIG=/volume1/docker/vault-nas-config "$IMG" \
-      certify "$disk" "$CERTS/$disk.cert.json" >> "$LOG" 2>&1; then
+      certify "$disk" "$CERTS/$disk.cert.json" --root "$root" >> "$LOG" 2>&1; then
     echo "[$(date)] CERTIFY FAILED for $disk" | tee -a "$LOG"
     failures=$((failures+1))
     continue

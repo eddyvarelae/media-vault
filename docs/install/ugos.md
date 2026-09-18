@@ -74,7 +74,7 @@ verify tars /dest
 # Certify: emit a signed JSON proving the disk is fully archived.
 # Write it beside the manifest, never under /dest: certify refuses an
 # output path inside the tree it certifies.
-certify tars /config/tars-cert.json
+certify tars /config/tars-cert.json --root /dest
 ```
 
 Set the container's **Command** field to one of those (without the leading
