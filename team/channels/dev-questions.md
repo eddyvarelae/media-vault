@@ -62,6 +62,18 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-18T03:22-07:00) - #32, #33, #34, #35 all fixed. READY FOR REVIEW, one per branch.** All four green (`go test ./... -count=1`, `gofmt`/`vet`/`bash -n` clean); none merged; `main` not merged into any except where already carried.
+
+- **#32 `tagger` → `3e3fd5a`** (review #26, 4). (1) `safe_rel` refuses absolute / climbing / `reports`-`#recycle`-hidden-AppleDouble paths for manifest rows (dest_path AND the empty-dest source_path fallback) as well as walked files, counted and announced; the shell re-checks each selected file's NAS path component-by-component (`path_is_unsafe`), refusing a symlinked directory or leaf at pull time. (2) the junk filter now covers manifest rows. (3) lock: cleanup trap on ownership before the state db opens, info-less lock = being acquired, dead lock taken over by an atomic rename. (4) the dry-run stderr file lives in the trapped temp dir. **Plus a snapshot-freshness fix found testing:** `take_snapshot` removes the previous snapshot before rsync, so a manifest edited within the same second reusing pages (unchanged size) is never rsync-skipped - the torn/stale db/wal pair the Reviewer flagged as out of #26's scope. Mutations: safe_rel(29), path_is_unsafe(3), info-less-as-dead(1), leaked errf(1), snapshot reuse(10).
+
+- **#33 `small-fixes` → `d84c7cf`** (review #27, 2). (1) `dryRunRequested` replaces `hasDryRun`: it skips the value after `--prefix`/`--rule`/`--on-collision`, so `--prefix --dry-run` is a prefix, not a mode switch, and main opens the manifest by the same interpretation the command runs by. (2) `move`'s guard (`guardDest`) runs at the top of the loop, before `MkdirAll` and before the duplicate `os.Remove`/`DeleteEntry`, and again after a collision rename - `move A A arch arch` over a verified same-path row no longer deletes it. Mutations: raw dry-run scan, guard-after-MkdirAll.
+
+- **#34 `backup` → `bc89f6f`** (review #28, 5). (1) `vault gap --tsv` is `O_EXCL|O_NOFOLLOW` (never overwrites the manifest/a source through an alias); the script removes its own dated output before a `--force` re-report. (2) lock discipline as #26-3. (3) unknown volumes logged once per attach identity, independent of due reports, markers pruned on detach. (4) snapshot failures throttled to hourly like the missing-manifest precondition, cleared on a usable snapshot. (5) the managed `go build` sets `GOCACHE`/`GOMODCACHE`/`GOTMPDIR` under `$STATE_DIR`; the harness stops preserving external caches and asserts the boundary (and chmods before cleanup - Go's module cache is read-only). Mutations: O_TRUNC tsv, info-less-lock-takeover, unknown-lifecycle removed, un-throttled snapshot, unconfined build.
+
+- **#35 `restore` → `5f48636`** (review #30, 1). The ENOENT claimant fallback (spelling key when a row's file can't be stat'ed) applies only to a **same-disk** row, which shares the dest-root; a different disk's folded-equal row under another root is no longer falsely flagged, so a valid cross-root restore is not refused. Its real aliases into this root are still caught by stat+`SameFile`. Test branches on the host's case sensitivity (the false positive is case-sensitive-only; **this Mac folds case, so that mutant is not observable here** - stated).
+
+Everything is queued for merge in your order; `restore` still awaits your word to merge `main`. Idle.
+
 **Dev (2026-09-18T02:47-07:00) - #24 fixes done → READY FOR REVIEW (#30); #29 fix done → READY FOR REVIEW (#31). #26's four on `tagger` next (→ #32).**
 
 **#30 `restore` → `d831dcc`** (one commit on `b70f35e`; `main` not merged, per your rule). **Rung: `tested`**, 8 ok.
