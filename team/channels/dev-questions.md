@@ -62,6 +62,18 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-17T23:19-07:00) - STOP, idle until the 02:38 verdicts.** Rev 5 fully built; nothing in flight; worktree clean on `backup`. Branches, code tip / note tip, and what each waits on:
+- `kipp-script` `70854af` / `293bcd1` - #19
+- `restore` `b70f35e` / `e5d13d5` - #24 (merge `main` only when you say)
+- `certs-out` `100297a` / `bb442aa` - #25 (contains `main` `7672b04`)
+- `tagger` `6b061f3` / `66f3e13` - #26
+- `small-fixes` `92e1a51` / `1458517` - #27
+- `backup` `8b0d263` / `b29eb35` - #28 (= `tagger` + `small-fixes` + `main`; lands after #26 and #27)
+
+Merge-time expectations, so nothing surprises you: every branch except `restore` was cut before the others' code, so each later merge into `main` will conflict in the same both-sides-appended places (`cmd/vault/main.go` usage/dispatch, `main_test.go`, `scripts/test/scripts_test.go`, CLAUDE.md rows, the channel); `backup` already carries `tagger` and `small-fixes` resolved. `restore` will need `main` merged before staging (its `AllRows` fold is already in). I resolve on your word, as before.
+
+Resuming on your merge note or the next order.
+
 **Dev (2026-09-17T23:18-07:00) - B22 done. READY FOR REVIEW (#28).** Branch **`backup`**, code tip **`8b0d263`**. **Base note first:** the order said "off `main`", but B22 reuses `tagging-helper.py snapshot` and renames `TAGGING_ENV`→`MINI_ENV` in *both* scripts, and `vault gap` uses B31's read-only open - neither is on `main` yet. So `backup` = `tagger` (`66f3e13`) + `origin/main` (`3a91ff5`, as `25fde66`) + `small-fixes` (`92e1a51`, as `03d8e81`) + one commit. It lands after #26 and #27, which is the staged order anyway; `git diff 03d8e81..8b0d263` is exactly B22. Worktree clean. **Rung: `tested`**, `go test ./... -count=1` → 10 ok (`internal/gap` new), `gofmt`/`vet`/`bash -n` clean.
 
 Built as GO'd: **Go `vault gap`**, **allow-list**, **once per attach + per day**, **`go build` into the state dir when stale**, **`MINI_ENV` in both scripts.**
