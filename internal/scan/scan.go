@@ -156,7 +156,7 @@ func Build(ctx context.Context, m *manifest.Manifest, disk, srcRoot, dstRoot, pr
 func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, dstRoot, prefix string, rules []Rule, onCollision CollisionStrategy, dedupeContent bool) (*Plan, error) {
 	p := &Plan{}
 	seenThisRun := map[string]string{} // sha256 -> source-relative path queued to copy
-	owners, err := verifiedOwners(m, dstRoot)
+	owners, err := VerifiedOwners(m, dstRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -374,28 +374,32 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 	return p, nil
 }
 
-// ownerIndex maps the physical location of every verified destination to
+// OwnerIndex maps the physical location of every verified destination to
 // its row. Physical means what the writer will touch: joined to this run's
 // root and cleaned, so a `..` in a routing rule collapses to where it
 // really lands, and case-folded, so `X.mov` and `x.mov` are one key. The
 // fold is unconditional rather than probed per filesystem: on a
 // case-sensitive root it can only refuse a write that differs from a
 // certified file by case alone, which is the safe mistake. (Unicode
-// normalization aliases are not folded; camera names are ASCII.)
-type ownerIndex map[string]manifest.Entry
+// normalization aliases are not folded; camera names are ASCII.) A row
+// with an empty dest_path locates its file by source_path (verify's rule)
+// and is indexed there. copy and move both consult it.
+type OwnerIndex map[string]manifest.Entry
 
-func verifiedOwners(m *manifest.Manifest, dstRoot string) (ownerIndex, error) {
+// VerifiedOwners builds the index for dstRoot from every verified row.
+func VerifiedOwners(m *manifest.Manifest, dstRoot string) (OwnerIndex, error) {
 	rows, err := m.VerifiedRows()
 	if err != nil {
 		return nil, err
 	}
-	idx := make(ownerIndex, len(rows))
+	idx := make(OwnerIndex, len(rows))
 	for _, e := range rows {
-		if e.DestPath == "" {
-			continue
+		rel := e.DestPath
+		if rel == "" {
+			rel = e.SourcePath
 		}
-		if _, dup := idx[physKey(dstRoot, e.DestPath)]; !dup {
-			idx[physKey(dstRoot, e.DestPath)] = e
+		if _, dup := idx[physKey(dstRoot, rel)]; !dup {
+			idx[physKey(dstRoot, rel)] = e
 		}
 	}
 	return idx, nil
@@ -406,14 +410,22 @@ func physKey(root, rel string) string {
 	return strings.ToLower(filepath.Clean(filepath.Join(root, rel)))
 }
 
-// claims reports whether either path copy.File will touch for task - the
-// staging file it creates first, then the final name - is a verified
-// row's destination.
-func (idx ownerIndex) claims(dstRoot string, task FileTask) *OwnedTask {
-	for _, rel := range []string{task.DstRel + ".vault-partial", task.DstRel} {
-		if owner, ok := idx[physKey(dstRoot, rel)]; ok {
-			return &OwnedTask{Task: task, Path: rel, Owner: owner}
+// Owner reports the verified row, if any, whose file is at rel under
+// dstRoot or at rel's .vault-partial staging name - the two paths a writer
+// touches - and which of the two it was.
+func (idx OwnerIndex) Owner(dstRoot, rel string) (owner manifest.Entry, path string, ok bool) {
+	for _, p := range []string{rel + ".vault-partial", rel} {
+		if o, found := idx[physKey(dstRoot, p)]; found {
+			return o, p, true
 		}
+	}
+	return manifest.Entry{}, "", false
+}
+
+// claims is Owner for a task, as a refusal record.
+func (idx OwnerIndex) claims(dstRoot string, task FileTask) *OwnedTask {
+	if owner, path, ok := idx.Owner(dstRoot, task.DstRel); ok {
+		return &OwnedTask{Task: task, Path: path, Owner: owner}
 	}
 	return nil
 }

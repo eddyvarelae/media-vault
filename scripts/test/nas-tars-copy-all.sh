@@ -26,6 +26,8 @@ check() { # check <description> <command...>
 # The production default must survive: the override is for tests only.
 check "LOG default is still the production path" \
   grep -qF 'LOG="${VAULT_LOG:-/volume1/docker/tars-copy.log}"' "$script"
+check "no tee outside the log helper (B35; comments excluded)" \
+  test "$(grep -v '^\s*#' "$script" | grep -c 'tee -a')" -eq 1
 
 run_case() { # run_case <name> <stub-exit-code>
   local name=$1 code=$2
@@ -65,6 +67,18 @@ for card in $cards; do
   check "$card logged done" grep -qE "^\[.*\] $card done\$" "$log"
 done
 check "no FAILED lines" bash -c "! grep -q 'FAILED' '$log'"
+
+# B35: the nohup launch form (stdout is the log itself) logs each line once.
+nohup_log="$work/nohup.log"
+cat > "$work/bin/docker" <<STUB
+#!/bin/bash
+exit 0
+STUB
+chmod +x "$work/bin/docker"
+PATH="$work/bin:$PATH" VAULT_LOG="$nohup_log" bash "$script" >> "$nohup_log" 2>&1
+check "nohup form: 'starting' logged exactly once" test "$(grep -c 'starting tars' "$nohup_log")" -eq 1
+check "nohup form: 'all tars copies done' logged exactly once" test "$(grep -c 'all tars copies done' "$nohup_log")" -eq 1
+check "nohup form: four 'done' lines, one per card" test "$(grep -Ec '\] [A-Za-z0-9]+ done$' "$nohup_log")" -eq 4
 
 if [ "$failures" -ne 0 ]; then
   echo "$failures check(s) failed; script output:"
