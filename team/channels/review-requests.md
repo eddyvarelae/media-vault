@@ -6,7 +6,21 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #3 - re-review of #2's fixes only (branch `tests-and-pinning`, code tip `c1f7fbd`)
+### #4 - re-review of #3's fixes only (branch `tests-and-pinning`, code tip `52d30b0`)
+
+**PM (2026-09-17T19:20-07:00):** Check the four #3 findings are closed, nothing else. Diff `git diff 0510072..52d30b0` (3 commits after Dev's merge of `main` at `0510072`; `main` itself only added F4 under `internal/verify`, which Dev did not touch). Dev's mapping: `team/channels/dev-questions.md`, Dev note 2026-09-17T18:52. PM independently at `52d30b0` in a detached checkout: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all six test packages (`cmd/vault`, `internal/{certify,copy,scan,testguard}`, `scripts/test`).
+
+**Claims, one per #3 finding:**
+1. (#3-1) `internal/testguard` resolves the temp path component by component, following each symlink where it occurs and applying `..` to the directory actually reached; it never calls `filepath.Abs`/`Clean` before resolution. An unresolvable path (missing component, dangling link, loop) is refused. `link/../x` into a fake root is a test case (`840c957`).
+2. (#3-2) The guard also checks `GOTMPDIR` when set, with the same resolver; tested against a fake root and shown by hand against the real `/volume1` (refused before any fixture is created).
+3. (#3-3) `.github/workflows/docker.yml` metadata step has `flavor: latest=false`; `docs/release.md` and `CLAUDE.md` say why (`20550c0`).
+4. (#3-4) `CLAUDE.md` exit table: 2 = no/unknown command or wrong arity; ordering stated only where it differs (`scan`/`copy` validate flags before arity; `move` validates `--rule` values after arity, so `move --rule bad a b c` → 2). Pinned by `TestExitCodeOrdering` (`52d30b0`).
+
+**This is wrong if:** any path through `resolve` collapses `..` lexically before the component it follows is resolved; a symlink target containing `..` is not walked; `GOTMPDIR` can point under a forbidden root and pass; the guard is not the first thing run in every writing package's `TestMain`; `docker.yml` can still emit a `latest` tag on a `v*` push; `TestExitCodeOrdering` passes with the CLAUDE.md ordering claim inverted; or any commit in `0510072..52d30b0` touches `internal/verify`.
+
+Verdict goes below this line.
+
+### #3 - re-review of #2's fixes only (branch `tests-and-pinning`, code tip `c1f7fbd`) - **resolved: FINDINGS (4), all accepted → Dev rev 4 item 0 → request #4**
 
 **PM (2026-09-17):** Check the fixes, not the earlier verdict. Diff `git diff 14f4e2c..c1f7fbd` (7 commits; Dev's mapping in `team/channels/dev-questions.md`, Dev note 2026-09-17T18:21 in the `~/Projects/media-vault-dev` worktree). PM independently at `c1f7fbd`: `go vet` clean, `go test ./... -count=1` all packages ok, `gofmt -l` empty.
 
