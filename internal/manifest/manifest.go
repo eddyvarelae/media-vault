@@ -3,6 +3,7 @@ package manifest
 import (
 	"database/sql"
 	"fmt"
+	"os"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -69,6 +70,45 @@ type Entry struct {
 	CopiedAt   int64
 	VerifiedAt int64
 	Status     string
+}
+
+// OpenReadOnly opens an existing manifest for reading only (`mode=ro`): no
+// schema init, no journal-mode change, no row can be written. A --dry-run
+// uses it so that "dry" means the manifest file is untouched too (B31). It
+// fails if the file does not exist.
+func OpenReadOnly(path string) (*Manifest, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout = 30000"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("busy_timeout: %w", err)
+	}
+	// Prove it is read-only before handing it out: a write must fail.
+	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS ro_probe (x)"); err == nil {
+		db.Close()
+		return nil, fmt.Errorf("%s opened writable although mode=ro was requested", path)
+	}
+	return &Manifest{db: db}, nil
+}
+
+// OpenEmpty is an in-memory manifest with the schema and no rows: what a
+// --dry-run plans against when no manifest exists yet, instead of creating
+// one on disk.
+func OpenEmpty() (*Manifest, error) {
+	db, err := sql.Open("sqlite", "file::memory:")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec(schema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("init schema: %w", err)
+	}
+	return &Manifest{db: db}, nil
 }
 
 func Open(path string) (*Manifest, error) {

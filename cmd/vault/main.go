@@ -72,11 +72,28 @@ func main() {
 	if configDir == "" {
 		configDir = "./vault-config"
 	}
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		die("create config dir: %v", err)
+	dbPath := filepath.Join(configDir, "manifest.db")
+	var m *manifest.Manifest
+	var err error
+	if hasDryRun(args) {
+		// A dry run writes nothing - not an archive file, not a row, and
+		// (B31) not the config dir or the manifest file either: the
+		// manifest is opened read-only, or planned against an empty
+		// in-memory one when none exists yet.
+		if _, statErr := os.Stat(dbPath); statErr == nil {
+			m, err = manifest.OpenReadOnly(dbPath)
+		} else if os.IsNotExist(statErr) {
+			fmt.Fprintf(os.Stderr, "(dry-run: no manifest at %s yet; planning against an empty one, creating nothing)\n", dbPath)
+			m, err = manifest.OpenEmpty()
+		} else {
+			err = statErr
+		}
+	} else {
+		if err := os.MkdirAll(configDir, 0o755); err != nil {
+			die("create config dir: %v", err)
+		}
+		m, err = manifest.Open(dbPath)
 	}
-
-	m, err := manifest.Open(filepath.Join(configDir, "manifest.db"))
 	if err != nil {
 		die("open manifest: %v", err)
 	}
@@ -594,7 +611,7 @@ func runRepairDest(ctx context.Context, m *manifest.Manifest, args []string) int
 	}
 	repairable, unresolved, by := plan.Counts()
 
-	fmt.Printf("Disk %s at %s: %d rows with a dest_path, %d intact, %d unresolved (%d inventoried rows have no dest_path and were not examined)\n",
+	fmt.Printf("Disk %s at %s: %d rows with a dest_path, %d intact, %d unresolved (%d rows have no dest_path — located by source_path, any status — and were not examined)\n",
 		disk, root, plan.Checked, plan.Intact, len(plan.Changes), plan.NoDest)
 	for _, c := range plan.Changes {
 		switch c.Outcome {
@@ -960,6 +977,18 @@ func human(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// hasDryRun reports whether --dry-run is among the arguments. It is only
+// used to pick how the manifest is opened; each command still parses its
+// own flags and rejects the flag where it means nothing.
+func hasDryRun(args []string) bool {
+	for _, a := range args {
+		if a == "--dry-run" {
+			return true
+		}
+	}
+	return false
 }
 
 func die(format string, args ...any) {

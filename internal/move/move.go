@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/eddyvarelae/media-vault/internal/manifest"
+	"github.com/eddyvarelae/media-vault/internal/scan"
 )
 
 // Rule maps a file extension (no leading dot, case-insensitive) to a
@@ -134,6 +135,15 @@ func renameWithMtimeYear(rel string, mtimeNs int64) string {
 // per-file so a partial failure doesn't lose progress already committed.
 func Execute(ctx context.Context, m *manifest.Manifest, plan *Plan, dstDisk string, onCollision CollisionStrategy, onFile func(mv Move, status string)) (*Result, error) {
 	res := &Result{}
+	// The never-overwrite rule is copy's and move's alike (B32): a rename
+	// never lands on a path a verified row owns - present or missing, in
+	// any spelling - nor passes through a symlinked directory, where two
+	// spellings are one file. The on-disk Stat below sees present files;
+	// this sees the manifest and the directories.
+	owners, err := scan.VerifiedOwners(m, plan.dstRoot)
+	if err != nil {
+		return nil, err
+	}
 	for _, mv := range plan.Moves {
 		if err := ctx.Err(); err != nil {
 			return res, err
@@ -215,6 +225,26 @@ func Execute(ctx context.Context, m *manifest.Manifest, plan *Plan, dstDisk stri
 			continue
 		}
 
+		if owner, path, ok := owners.Owner(plan.dstRoot, mv.DstRel); ok {
+			res.Skipped++
+			if onFile != nil {
+				onFile(mv, fmt.Sprintf("dst-owned by verified row %s:%s (%s) — never written", owner.SourceDisk, owner.SourcePath, path))
+			}
+			continue
+		}
+		if link, err := scan.SymlinkComponent(plan.dstRoot, mv.DstRel); err != nil {
+			res.Errors++
+			if onFile != nil {
+				onFile(mv, "lstat-error: "+err.Error())
+			}
+			continue
+		} else if link != "" {
+			res.Skipped++
+			if onFile != nil {
+				onFile(mv, "dst through a symlink ("+link+") — never written")
+			}
+			continue
+		}
 		if err := os.Rename(mv.SrcAbs, mv.DstAbs); err != nil {
 			res.Errors++
 			if onFile != nil {

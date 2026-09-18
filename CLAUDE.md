@@ -42,7 +42,7 @@ still the one command.
 | `internal/repair` | `repair-dest`: rows whose `dest_path` is not a regular file under the root → same basename one directory down, `Lstat` only (no symlink as leaf, subdirectory or ancestor; containment proven under the resolved root), kept only on size **and** sha256 match and only if no other row's `dest_path` is that file (physical compare, as in `scan`); the row's own directory walked the same way *before* a leaf counts as intact; a chosen file is reserved so two rows of one run cannot repair to it (`CONFLICT`, both unresolved), and `Apply` re-checks claims at write time; outcomes `REPAIR` / `NOT FOUND` / `AMBIGUOUS` / `OWNED` / `NOT A FILE` / `UNSAFE` / `CONFLICT`; `Apply` rewrites `dest_path` alone (`UpdateDestPath`), status untouched so `verify` still promotes |
 | `internal/dedup`, `internal/move`, `internal/importer` | Duplicate reports, manifest-aware moves, video-tagger imports |
 | `scripts/tagging/` | The nightly video tagger (B17): `run-tagging.sh` + `tagging-helper.py`, `README.md` is the contract. Machine settings from mini-server's `mini.env`, job policy defaulted in the script (tiers, 200 GB, `verified` rows only, newest first), every policy override logged; the NAS manifest is read only through a per-run snapshot. Tested by `scripts/test/run-tagging.sh` against a manifest built by `vault` itself |
-| `scripts/*.sh` | How work runs on the NAS: `docker run --rm … ghcr.io/eddyvarelae/media-vault:<tag> <command>`, sequential, as root via `sudo nohup`. `nas-kipp-copy-all.sh` (B26): `KIPP_SRC` required (container path of the disk), `DRY_RUN=1` plans only, `--dedupe-content --on-collision rename-mtime-year` on every folder, per-folder flags per `team/context/runbook-kipp.md` step 2 |
+| `scripts/*.sh` | How work runs on the NAS: `docker run --rm … ghcr.io/eddyvarelae/media-vault:<tag> <command>`, sequential, as root via `sudo nohup`. `nas-tars-copy-all.sh` and `nas-verify-certify-all.sh` log through a `log()` helper (once per line under any launch form — B27/B35). `nas-kipp-copy-all.sh` (B26): `KIPP_SRC` required (container path of the disk), `DRY_RUN=1` plans only, `--dedupe-content --on-collision rename-mtime-year` on every folder, per-folder flags per `team/context/runbook-kipp.md` step 2 |
 
 ## Manifest status vocabulary
 
@@ -127,7 +127,7 @@ command:
 | Command | Exits 1 when | Exits 0 even though |
 |---|---|---|
 | `scan` | scan error (unreadable source, cancelled) | collisions/recopies/verified-changed are predicted — it only reports |
-| `copy` | run finished `INCOMPLETE:` — any file failed, any unresolved destination collision, any file whose verified archive copy holds different content (kept, never overwritten), any file whose destination or staging path a verified row owns, any file whose destination path passes through a symlinked directory, any intra-run duplicate left unarchived (stderr names which); interrupted between files; `die` on scan or manifest-write error | no-op (including only retouched files), `--dry-run` (even with predicted collisions, verified-changed or owned files). `--dry-run` writes **no archive file and no manifest row**; it does still create the config dir and open/initialize `manifest.db` (pre-existing, every command does — B31) |
+| `copy` | run finished `INCOMPLETE:` — any file failed, any unresolved destination collision, any file whose verified archive copy holds different content (kept, never overwritten), any file whose destination or staging path a verified row owns, any file whose destination path passes through a symlinked directory, any intra-run duplicate left unarchived (stderr names which); interrupted between files; `die` on scan or manifest-write error | no-op (including only retouched files), `--dry-run` (even with predicted collisions, verified-changed or owned files). `--dry-run` writes **no archive file and no manifest row**, and (B31) neither creates the config dir nor initializes `manifest.db`: the manifest is opened read-only (`OpenReadOnly`, `mode=ro`, proven by a write that must fail) or, when none exists, planned against an empty in-memory one with a notice on stderr. A read-only open of a WAL database still creates `-shm`/empty `-wal` beside it — SQLite's, not ours |
 | `verify` | any mismatch, missing, or read error; `die` on cancel | — |
 | `certify` | any row not `verified` (`Cannot certify: …`); no rows for the disk; key/sign/marshal/write error | — |
 | `repair-dest` | unknown flag (`die`); query, read-dir or hash error (`die`); write error mid-run (`die`, names how many rows were already written — each was hash-backed, so they stand); after a real run, any row still unresolved — `NOT FOUND`, `AMBIGUOUS`, `OWNED`, `NOT A FILE`, `UNSAFE`, `CONFLICT` (`INCOMPLETE:` on stderr, counts per outcome) | `--dry-run` (even with unresolved rows) — it writes no manifest row, and `repair-dest` never writes archive files; the config dir / `manifest.db` initialization on open is pre-existing (B31); a disk with no rows |
@@ -135,7 +135,7 @@ command:
 | `dedup` | unknown arg or bad `--min-size` (`die`, not usage); query error | — |
 | `unique`, `tag`, `untag`, `tagged`, `tags` | query error | no matches (`No files tagged …`) |
 | `symlinks`, `hardlinks` | malformed `<disk>=<path>`; query or mkdir error | individual links that FAIL or SKIP — counted, exit 0 |
-| `move` | bad `--on-collision`/`--rule`; plan or execute error | per-file `Errors:`/`Skipped:` in the summary — exit 0; `--dry-run` |
+| `move` | bad `--on-collision`/`--rule`; plan or execute error | per-file `Errors:`/`Skipped:` in the summary — exit 0, including (B32) a destination a verified row owns (`dst-owned by verified row …`) or one through a symlinked directory (`dst through a symlink …`), both never written; `--dry-run` |
 | `import-tags` | import error | ambiguous / not-found reports — counted, exit 0 |
 
 A collision counts against `copy` only after the policy ran: under
@@ -163,9 +163,10 @@ number nobody can recompute is a finding, not a fact.
 - Never write to a source disk. Containers mount `/sources` read-only.
 - Atomic destination writes only (`.vault-partial` created `O_EXCL` → fsync
   → rename). The staging path must be empty; the writer never truncates.
-- A `verified` destination is never overwritten. Not by recopy, not by any
-  collision policy, not through another row's route, not as a staging file,
-  not through a symlinked directory.
+- A `verified` destination is never overwritten — by `copy` or by `move`
+  (B32). Not by recopy, not by any collision policy, not through another
+  row's route, not as a staging file, not through a symlinked directory,
+  not when the verified file is missing (the row still owns the path).
   Both checks — by source row and by destination path — live in
   `scan.Build`, so `scan` and `copy` agree and every write `copy.File`
   makes was admitted there.
