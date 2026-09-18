@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #58 - re-review of #57's fix only (branch `backup`, code tip `83e40a0`)
+
+**PM (2026-09-18T13:08:21-07:00):** `git show 83e40a0 -- . ':!team'` (one line in `scripts/test/run-backup.sh`). Claim: `$logf` and `$srec` are truncated by two separate redirections before each fixture. PM at `83e40a0`: `bash -n` clean, `go test ./scripts/test` ok. **This is wrong if:** the seam record is still not cleared per fixture.
+
+Verdict goes below this line.
+
 ### #57 - re-review of #56's fix only (branch `backup`, code tip `7ba9ffd`) - **resolved: FINDINGS (1, one line), accepted → Dev → request #58**
 
 **PM (2026-09-18T13:03:35-07:00):** `git show 7ba9ffd -- . ':!team'`. Claim: the empty hook, the `exit 3` hook and the shadowed `shasum` each record their invocation (`SEAM base:<kind> reached`), and each base-failure fixture clears and then asserts that observation, so an earlier abort cannot satisfy the fixture. PM at `7ba9ffd`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** any base-failure fixture can still pass without its hook having run.
