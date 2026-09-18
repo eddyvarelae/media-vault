@@ -6,6 +6,22 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #30 - re-review of #24's fixes only (branch `restore`, code tip `d831dcc`)
+
+**PM (2026-09-18T02:48:04-07:00):** One commit on `b70f35e`: `git show d831dcc -- . ':!team'`. Dev's note: Dev 2026-09-18T02:47 (commit `b8e1aee` on that branch). PM at the branch tip: vet/gofmt/bash -n clean, 8 packages ok.
+
+**Claims:** (1) `copy.Escapes(root, rel)` refuses climbing/absolute row paths; `copy.Under(root, path)` proves the resolved parent lies under the resolved root; `restore.Build` applies both before hashing the destination and `copy.File` applies both before creating anything (so `copy`'s recopy of a row with a `../` `dest_path` is now refused too). Tests for both row forms, absolute paths, writer with/without `Replace`. (2) Claimants by identity: `os.SameFile` against every other row's `stat(root/rowpath)` (dir-symlink alias, leaf symlink, hard link, case alias all claim); an un-stat-able row falls back to the spelling key. Cross-disk `deduped alias/x.JPG` regression.
+
+**This is wrong if:** `Under` can be satisfied by a parent that exists only through a symlink *outside* the root (does it resolve the root too?); `Escapes` can be bypassed by an absolute path on the `dest_path` side only; `copy.File`'s new check changes any previously approved `copy` behavior beyond refusing climbing rows (state which tests would have caught a regression); or a claimant row of another disk under a *different* root is falsely matched by ENOENT fallback to the spelling key.
+
+Verdict goes below this line.
+
+### #31 - re-review of #29's fix only (branch `certs-out`, code tip `2214e3d`)
+
+**PM (2026-09-18T02:48:04-07:00):** One commit on `6aab549`: `git show 2214e3d -- . ':!team'`. Claim: the six expected `(disk, root)` pairs are spelled out literally in the test; each must have exactly one certify call (`$CERTS` path, `--root` that root) and no certify call may fall outside the six; a disk listed twice fails. PM: `bash -n` clean, scripts test ok. **This is wrong if:** the literal list is derived from the recording, or a seventh certify call can pass.
+
+Verdict goes below this line.
+
 ### #29 - re-review of #25's fix only (branch `certs-out`, code tip `6aab549`) - **resolved: FINDINGS (1), accepted → Dev → request #31**
 
 **PM (2026-09-18T02:42:23-07:00):** One commit on `100297a`: `git show 6aab549 -- . ':!team'` (+11 in `scripts/test/nas-verify-certify-all.sh`). Claim: the all-six `--root /volume1/media/<Cam>` assertion is back, and stronger - each disk's `--root` must equal the root its own `verify` call used (six pairs read from the recorded calls). PM at `6aab549`: `bash -n` clean, `go test ./scripts/test` ok. **This is wrong if:** the pairing can be satisfied with fewer than six distinct pairs, or a certify call with a wrong disk's root still passes.
@@ -30,7 +46,7 @@ Validation: source trace of the added assertions and surrounding harness; `bash 
 
 Verdict goes below this line.
 
-### #27 - small fixes: B31 dry-run read-only, B32 `move` owner check, B35 tars logging, B42 wording (branch `small-fixes`, code tip `92e1a51`)
+### #27 - small fixes: B31 dry-run read-only, B32 `move` owner check, B35 tars logging, B42 wording (branch `small-fixes`, code tip `92e1a51`) - **resolved: FINDINGS (2), accepted → Dev fixes → request #33**
 
 **PM (2026-09-17T23:04:41-07:00):** One commit off `main` `70d1fc2`: `git show 92e1a51 -- . ':!team'` (10 files, +387/-37). Dev's note: Dev 2026-09-17T23:05 (commit `1458517` on that branch). PM at `92e1a51`: vet/gofmt/bash -n clean, 9 packages ok (`internal/manifest` now tested).
 
@@ -39,6 +55,19 @@ Verdict goes below this line.
 **This is wrong if:** any `--dry-run` path can still reach a writable handle (trace every `manifest.Open*` call site and the flag detection - an arg like `--dry-run=false` or a positional literally named `--dry-run`?); `OpenReadOnly` can create the file when missing; `move` can rename onto a verified-owned path via a rule-rewritten destination that the index key does not match; the shared index change alters any `copy` refusal beyond adding empty-`dest_path` rows; or the tars script double-logs under nohup.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-18):** FINDINGS — reviewed exactly `git show 92e1a51 -- . ':!team'`.
+
+1. **Manifest mode and command execution disagree when `--dry-run` is an option value.** At `92e1a51:cmd/vault/main.go:78-95,985-991`, `hasDryRun` scans raw tokens, but `parseScanFlags` consumes the token after `--prefix` as a value (lines 158-163). Failing input: `vault copy cam /src /dst --prefix --dry-run`, with `/src/--dry-run/a.mov` present. The command's `dryRun` remains false. With an existing manifest, it copies the archive file and then fails its manifest Upsert because main opened read-only (lines 385-394), leaving an unrecorded copy. With no manifest, it copies and records only in the disposable in-memory database, despite the notice claiming it is creating nothing. Parse once and use the same interpreted dry-run state for both opening and execution; a literal prefix must not switch the database mode. The analogous move prefix has the same mismatch.
+
+2. **The new move guards run after destructive operations, so owned/symlinked destinations are not always safely skipped.** At `92e1a51:internal/move/move.go:228-247`, the owner and symlink checks occur after `MkdirAll` (167) and the duplicate branch's `os.Remove`/`DeleteEntry` (181-203). Failing input: `vault move A A /archive /archive`, with a verified `A:x.mov` row whose source_path and dest_path are both `x.mov` and whose file exists. The existing-row hash matches, so the command deletes that verified file and its row before ever consulting the newly added owner guard. A symlink route such as `--rule MOV=alias/new`, where `alias` points outside the destination root, also creates `new` through the symlink before being refused. Move the safety checks before filesystem mutation and duplicate handling, and re-check any collision-rewritten destination. The added test covers only an absent owned file and an existing symlink directory, missing these paths.
+
+Other checks: the only production `manifest.Open*` call sites are the three in main. Recognized dry-run flags select read-only/empty opening; `--dry-run=false` is not recognized by the command parsers either (it becomes positional for copy/move and is rejected by repair-dest). The shared owner-index refactor preserves copy's staging/final-path lookup order and cleaned, case-folded keys, adding the empty-dest_path fallback. Move checks the final collision-rewritten relative path before its forward rename. The tars helper writes once under the stated nohup redirection; B42's summary no longer labels all empty-destination rows inventoried.
+
+Validation: source tracing only, plus successful `bash -n` on both committed tars shell files. No Go tests, harnesses, or executable reproductions were run. Only this channel file modified.
+
+
+**PM (2026-09-18T02:48:04-07:00):** Both accepted. #1: one parse decides dry-run for both the manifest open and the command - a literal token after `--prefix`/`--rule` must not switch modes. #2: `move`'s owner/symlink checks run before `MkdirAll` and before the duplicate branch's delete, and re-check the collision-rewritten destination. Back to Dev on `small-fixes`, new commits only; re-review as **#33, fixes only**. B35/B42 and the index refactor are closed.
 
 ### #26 - B17 nightly tagger transfer (branch `tagger`, code tip `6b061f3`) - **resolved: FINDINGS (4), all accepted → Dev fixes → request #32**
 
