@@ -509,31 +509,6 @@ func (m *Manifest) listByDisk(disk string, onlyUnverified bool) ([]Entry, error)
 	return out, rows.Err()
 }
 
-// AllDestPaths returns (source_disk, source_path, dest_path, status) for
-// every row with a dest_path, any status. repair-dest indexes them by
-// physical location so a candidate file another row already claims is
-// never chosen.
-func (m *Manifest) AllDestPaths() ([]Entry, error) {
-	rows, err := m.db.Query(`
-		SELECT source_disk, source_path, dest_path, status
-		FROM files
-		WHERE dest_path != ''
-		ORDER BY source_disk, source_path`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Entry
-	for rows.Next() {
-		var e Entry
-		if err := rows.Scan(&e.SourceDisk, &e.SourcePath, &e.DestPath, &e.Status); err != nil {
-			return nil, err
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
-}
-
 // VerifiedRows returns every verified row, of every disk. scan.Build
 // indexes their dest_paths by physical location once per run, because the
 // writer touches physical paths and a spelling lookup cannot see that
@@ -564,8 +539,11 @@ func (m *Manifest) VerifiedRows() ([]Entry, error) {
 }
 
 // AllRows returns every row of every disk with the fields that identify it
-// and locate its file: restore uses them to find other rows that resolve to
-// the file it is about to replace.
+// and locate its file. repair-dest and restore index them by physical
+// location so a file some row already claims is never handed to, or
+// replaced under, another. A row with an empty dest_path (inventoried, or
+// the B39 rows) locates its file by source_path - verify's rule - so
+// callers apply that rule, not a dest_path filter.
 func (m *Manifest) AllRows() ([]Entry, error) {
 	rows, err := m.db.Query(`
 		SELECT source_disk, source_path, dest_path, size, sha256, status

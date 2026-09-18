@@ -467,3 +467,33 @@ func TestContainmentWithDotAndSlashRoots(t *testing.T) {
 		t.Errorf("root \".\": %+v, want REPAIR → DCIM/X.JPG", c)
 	}
 }
+
+// The claim index applies verify's rule: a row with an empty dest_path
+// locates - and so claims - root/source_path. A repair candidate that is
+// such a row's file is OWNED, not handed over.
+func TestEmptyDestPathRowsClaimTheirSourcePath(t *testing.T) {
+	m, err := manifest.Open(filepath.Join(t.TempDir(), "manifest.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	root := t.TempDir()
+	write(t, filepath.Join(root, "DCIM", "X.JPG"), "same bytes")
+	row(t, m, "X.JPG", "X.JPG", "same bytes") // missing at root/X.JPG, matches root/DCIM/X.JPG
+	// A B39-shaped row: empty dest_path, located by source_path = DCIM/X.JPG.
+	if err := m.Upsert(manifest.Entry{SourceDisk: "sony", SourcePath: "DCIM/X.JPG", DestPath: "",
+		Size: 10, MtimeNs: 1, SHA256: sha("same bytes"), CopiedAt: 2, Status: "verified"}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := Build(context.Background(), m, "sony", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := outcomes(p)["X.JPG"]
+	if c.Outcome != Owned || c.Owner != "sony:DCIM/X.JPG" {
+		t.Errorf("X.JPG = %+v, want OWNED by the empty-dest_path row sony:DCIM/X.JPG", c)
+	}
+	if p.NoDest != 1 {
+		t.Errorf("NoDest = %d, want 1 (the empty-dest_path row is not examined as a repair target)", p.NoDest)
+	}
+}
