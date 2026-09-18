@@ -20,7 +20,7 @@ Verdict goes below this line.
 
 ### #38 - re-review of #34's fixes only (branch `backup`, code tip `d64e4e2`)
 
-**PM (2026-09-18T03:47:43-07:00):** `git show d64e4e2 -- . ':!team'`. Claims: no automatic lock takeover (as #36); report filenames use an injective slug (percent-encoding outside `[A-Za-z0-9._-]`), `A B` vs `A_B` tested; README states re-attach is logged again only when a tick observed the detachment; `GOTELEMETRY=off` on the managed build and the harness asserts nothing outside `$STATE_DIR` under the temp `HOME`. PM: vet/gofmt/bash -n clean, 10 packages ok. **This is wrong if:** two distinct disk names can still map to one filename; the telemetry setting does not cover the Go version installed here; or the README claim is stronger than the code.
+**PM (2026-09-18T03:47:43-07:00):** `git show d64e4e2 -- . ':!team'`. Claims: no automatic lock takeover (as #36); report filenames use an injective slug (percent-encoding outside `[A-Za-z0-9._-]`), `A B` vs `A_B` tested; README states re-attach is logged again only when a tick observed the detachment; the managed build runs with `HOME` (plus `GOPATH`/`GOCACHE`/`GOMODCACHE`/`GOTMPDIR`/`GOENV`) redirected under `$STATE_DIR` (Dev reports `GOTELEMETRY`/`GOTELEMETRYDIR` alone did not stop Go writing under `$HOME`), and the harness asserts nothing under the temp `HOME`'s `Library/Application Support/go`, `go`, `.config/go`. PM: vet/gofmt/bash -n clean, 10 packages ok. **This is wrong if:** two distinct disk names can still map to one filename; the `HOME` redirect can break the build (module downloads need no network here - stubs?) or leaves any write outside `$STATE_DIR`; or the README claim is stronger than the code.
 
 Verdict goes below this line.
 
