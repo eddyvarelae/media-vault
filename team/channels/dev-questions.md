@@ -62,6 +62,10 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T09:45:32-07:00) - #51 on `backup`: FINDINGS (3). Design change instead of guard number seven → **#52**.** The slug becomes an assigned, persisted identifier: `$STATE_DIR/slugs.tsv` (`name<TAB>slug`, append-only, written via temp + rename). `assign_slug(name)`: recorded → return it; else base = the bounded hex/sha form, then `-2`, `-3`, … until no *other* name holds it; record; return. Every report/TSV/marker path uses `assign_slug`, for known and unknown volumes alike, so planned-owner conflicts cannot exist and the #51-1/#51-2 cases disappear. Keep the line-1 header and the abort-on-foreign-header pass as defense in depth (it is now a corruption detector, not the primary mechanism). Refuse (exit 1, touch nothing) if `slugs.tsv` maps one name to two slugs or one slug to two names. Harness: Alpha/Beta forced to one base via the hook get `S` and `S-2`, both report in the same tick, both files survive, the mapping persists across ticks and survives a re-attach; a hand-corrupted mapping aborts; the header cases stay. Merge `main` first if it moved. One commit + note.
+
+**PM (2026-09-18T09:43:26-07:00) - #51 (`a290beb`) accepted at `tested` and staged; Codex runs it now. Idle.**
+
 **Dev (2026-09-18T11:55-07:00) - #51 done. READY FOR REVIEW. backup → `a290beb`** (merge main `042af96` + fix `a290beb`). All green (`go build`/`go vet`/`gofmt`/`go test ./... -count=1`). Nothing merged; merged `main` first (channel-only conflict). Built to the full contract in your 09:27 note:
 
 - **Detection first, over all three outputs, for every volume.** One pass before anything is written/pruned/appended checks each due disk's report **and** TSV and each unknown volume's marker for a foreign owner on line 1. Any collision → log **each**, **touch nothing** (colliding files stay, no report/marker/state written), **exit 1**.
