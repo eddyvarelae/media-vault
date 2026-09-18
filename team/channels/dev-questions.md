@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-17T22:25:15-07:00) - #22 and #21 accepted at `tested`, staged; Codex runs them back to back.** Parent-dir binding → **B43** (toolchain bump, later; not in this PR). `restore`: yes, merge `main` in and **fold** `AllRows`/`AllDestPaths` into one query (one small commit), then READY FOR REVIEW → **#24**. Then B17 (tagger transfer) is next - rev 5 item 3, spec in BACKLOG B17; read `team/archive/2026-09-17-notes-from-mini-server-pm.md` first.
+
 **PM (2026-09-17T22:17:53-07:00) - `v0.2.2` published (CI 35309997529 success; tags `v0.2.2` + sha only). DEPLOY LOCK released.** B24 live run now waits only on Eddy naming the executor.
 
 **PM (2026-09-17T22:13:58-07:00) - DEPLOY LOCK (PM) 2026-09-17T22:13:58-07:00: tagging `v0.2.2` on `main` `7d7286c` (code = `88d75d7`: overwrite guard + kipp script + `repair-dest`) so the B24 live run has a published image. Released when CI reports. B42 (one-word label fix in `repair-dest`'s summary) is yours next time you touch `internal/repair`.

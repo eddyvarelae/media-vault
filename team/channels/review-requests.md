@@ -6,6 +6,24 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #22 - `f4-tests` merge resolution only, second attempt (branch tip `846c958`; approved content `dc36e5f` #13, resolution verified once #17)
+
+**PM (2026-09-17T22:25:15-07:00):** Base pinned this time: `main`'s code tip is `88d75d7` (later `main` commits are team files only). Review `git diff 88d75d7..846c958 -- . ':!team'` - it must be exactly the approved `dc36e5f` content (F4 tests, B27 helper + shell test, `reports/` skip, docs) re-expressed on top of `88d75d7`, plus nothing. Dev's two conflict resolutions (`scripts/test/scripts_test.go`: `TestVerifyCertifyAllLogsEachLineOnce` beside `TestKippCopyAllShape`; `cmd/vault/main_test.go`: `TestVerifyOnlyUnverified` beside `TestRepairDest`) reconstruct both functions whole. PM at `846c958`: vet/gofmt/bash -n clean, 8 packages ok.
+
+**This is wrong if:** the diff touches any file outside the nine approved feature files; any function from `main` (`TestKippCopyAllShape`, `TestRepairDest`, the repair-dest/kipp code) is altered or missing; or any `dc36e5f` test body differs.
+
+Verdict goes below this line.
+
+### #21 - re-review of #16's fix only (branch `certs-out`, code tip `b0dccb9`)
+
+**PM (2026-09-17T22:25:15-07:00):** Check #16's one finding is closed. Review `git show b0dccb9 -- . ':!team'` (4 files, +154/-2). Dev's note: Dev 2026-09-17T22:13 (commit `0f3ae2f` on that branch). PM at `b0dccb9`: vet/gofmt/bash -n clean, 8 packages ok.
+
+**Claims:** `certify.WriteOutput` opens `<out>.vault-partial` with `O_WRONLY|O_CREATE|O_EXCL|O_NOFOLLOW`, writes, fsyncs, closes, renames over `out` (rename replaces the directory entry, follows nothing); temp removed on failure after create; a stale temp name refuses. `runCertify` uses it instead of `os.WriteFile`. Regression substitutes the leaf between check and write (link to a verified photo; dangling link into the tree), stale temp, link at the temp name; a demonstration that `os.WriteFile` fails the same case. Stated limitation: the parent directory is not bound (needs `openat`/`os.Root`, Go 1.24+; toolchain pinned 1.23) - B43.
+
+**This is wrong if:** `os.Rename` on this platform can follow a symlink at `out` (state the semantics you rely on); the temp name is predictable *and* the open lacks `O_EXCL` on any path; the temp is left behind on a rename failure; or the parent-directory limitation is understated (can a swapped parent redirect the rename target into the archive?).
+
+Verdict goes below this line.
+
 ### #23 - acceptance: B24 live run may proceed (Tester #26 dry-run evidence vs the original finding #7) - **resolved: APPROVE → live run gated only on Eddy naming the executor**
 
 **PM (2026-09-17T22:13:58-07:00):** Not code. Before the PM runs `vault repair-dest` against the **live** NAS manifest (runbook `team/context/runbook-b24.md`), confirm the evidence proves each of the 195 rewrites points at the file whose bytes the row attests. Inputs on `/Volumes/Scratch1/tester/b24-dryrun/` (read-only): `manifest.db` (snapshot, sha `9db9b01a…`), `plan.txt` (the dry-run output, 195 `REPAIR` lines), `compare.txt` + the comparison script (independent re-hash of each row's file at `CLIP|DCIM|THMBNL/<basename>` over SMB), and Tester #7's `check195b.py` result from earlier today. Claims: (1) the 195 `copied` rows in the snapshot are exactly the rows in `plan.txt`; (2) for every plan line, the `→` path's file size and sha256 equal the row's; (3) no plan line targets a path that is any other row's `dest_path` in the snapshot; (4) the plan's counts add up (38,809 = 38,614 + 195; 39,414 = 39,219 + 195). **This is wrong if:** any row in the plan is not `copied`; any `→` path's recorded hash in `compare.txt` differs from the row; you can find a second candidate for any basename the plan did not report as `AMBIGUOUS`; or the snapshot's sha differs from the NAS file's current sha (`shasum -a 256 ~/mounts/docker/vault-nas-config/manifest.db`, read-only over SMB - note it opens nothing).
