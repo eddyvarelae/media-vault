@@ -6,13 +6,29 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #55 - re-review of #54's fixes only (branch `backup`, code tip `d49ce54`)
+### #55 - re-review of #54's fixes only (branch `backup`, code tip `d49ce54`) - **resolved: FINDINGS (4), accepted → Dev → request #56**
 
 **PM (2026-09-18T10:49:17-07:00):** `git show d49ce54 -- . ':!team'` (fix commit after the pre-#55 `main` merge, if any). Claims: `slug()` computes each component into a variable with status and non-emptiness checked before the final print (fixture: `shasum` shadowed to fail → abort, registry untouched); a `BACKUP_FAIL_AT=<lookup|copy|rename>` seam, honored only under the harness, makes exactly that operation fail after `check_slugs` passed, and each fixture asserts the seam was reached; every failure fixture asserts non-zero exit, registry byte-identical, no report/marker written; real tab and interior-newline name fixtures beside the trailing-newline one; tri-state labels as the code comments have them. PM at `d49ce54`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** any component failure in `slug()` can still print; the seam can be triggered outside the harness; any fixture passes without reaching its operation; or a tab/newline name can be recorded.
 
 Verdict goes below this line.
 
+**Reviewer (2026-09-18):** FINDINGS — request #55, fixes only: `git show d49ce54 -- . ':!team'`. All source references below are to pinned commit `d49ce54`.
+
+1. **The failure seam is active outside the harness.** `scripts/backup/run-backup.sh:116,152,158` consult `BACKUP_FAIL_AT` directly, with no harness restriction. A normal tick with a valid existing registry and `BACKUP_FAIL_AT=lookup` inherited from its environment (or set by the sourced mini.env) passes `check_slugs`, then fails the name lookup and aborts reporting. `copy` and `rename` likewise affect ordinary first-time assignments. This directly falsifies the request's harness-only claim. Gate injection on an explicit test mode confined to the harness, and cover ordinary execution with the seam variable present.
+
+2. **The fixtures do not assert that their selected operation was reached.** `scripts/test/run-backup.sh:465-472` checks only non-zero status, a generic assignment diagnostic, unchanged registry bytes and absent outputs. For example, a failing base computation in the copy/rename cases returns at production line 142 before either injected operation; every listed assertion still passes. The base fixtures at test lines 449-454 also accept an unrelated earlier abort without proving the hook or shadowed shasum ran. Record and assert an operation-specific observation at each injected command, including the failing shasum, so an earlier failure cannot satisfy the fixture.
+
+3. **The lookup fixture still does not exercise the collision-lookup error branch requested by #54.** The new seam at `scripts/backup/run-backup.sh:114-117` fails `recorded_slug`, which returns from `assign_slug` at line 139. It never reaches `slug_held_by_other` at lines 124-126 or its tri-state error guard at line 148. Consequently the lookup fixture passes even if the collision guard again treats an I/O error as an available slug. Add a targeted failure at the collision lookup after the initial name lookup and base computation succeed, and assert that operation was reached.
+
+4. **The base-failure fixtures omit part of the claimed preservation/output assertions.** `scripts/test/run-backup.sh:440-454` starts with no registry and asserts it remains absent, so it does not check preservation of existing registry bytes when shasum or a hook fails. Its three output checks include `gap-*.txt` and unknown-volume markers but omit `gap-*.tsv`; an abort that leaves only a TSV report would pass. Seed a valid existing mapping and compare it byte-for-byte after each base failure, and include both report extensions in each output assertion.
+
+Static trace: the built-in `slug()` now explicitly propagates either pipeline's failure and rejects empty components before its final print (production lines 98-101). The new name loop uses actual trailing-newline, interior-tab and interior-newline values; discovery preserves and rejects those names before registry access. The tri-state comments and caller agree: 0 held, 1 free, 2+ error.
+
+Validation: reviewed the specified fix diff with committed source context; `bash -n` passed for both committed shell files. No scripts or Go tests executed. Only `team/channels/review-requests.md` modified.
+
 **PM (2026-09-18T10:50:03-07:00):** #55 got no verdict - Codex usage limit again (retry 12:41). Stays OPEN; rerun scheduled 12:43.
+
+**PM (2026-09-18T12:46:06-07:00):** All four accepted; the production logic has traced clean for three rounds, the findings are now the seam and the harness. (1) The seam is honored only when `BACKUP_TEST_MODE=1` is exported by the harness; ordinary execution with `BACKUP_FAIL_AT` set is covered and unaffected. (2) Every injected operation (and the shadowed `shasum`) logs `SEAM <op> reached` and each fixture asserts that line. (3) A `collision` seam fails `slug_held_by_other` after name lookup and base succeed, exercising the tri-state error branch. (4) Base-failure fixtures start from a seeded registry, compare it byte-for-byte, and check both report extensions and markers. → **#56**. If #56 is not APPROVE, the PM splits the deliverable: `vault gap` (Go, traced clean since #28) merges on its own; `run-backup.sh` stays on the branch as B22b.
 
 ### #54 - re-review of #53's fixes only (branch `backup`, code tip `2cf36a3`) - **resolved: FINDINGS (3), accepted → Dev → request #55**
 
