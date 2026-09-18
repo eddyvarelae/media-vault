@@ -1448,4 +1448,27 @@ func TestGap(t *testing.T) {
 	if _, _, code := vault(t, cfg, "gap", filepath.Join(ssd, "nope")); code != 1 {
 		t.Errorf("missing dir: exit %d, want 1", code)
 	}
+	// review #28-1: --tsv never overwrites an existing file or follows a
+	// symlink into one - it would let a report-only command truncate the
+	// manifest or a source file.
+	existing := filepath.Join(t.TempDir(), "taken.tsv")
+	writeFile(t, existing, "precious", t0)
+	if _, errOut, code := vault(t, cfg, "gap", ssd, "--tsv", existing); code != 1 || !strings.Contains(errOut, "refusing to overwrite") {
+		t.Errorf("--tsv over an existing file: exit %d, stderr %q", code, errOut)
+	}
+	if readFile(t, existing) != "precious" {
+		t.Errorf("--tsv truncated an existing file")
+	}
+	victim := filepath.Join(t.TempDir(), "victim")
+	writeFile(t, victim, "keep me", t0)
+	link := filepath.Join(t.TempDir(), "link.tsv")
+	if err := os.Symlink(victim, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, code := vault(t, cfg, "gap", ssd, "--tsv", link); code != 1 {
+		t.Errorf("--tsv at a symlink: exit %d, want 1", code)
+	}
+	if readFile(t, victim) != "keep me" {
+		t.Errorf("--tsv followed a symlink and truncated its target")
+	}
 }

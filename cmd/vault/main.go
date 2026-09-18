@@ -715,7 +715,19 @@ func runGap(ctx context.Context, m *manifest.Manifest, args []string) int {
 		for _, f := range r.AbsentFiles {
 			fmt.Fprintf(&b, "%s\t%d\t%s\n", f.Rel, f.Size, f.SHA256)
 		}
-		if err := os.WriteFile(tsv, []byte(b.String()), 0o644); err != nil {
+		// O_EXCL|O_NOFOLLOW: gap is report-only, so its --tsv must never
+		// truncate an existing file or follow a symlink into one - a path
+		// aliasing the manifest or a source file (review #28). Refuse
+		// anything already there.
+		f, err := os.OpenFile(tsv, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
+		if err != nil {
+			die("write %s: %v (refusing to overwrite or follow an existing --tsv target)", tsv, err)
+		}
+		if _, err := f.WriteString(b.String()); err != nil {
+			f.Close()
+			die("write %s: %v", tsv, err)
+		}
+		if err := f.Close(); err != nil {
 			die("write %s: %v", tsv, err)
 		}
 		fmt.Printf("absent files written to %s\n", tsv)

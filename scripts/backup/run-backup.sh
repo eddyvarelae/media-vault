@@ -114,17 +114,38 @@ if (( dry_run )); then
   echo "  due now: ${due[*]-(none)}"
   exit 0
 fi
-(( ${#due[@]} > 0 )) || exit 0     # the normal tick: nothing attached that is owed a report; say nothing
+# Unknown mounted volumes get logged once per attach, independent of whether
+# any known disk is due (review #28). The marker is keyed by name+attach-id,
+# so a detach/reattach (new id) logs again, and stale markers are pruned.
+if (( ! dry_run )); then
+  mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"
+  live_unknown=""
+  for u in "${unknown[@]+"${unknown[@]}"}"; do
+    id=$(attach_id "$VOLUMES_DIR/$u")
+    slug=$(printf '%s@%s' "$u" "$id" | tr -c 'A-Za-z0-9._@-' '_')
+    live_unknown="$live_unknown $slug"
+    marker="$STATE_DIR/backup.unknown-$slug"
+    [[ -f "$marker" ]] || { touch "$marker"; log "mounted volume '$u' is not in BACKUP_DISKS — ignored (add it to report it)"; }
+  done
+  for marker in "$STATE_DIR"/backup.unknown-*; do
+    [[ -e "$marker" ]] || continue
+    case " $live_unknown " in *" ${marker##*/backup.unknown-} "*) ;; *) rm -f "$marker" ;; esac
+  done
+fi
+(( ${#due[@]} > 0 )) || exit 0     # the normal tick: nothing more owed; say nothing
 
-# ── 2. preconditions (only checked when something is due, once an hour) ──
+# ── 2. preconditions (only checked when something is due) ────────────────
+# A failure that will recur every five minutes - a missing OR unusable
+# manifest - is logged at most once an hour; a good tick clears the stamp
+# (review #28). throttled_fail logs+exits 2 the first time and stays quiet
+# until the hour is up.
 mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"
-precond_fail() {
-  local stamp="$STATE_DIR/backup.precondition-failed"
-  if [[ ! -f "$stamp" ]] || (( $(date +%s) - $(stat -f %m "$stamp") >= 3600 )); then touch "$stamp"; die "$*"; fi
+THROTTLE="$STATE_DIR/backup.precondition-failed"
+throttled_fail() {
+  if [[ ! -f "$THROTTLE" ]] || (( $(date +%s) - $(stat -f %m "$THROTTLE") >= 3600 )); then touch "$THROTTLE"; die "$*"; fi
   exit 2
 }
-[[ -f "$MANIFEST_DB" ]] || precond_fail "manifest not found at $MANIFEST_DB (is the NAS docker share mounted?) — ${due[*]} due"
-rm -f "$STATE_DIR/backup.precondition-failed"
+[[ -f "$MANIFEST_DB" ]] || throttled_fail "manifest not found at $MANIFEST_DB (is the NAS docker share mounted?) — ${due[*]} due"
 
 # ── 3. the vault binary: built from this checkout into the state dir when missing or stale ──
 ensure_vault() {
@@ -134,8 +155,10 @@ ensure_vault() {
   if [[ -x "$VAULT_BIN" && -f "$stamp" && "$(cat "$stamp")" == "$head" ]]; then return 0; fi
   if [[ -x "$VAULT_BIN" && "$head" == unknown ]]; then return 0; fi   # not a checkout: use what is there
   command -v go >/dev/null || { log "vault binary missing or stale at $VAULT_BIN and go is not installed"; return 1; }
-  mkdir -p "$(dirname "$VAULT_BIN")"
-  if ! (cd "$REPO_DIR" && go build -o "$VAULT_BIN.tmp" ./cmd/vault) >> "$LOG_FILE" 2>&1; then
+  mkdir -p "$(dirname "$VAULT_BIN")" "$STATE_DIR/go/cache" "$STATE_DIR/go/mod" "$STATE_DIR/go/tmp"
+  # The managed build writes only under $STATE_DIR (review #28-5): its
+  # object cache, module cache and temp workspace are all confined there.
+  if ! (cd "$REPO_DIR" && GOCACHE="$STATE_DIR/go/cache" GOMODCACHE="$STATE_DIR/go/mod" GOTMPDIR="$STATE_DIR/go/tmp" go build -o "$VAULT_BIN.tmp" ./cmd/vault) >> "$LOG_FILE" 2>&1; then
     log "go build failed (see above); keeping the previous binary if any"; rm -f "$VAULT_BIN.tmp"; [[ -x "$VAULT_BIN" ]]; return
   fi
   mv "$VAULT_BIN.tmp" "$VAULT_BIN"; echo "$head" > "$stamp"
@@ -143,26 +166,46 @@ ensure_vault() {
 }
 
 # ── 4. lock, snapshot, one report per due disk ───────────────────────────
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-  info=$(cat "$LOCK_DIR/info" 2>/dev/null || echo "no info"); lock_pid=${info%% *}
-  if [[ "$lock_pid" =~ ^[0-9]+$ ]] && kill -0 "$lock_pid" 2>/dev/null; then exit 1; fi   # a report is running; the next tick will look again
-  log "lock from a run that is no longer alive ($info) — taking it over"
-fi
-echo "$$ started $(ts)" > "$LOCK_DIR/info"
-rc=0
-finish() { rm -rf "$LOCK_DIR"; exit "$rc"; }
+# Same discipline as the tagger (review #26-3, #28-2): cleanup trap the
+# instant the lock is ours; a lock dir with no info yet is being acquired,
+# not dead; a dead lock is taken over by renaming it away, which only one
+# competitor can win.
+rc=0 have_lock="" finishing=""
+finish() { finishing=1; [[ -n "$have_lock" ]] && rm -rf "$LOCK_DIR"; exit "$rc"; }
+acquire_lock() {
+  if mkdir "$LOCK_DIR" 2>/dev/null; then return 0; fi
+  local info age_s pid
+  info=$(cat "$LOCK_DIR/info" 2>/dev/null || true)
+  age_s=$(( $(date +%s) - $(stat -f %m "$LOCK_DIR" 2>/dev/null || date +%s) ))
+  if [[ -z "$info" ]]; then
+    (( age_s < 60 )) && return 1   # being acquired right now; the next tick looks again
+    info="no info"
+  fi
+  pid=${info%% *}
+  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then return 1; fi   # a report is running
+  mv "$LOCK_DIR" "$LOCK_DIR.dead.$$" 2>/dev/null || return 1                      # exclusive takeover: one winner
+  rm -rf "$LOCK_DIR.dead.$$"
+  mkdir "$LOCK_DIR" 2>/dev/null || return 1
+  log "lock from a run that is no longer alive ($info) — taken over"
+}
+acquire_lock || exit 1
+have_lock=1
 trap 'log "interrupted — the report in flight is not recorded"; rc=143; finish' TERM INT
+trap '[[ -n "$finishing" ]] || { log "UNEXPECTED EXIT (rc=$?) — releasing the lock"; rc=1; finish; }' EXIT
+{ echo "$$ started $(ts)" > "$LOCK_DIR/info.tmp" && mv "$LOCK_DIR/info.tmp" "$LOCK_DIR/info"; }
 
 for o in "${policy_overrides[@]+"${policy_overrides[@]}"}"; do log "POLICY OVERRIDE: $o"; done
-for u in "${unknown[@]+"${unknown[@]}"}"; do
-  [[ -f "$STATE_DIR/backup.unknown-$u" ]] || { touch "$STATE_DIR/backup.unknown-$u"; log "mounted volume '$u' is not in BACKUP_DISKS — ignored (add it to report it)"; }
-done
 ensure_vault || { rc=1; finish; }
 
 mkdir -p "$SNAP_DIR"
 if ! snap=$(python3 "$HELPER" snapshot --state "$STATE_DIR/tagging-state.db" --manifest "$MANIFEST_DB" --snapshot "$SNAP_DIR/manifest.db" 2>&1); then
-  log "manifest snapshot failed: $snap"; rc=2; finish
+  # A snapshot that keeps failing (a corrupt manifest) recurs every tick;
+  # throttle it like the preconditions (review #28-4).
+  rc=2
+  if [[ ! -f "$THROTTLE" ]] || (( $(date +%s) - $(stat -f %m "$THROTTLE") >= 3600 )); then touch "$THROTTLE"; log "manifest snapshot failed: $snap"; fi
+  finish
 fi
+rm -f "$THROTTLE"    # a usable snapshot clears the throttle
 read -r _ rows newest mtime <<< "$(head -1 <<< "$snap")"
 log "manifest snapshot: $rows rows, newest copied_at $newest, NAS file modified $mtime (from $MANIFEST_DB)"
 
@@ -170,6 +213,7 @@ for name in "${due[@]}"; do
   mp="$VOLUMES_DIR/$name"; id=$(attach_id "$mp"); d=$(today)
   slug=$(printf '%s' "$name" | tr -c 'A-Za-z0-9._-' '_')
   report="$STATE_DIR/gap-$slug-$d.txt"; tsv="$STATE_DIR/gap-$slug-$d.tsv"
+  rm -f "$report" "$tsv"   # the job owns its dated output; a --force re-report replaces it (vault gap's --tsv is O_EXCL against aliases, not against our own file)
   log "GAP $name: report starting ($mp, attach $id)"
   if VAULT_CONFIG="$SNAP_DIR" "$VAULT_BIN" gap "$mp" --tsv "$tsv" > "$report" 2>&1; then
     log "$(grep '^GAP ' "$report" | sed "s|^GAP $mp|GAP $name|")"

@@ -13,11 +13,12 @@ here=$(cd "$(dirname "$0")" && pwd)
 script="$here/../backup/run-backup.sh"
 vault="${VAULT_BIN:?set VAULT_BIN to a built vault binary}"
 work=$(mktemp -d "${TMPDIR:-/tmp}/backup-test.XXXXXX")
-trap 'rm -rf "$work"' EXIT
-# The script's defaults live under $HOME; none of them may be real. Go's
-# caches must stay where they are, or the build case re-downloads modules
-# into the temp dir (and cannot remove the read-only module cache after).
-export GOMODCACHE="${GOMODCACHE:-$(go env GOMODCACHE 2>/dev/null || true)}" GOCACHE="${GOCACHE:-$(go env GOCACHE 2>/dev/null || true)}"
+trap 'chmod -R u+w "$work" 2>/dev/null; rm -rf "$work"' EXIT
+# The script's defaults live under $HOME; none of them may be real. The
+# managed build confines its caches under STATE_DIR (review #28-5), so the
+# harness does NOT preserve external GOCACHE/GOMODCACHE - it verifies the
+# boundary instead (see the build case). The trap chmods before rm because
+# Go writes the module cache read-only.
 export HOME="$work/home"; mkdir -p "$HOME"
 
 failures=0
@@ -145,6 +146,8 @@ if command -v go > /dev/null; then
   MANAGED_BIN=1 run --force > "$out" 2>&1
   check "build: not rebuilt when the stamp matches HEAD" test "$(count 'built vault at' "$logf")" -eq 1
   check "build: a binary handed in from outside is never rebuilt" test "$(count "built vault at $vault" "$logf")" -eq 0
+  check "build: caches landed under STATE_DIR (write boundary)" test -d "$state/go/mod" -a -d "$state/go/cache"
+  check "build: nothing was written to \$HOME/go" test ! -e "$HOME/go/pkg/mod"
 else
   echo "  skip build case: go not on PATH"
 fi
@@ -153,8 +156,22 @@ fi
 head -c 3000 /dev/urandom > "$work/torn.db"
 MANIFEST_DB="$work/torn.db" run --force > "$out" 2>&1
 rc=$?
-check "torn manifest: exit 2 and says the snapshot failed" test "$rc" -eq 2 -a "$(count 'manifest snapshot failed' "$logf")" -ge 1
+before=$(count 'manifest snapshot failed' "$logf")
+check "torn manifest: exit 2 and says the snapshot failed" test "$rc" -eq 2 -a "$before" -ge 1
 check "torn manifest: lock released" test ! -e "$state/backup.lock"
+# review #28-4: a corrupt manifest recurs every tick; the failure is
+# throttled to once an hour, not logged on every five-minute tick.
+MANIFEST_DB="$work/torn.db" run --force > "$out" 2>&1
+check "torn manifest again within the hour: exit 2, not logged twice" test $? -eq 2 -a "$(count 'manifest snapshot failed' "$logf")" -eq "$before"
+# review #28-2: a live lock holder is not taken over; an info-less young
+# lock is treated as held.
+mkdir -p "$state/backup.lock"; echo "$$ holding" > "$state/backup.lock/info"
+run --force > "$out" 2>&1
+check "live lock holder: exit 1, not taken over" test $? -eq 1 -a -d "$state/backup.lock" -a "$(cat "$state/backup.lock/info")" = "$$ holding"
+rm -rf "$state/backup.lock"; mkdir -p "$state/backup.lock"
+run --force > "$out" 2>&1
+check "info-less young lock: exit 1, treated as held" test $? -eq 1 -a -d "$state/backup.lock" -a ! -e "$state/backup.lock/info"
+rm -rf "$state/backup.lock"
 
 echo
 if [ "$failures" -ne 0 ]; then echo "$failures check(s) failed"; exit 1; fi
