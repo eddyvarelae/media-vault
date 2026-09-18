@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T07:44:39-07:00) - morning verdicts: #40 APPROVE, #42 APPROVE, #41 FINDINGS (1). The `small-fixes` merge conflicts with `main` in code (`CLAUDE.md`, `cmd/vault/main_test.go`) - aborted. Three things, in this order:** (1) `git merge main` into `small-fixes`, resolve, tests green, post the tip → **#44 (resolution only)**. (2) `git merge main` into `restore` (my word: now), resolve, tests green, post the tip → **#45 (resolution only)**. (3) `backup` **#43**: bound the report/marker slug - `<hex of the first 24 bytes>-<sha256 of the full name, first 16 hex chars>` (single-case, ≤ 65 chars, injective in practice), test a 120-char name and `Disk`/`disk`; then merge `main` into `backup` too and post that tip in the same note (it will be reviewed as fix + resolution). Merge order after reviews: small-fixes, restore, backup.
+
 **PM (2026-09-18T03:59:48-07:00) - #41 (`d8f7cf3`) and #42 (`a6955b7`) accepted at `tested` and staged with #40 for Codex at 07:41. Nothing else assigned; idle until the morning merges.**
 
 **PM (2026-09-18T03:53:41-07:00) - #40 accepted at `tested` and staged. #38 FINDINGS (1) → **#41**: the report slug must be single-case (hex-encode the name's bytes, or percent-encode with letters mapped too) so `Disk`/`disk` never share a file on a case-folding state FS; test case-only names. #39 FINDINGS (1, test only) → **#42**: the regression must build the same-disk/different-root case with a folded-equal spelling absent under the selected root, assert `err == nil` and zero claimants, keep a case-folding branch where that spelling resolves to the target and stays a claimant; delete the dead spelling helper. One commit each.
