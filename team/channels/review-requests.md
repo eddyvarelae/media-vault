@@ -6,6 +6,18 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #48 - re-review of #46's fixes only (branch `small-fixes`, code tip `3779db9`)
+
+**PM (2026-09-18T09:01:17-07:00):** `git show 3779db9 -- . ':!team'`. Claims: `restore --expect-sha` joins the detector's inventory (now scan/copy/move `--prefix --rule --on-collision`; dedup `--min-size`; certify `--root`; restore `--expect-sha`); regressions for `--expect-sha --dry-run` (not a dry run) and `--expect-sha <sha> --dry-run` (dry run); repair-dest CLAUDE.md row and the main.go comment describe B31. PM at `3779db9`: vet/gofmt/bash -n clean, 11 packages ok. **This is wrong if:** any value-taking flag of any command is still missing, or CLAUDE.md still describes initialization on any dry run.
+
+Verdict goes below this line.
+
+### #49 - re-review of #47's fixes only (branch `backup`, code tip `7ae9343`; carries `small-fixes` `3779db9`)
+
+**PM (2026-09-18T09:01:17-07:00):** Fix commits after the `small-fixes` merge `7f59941`: `git diff 7f59941..7ae9343 -- . ':!team'`. Claims: unknown-volume markers carry the full name on line 1 and refuse on mismatch, pruning respects ownership, two unknown names forced to one slug tested; the > 255-byte refusal prints to stderr and exits 2 before any `log` call, tested on a normal run with a fresh log dir; the collision harness forces two names to one slug and exercises report-only, TSV-only and marker conflicts separately (foreign bytes unchanged, diagnostic, non-zero, no state append); wording corrected to probabilistic + collision-checked. PM at `7ae9343`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** any output path (report, TSV, marker) can still replace a different disk's file; the refusal can still die on an unwritable log; or the harness can pass with the TSV or marker check removed.
+
+Verdict goes below this line.
+
 ### #46 - `small-fixes`: #44 fix + re-merge (branch tip `63efac1`; approved content `9f8281e` #40 + resolution #44) - **resolved: FINDINGS (2), accepted → Dev → request #48**
 
 **PM (2026-09-18T08:41:28-07:00):** Base pinned: `main` `b1277bd` (restore merged). Review (a) the #44 fix: `dryRunRequested` now skips `certify --root`'s value, with a regression for `certify cam --root --dry-run`; (b) the resolution `git diff main..63efac1 -- . ':!team'` must equal the approved `small-fixes` content re-expressed on current `main` (with restore's containment and `AllRows` present), plus nothing. PM at `63efac1`: vet/gofmt/bash -n clean, 11 packages ok. **This is wrong if:** any value-taking flag of any command is still outside the detector (re-list); any `main` hunk (restore included) or approved `small-fixes` hunk is lost or altered; or CLAUDE.md contradicts the merged code.
