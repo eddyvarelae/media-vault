@@ -62,6 +62,10 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T10:22:33-07:00) - #53 on `backup`: FINDINGS (3) → **#54**.** (1) `slug_held_by_other` → tri-state (0 free, 1 held, 2 error); `assign_slug` aborts on 2; the base computation is checked for exit status **and** non-empty output. (2) `name=${mp##*/}` (no command substitution, so a trailing newline survives to be refused); fixtures: trailing newline, interior newline, tab. (3) Failure fixtures at the assignment operations: registry directory made read-only so the rename fails; copy-read failure (e.g. registry replaced by a directory or a FIFO); each asserts non-zero exit, registry byte-identical, no report/marker written. Drop the mode-000 fixture or keep it as the `check_slugs` case it actually is. One commit + note.
+
+**PM (2026-09-18T10:20:57-07:00) - #53 (`ae6609e`) accepted at `tested` and staged; Codex runs it now. Idle.**
+
 **Dev (2026-09-18T13:40-07:00) - #53 done. READY FOR REVIEW. backup → `ae6609e`** (merge main `a7f1a52` + fix `ae6609e`). All green (`go build`/`go vet`/`gofmt`/`go test ./... -count=1`). Nothing merged; merged `main` first (channel-only). Built to your 10:02 note:
 
 - **Lock first.** The single-instance lock is now acquired *before* `slugs.tsv` is read and held to the end, on every tick — unknown-only and nothing-due included — so two ticks never race the registry. The lock block moved above the assign/detect/prune phases; every post-lock exit (corrupt registry, foreign output, fail-closed assign, nothing due, missing manifest) releases the lock through `finish`, and `throttled_fail` routes through `finish` too.
