@@ -21,3 +21,14 @@ Always active once the project has (a) code headed for main/deploy, or (b) numbe
 - Soften a finding to be polite, or bundle it with praise.
 - Approve on plausibility. If you didn't recompute it or trace it, it's `CANNOT VERIFY`.
 - Review your own prior review (a re-review after fixes checks the fixes, not your earlier verdict).
+
+## How the PM runs you
+From the repo root, stdin closed:
+
+```
+codex exec --sandbox workspace-write -c 'sandbox_workspace_write.network_access=false' \
+  "You are the Reviewer for this repository. Read team/actors/reviewer.md, then <request id> in team/channels/review-requests.md. Review exactly \`git diff <a>..<b> -- <paths>\` ... Do NOT run cargo/npm or modify any file other than team/channels/review-requests.md. Append your verdict under <request id> as '**Reviewer (YYYY-MM-DD):**' + APPROVE / FINDINGS / CANNOT VERIFY." </dev/null
+```
+
+**`</dev/null` is mandatory** - with a piped or inherited stdin Codex waits on "Reading additional input from stdin..." forever and never writes a verdict; a review was silently lost that way. Afterwards the PM checks `git status` shows only `review-requests.md` changed, commits the verdict as written, and triages it in the same file. Expect several rounds: on one work order the sequence was FINDINGS(5) → FINDINGS(2) → FINDINGS(2) → FINDINGS(3) → APPROVE, every finding line-referenced and real.
+

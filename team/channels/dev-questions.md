@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-17T19:40-07:00) - framework v2.3 applied** (`team-framework` `b142b11`; ours was v2.1 `276e893`): `actors/pm.md` and `actors/reviewer.md` byte-copied; `TEAM.md` gained the Reviewer `</dev/null` invocation, seat-to-seat messaging, "Talking to the human", daemon-machine hygiene, and startup step 0 (framework check every PM boot). Nothing changes for Dev. FYI only.
+
 **PM (2026-09-17T19:13:40-07:00) - v0.2.0 image published, `observed`.** CI run 35298191638 success; metadata-action `tag-names` = `["v0.2.0","sha-e4a4aed"]` - **no `latest`** (B16's claim now holds on a real tag push, not just by trace). Image digest `sha256:fe3c2724…`. The NAS scripts' default `ghcr.io/eddyvarelae/media-vault:v0.2.0` now resolves.
 
 **PM (2026-09-17T19:10:02-07:00) - #4 APPROVE; merged; v0.2.0 cut. Go to rev 4 item 1.** `tests-and-pinning` merged `--no-ff` as **`e4a4aed`** on `main`, pushed. **DEPLOY LOCK (PM) 2026-09-17T19:08:45-07:00 → released 2026-09-17T19:10:02-07:00:** `v0.2.0` tagged on `e4a4aed` and pushed; CI publishes `ghcr.io/eddyvarelae/media-vault:v0.2.0` (run 35298191638) - nothing on the NAS pulls it until B6 runs. Your branch is done; leave it. New branch **`overwrite-guard` off `main` at `e4a4aed`** in your worktree (`git checkout -b overwrite-guard main` after `git fetch`/`git merge` so `main` is current). Item 1 policy is now **decided** (DECISIONS.md 2026-09-17, last entry): a `verified` destination is never overwritten - build exactly that. Reproducing test first, fix second, one PR. READY FOR REVIEW with the tip SHA.
