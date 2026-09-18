@@ -6,6 +6,24 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #44 - `small-fixes` merge resolution only (branch tip `fd5fe06`; approved content `9f8281e` #40)
+
+**PM (2026-09-18T08:11:05-07:00):** Base pinned: `main` `bd1a384` (code tip `4a028c8`, the tagger merge). Review `git diff main..fd5fe06 -- . ':!team'` - it must equal the approved `small-fixes` content (B31 read-only dry-run open, B32 `move` owner guard, B35, B42, the #33/#37/#40 fixes) re-expressed on `main`, plus nothing. Dev's resolution decisions (Dev 2026-09-18T08:20): CLAUDE.md scan row from `main` (B34), copy row from `small-fixes` (B31), both script rows kept; `main_test.go` shared-tail seam reconstructed whole. PM at `fd5fe06`: vet/gofmt clean, 10 packages ok. **This is wrong if:** any `main` hunk (tagger, certs-out, f4-tests) is lost or altered; any approved `small-fixes` test body differs; or CLAUDE.md contradicts the merged code.
+
+Verdict goes below this line.
+
+### #45 - `restore` merge resolution only (branch code tip `cad0066`; approved content `a6955b7` #42)
+
+**PM (2026-09-18T08:11:05-07:00):** Base pinned: `main` `bd1a384`. Review `git diff main..cad0066 -- . ':!team'` - it must equal the approved `restore` content (B40 `vault restore`, `copy.Escapes`/`Under` containment, identity-only claimants, `AllRows` fold, tests) re-expressed on `main`, plus nothing. Dev's decisions: CLAUDE.md scan row from `main` (B20), copy row from `restore` (containment), ownership-test comment from `restore`; `main_test.go` seam reconstructed whole. Note: `restore` does **not** carry B31, so its copy row still says dry-run "does still create" - correct for this branch; the wording converges when `small-fixes` lands first. PM at `cad0066`: vet/gofmt clean, 10 packages ok. **This is wrong if:** any `main` hunk is lost; any approved `restore` body differs; or the containment helpers regress an approved `copy` behavior.
+
+Verdict goes below this line.
+
+### #43 - `backup`: #41 fix + merge resolution (branch tip `032456c`; fix commit `779613f`; approved content `d8f7cf3` #41 minus the slug)
+
+**PM (2026-09-18T08:11:05-07:00):** Two parts. (a) Fix: `git show 779613f -- . ':!team'` - `slug()` = `<hex of first 24 bytes>-<first 16 hex of sha256(name)>`, single-case, ≤ 65 chars; a 200-byte name lands a report; two names sharing a 24-byte head get distinct files; `Disk`/`disk` still distinct. (b) Resolution: `git diff main..032456c -- . ':!team'` must equal approved `backup` content + `small-fixes` content (backup was built on small-fixes; #44 covers that part) re-expressed on `main`; Dev's decisions: CLAUDE.md scan/copy rows from `main`/B31, gap/backup/move rows kept; `032456c` re-words the copy row to B31's read-only wording because the merged code has it. PM at `032456c`: vet/gofmt/bash -n clean, 11 packages ok. **This is wrong if:** two ≤255-byte names can still collide (state the collision bound); a name > 255 bytes is not refused explicitly; or the resolution drops any `main`/`small-fixes`/`backup` hunk.
+
+Verdict goes below this line.
+
 ### #41 - re-review of #38's fix only (branch `backup`, code tip `d8f7cf3`) - **resolved: FINDINGS (1), accepted → Dev → request #43**
 
 **PM (2026-09-18T03:59:48-07:00):** `git show d8f7cf3 -- . ':!team'`. Claim: `slug()` hex-encodes every byte of the disk name (`[0-9a-f]`, injective on any filesystem) for report files and unknown-volume markers; `Disk` then `disk` on the same day both survive. PM: vet/gofmt/bash -n clean, 10 packages ok. **This is wrong if:** any output filename still derives from the raw name, or the encoding can be non-injective.
