@@ -84,8 +84,11 @@ unless every file is in `verified` status.
 
 1. **Scan** walks the source directory and looks each file up in the manifest
    (keyed on `source_disk` + relative path). Files not in the manifest are
-   queued to copy. Files whose size or mtime changed are queued to recopy.
-   Everything else is skipped.
+   queued to copy. Files whose size or mtime changed are queued to recopy —
+   unless their row is already `verified`: a verified destination is never
+   overwritten. Such a file is reported as "verified, changed", skipped, and
+   the run exits 1 (a touched file with identical content is hashed and
+   skipped quietly). Everything else is skipped.
 
 2. **Copy** streams each file from source to destination through a
    `sha256.Hash`. The destination is written to a `.vault-partial` file and

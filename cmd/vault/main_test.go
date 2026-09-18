@@ -221,6 +221,10 @@ func TestRoundTrip(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "Done. Copied 3/3 files") {
 		t.Fatalf("copy: exit %d", code)
 	}
+	// The zero counts print on an ordinary run too (review #5, finding 3).
+	if !strings.Contains(out, "Verified, changed: 0") || !strings.Contains(out, "Dst owned:        0") {
+		t.Errorf("first copy did not print the zero counts:\n%s", out)
+	}
 	if got := readFile(t, filepath.Join(dst, "Videos", "C0002.MP4")); got != "clip two" {
 		t.Errorf("dest content = %q", got)
 	}
@@ -248,12 +252,40 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatalf("certify before verify: exit %d, want 1", code)
 	}
 
+	// Recopy: the source changes size AND mtime while its row is still
+	// `copied` (nothing has attested the destination yet), so scan plans
+	// exactly one recopy and copy replaces the destination; the row takes
+	// the new hash and mtime, the other rows do not move.
+	writeFile(t, filepath.Join(src, "DCIM", "C0001.MP4"), "clip one, re-exported", t0.Add(time.Hour))
+	out, _, code = vault(t, cfg, "scan", "cam", src, dst, "--prefix", "DCIM", "--rule", "MP4=Videos", "--rule", "JPG=Photos")
+	if code != 0 || !strings.Contains(out, "Files to recopy:  1") || !strings.Contains(out, "Files to skip:    2") {
+		t.Fatalf("scan after change: exit %d", code)
+	}
+	out, _, code = vault(t, cfg, "copy", "cam", src, dst, "--prefix", "DCIM", "--rule", "MP4=Videos", "--rule", "JPG=Photos")
+	if code != 0 || !strings.Contains(out, "Done. Copied 1/1 files") {
+		t.Fatalf("recopy: exit %d", code)
+	}
+	if got := readFile(t, filepath.Join(dst, "Videos", "C0001.MP4")); got != "clip one, re-exported" {
+		t.Errorf("recopied content = %q", got)
+	}
+	recopied := rowsOf(t, cfg, "cam")
+	wantRow(t, recopied, "DCIM/C0001.MP4", "Videos/C0001.MP4", "clip one, re-exported", "copied")
+	if recopied["DCIM/C0001.MP4"].MtimeNs != t0.Add(time.Hour).UnixNano() {
+		t.Errorf("recopied row mtime = %d, want the new source mtime", recopied["DCIM/C0001.MP4"].MtimeNs)
+	}
+	for _, src := range []string{"DCIM/C0002.MP4", "DCIM/C0001.JPG"} {
+		if !reflect.DeepEqual(recopied[src], rows[src]) {
+			t.Errorf("recopy touched an unrelated row %s: %+v vs %+v", src, recopied[src], rows[src])
+		}
+	}
+	rows = recopied
+
 	out, _, code = vault(t, cfg, "verify", "cam", dst)
 	if code != 0 || !strings.Contains(out, "Verified: 3   Mismatch: 0   Missing: 0   Errors: 0") {
 		t.Fatalf("verify: exit %d", code)
 	}
 	verified := rowsOf(t, cfg, "cam")
-	wantRow(t, verified, "DCIM/C0001.MP4", "Videos/C0001.MP4", "clip one", "verified")
+	wantRow(t, verified, "DCIM/C0001.MP4", "Videos/C0001.MP4", "clip one, re-exported", "verified")
 	wantRow(t, verified, "DCIM/C0002.MP4", "Videos/C0002.MP4", "clip two", "verified")
 	wantRow(t, verified, "DCIM/C0001.JPG", "Photos/C0001.JPG", "still", "verified")
 	for src, e := range verified {
@@ -276,7 +308,7 @@ func TestRoundTrip(t *testing.T) {
 	if err := json.Unmarshal([]byte(readFile(t, certPath)), &cert); err != nil {
 		t.Fatal(err)
 	}
-	if cert.FileCount != 3 || cert.TotalBytes != int64(len("clip one")+len("clip two")+len("still")) || cert.SourceDisk != "cam" {
+	if cert.FileCount != 3 || cert.TotalBytes != int64(len("clip one, re-exported")+len("clip two")+len("still")) || cert.SourceDisk != "cam" {
 		t.Errorf("cert = %+v", cert)
 	}
 	if len(cert.Files) != len(verified) {
@@ -300,52 +332,45 @@ func TestRoundTrip(t *testing.T) {
 		t.Errorf("signing key should live under VAULT_CONFIG: %v", err)
 	}
 
-	// Recopy: the source changes size AND mtime; scan plans exactly one
-	// recopy, copy replaces the destination, and the row drops back to
-	// `copied` so certify refuses again until verify re-promotes it.
-	writeFile(t, filepath.Join(src, "DCIM", "C0001.MP4"), "clip one, re-exported", t0.Add(time.Hour))
-	out, _, code = vault(t, cfg, "scan", "cam", src, dst, "--prefix", "DCIM", "--rule", "MP4=Videos", "--rule", "JPG=Photos")
-	if code != 0 || !strings.Contains(out, "Files to recopy:  1") || !strings.Contains(out, "Files to skip:    2") {
-		t.Fatalf("scan after change: exit %d", code)
-	}
-	out, _, code = vault(t, cfg, "copy", "cam", src, dst, "--prefix", "DCIM", "--rule", "MP4=Videos", "--rule", "JPG=Photos")
-	if code != 0 || !strings.Contains(out, "Done. Copied 1/1 files") {
-		t.Fatalf("recopy: exit %d", code)
-	}
-	if got := readFile(t, filepath.Join(dst, "Videos", "C0001.MP4")); got != "clip one, re-exported" {
-		t.Errorf("recopied content = %q", got)
-	}
-	recopied := rowsOf(t, cfg, "cam")
-	wantRow(t, recopied, "DCIM/C0001.MP4", "Videos/C0001.MP4", "clip one, re-exported", "copied")
-	if recopied["DCIM/C0001.MP4"].MtimeNs != t0.Add(time.Hour).UnixNano() {
-		t.Errorf("recopied row mtime = %d, want the new source mtime", recopied["DCIM/C0001.MP4"].MtimeNs)
-	}
-	for _, src := range []string{"DCIM/C0002.MP4", "DCIM/C0001.JPG"} {
-		if !reflect.DeepEqual(recopied[src], verified[src]) {
-			t.Errorf("recopy touched an unrelated row %s: %+v vs %+v", src, recopied[src], verified[src])
-		}
-	}
-	if _, _, code = vault(t, cfg, "certify", "cam"); code != 1 {
-		t.Fatalf("certify after recopy: exit %d, want 1", code)
-	}
-	if _, _, code = vault(t, cfg, "verify", "cam", dst); code != 0 {
-		t.Fatalf("verify after recopy: exit %d", code)
-	}
-	reverified := rowsOf(t, cfg, "cam")
-	e := wantRow(t, reverified, "DCIM/C0001.MP4", "Videos/C0001.MP4", "clip one, re-exported", "verified")
-	if e.VerifiedAt <= verified["DCIM/C0001.MP4"].VerifiedAt {
-		t.Errorf("re-verify did not advance verified_at: %d → %d", verified["DCIM/C0001.MP4"].VerifiedAt, e.VerifiedAt)
-	}
-	if _, _, code = vault(t, cfg, "certify", "cam"); code != 0 {
-		t.Fatalf("certify after re-verify: exit %d", code)
-	}
-
-	// A mtime-only change is also a recopy (size equal, mtime differs).
+	// A verified row whose source was merely touched (same bytes, new
+	// mtime) is not a change: scan hashes it, reports it retouched, and copy
+	// has nothing to do. No row moves, certify still passes.
 	writeFile(t, filepath.Join(src, "DCIM", "C0001.JPG"), "still", t0.Add(2*time.Hour))
 	out, _, code = vault(t, cfg, "scan", "cam", src, dst, "--prefix", "DCIM", "--rule", "MP4=Videos", "--rule", "JPG=Photos")
-	if code != 0 || !strings.Contains(out, "Files to recopy:  1") {
-		t.Fatalf("scan after mtime-only change: exit %d\n%s", code, out)
+	if code != 0 || !strings.Contains(out, "Retouched:        1") || !strings.Contains(out, "Files to recopy:  0") || !strings.Contains(out, "Verified, changed: 0") {
+		t.Fatalf("scan after mtime-only touch: exit %d\n%s", code, out)
 	}
+	out, _, code = vault(t, cfg, "copy", "cam", src, dst, "--prefix", "DCIM", "--rule", "MP4=Videos", "--rule", "JPG=Photos")
+	if code != 0 || !strings.Contains(out, "Nothing to copy") || !strings.Contains(out, "Retouched:        1") || !strings.Contains(out, "Verified, changed: 0") {
+		t.Fatalf("copy after mtime-only touch: exit %d\n%s", code, out)
+	}
+	if got := rowsOf(t, cfg, "cam"); !reflect.DeepEqual(got, verified) {
+		t.Errorf("mtime-only touch moved a row:\n before %+v\n after  %+v", verified, got)
+	}
+
+	// A verified row whose source now holds different bytes is the B23(b)
+	// case (TestVerifiedDestinationNeverOverwritten has the full assertion
+	// set): never recopied, named in INCOMPLETE:, exit 1, destination and
+	// row exactly as certified, certify still passes.
+	writeFile(t, filepath.Join(src, "DCIM", "C0001.MP4"), "clip one, re-exported AGAIN", t0.Add(3*time.Hour))
+	out, _, code = vault(t, cfg, "scan", "cam", src, dst, "--prefix", "DCIM", "--rule", "MP4=Videos", "--rule", "JPG=Photos")
+	if code != 0 || !strings.Contains(out, "Verified, changed: 1") || !strings.Contains(out, "Files to recopy:  0") {
+		t.Fatalf("scan after change under a verified row: exit %d\n%s", code, out)
+	}
+	_, errOut, code = vault(t, cfg, "copy", "cam", src, dst, "--prefix", "DCIM", "--rule", "MP4=Videos", "--rule", "JPG=Photos")
+	if code != 1 || !strings.Contains(errOut, "INCOMPLETE: 1 file(s) skipped because their verified archive copy holds different content (kept)") {
+		t.Fatalf("copy over a verified row: exit %d, stderr %q", code, errOut)
+	}
+	if got := readFile(t, filepath.Join(dst, "Videos", "C0001.MP4")); got != "clip one, re-exported" {
+		t.Errorf("verified destination overwritten: %q", got)
+	}
+	if got := rowsOf(t, cfg, "cam"); !reflect.DeepEqual(got, verified) {
+		t.Errorf("refused copy moved a row:\n before %+v\n after  %+v", verified, got)
+	}
+	if _, _, code = vault(t, cfg, "certify", "cam"); code != 0 {
+		t.Fatalf("certify after the refused copy: exit %d", code)
+	}
+	reverified := verified
 
 	// Bit-rot at the destination: verify exits 1, names the file, marks the
 	// row mismatch; certify refuses. A missing destination file also fails
@@ -358,7 +383,7 @@ func TestRoundTrip(t *testing.T) {
 	// The row keeps the sha the file HAD (the certificate's claim), flips to
 	// mismatch, and stamps when the mismatch was seen. Nothing else moves.
 	mismatched := rowsOf(t, cfg, "cam")
-	e = wantRow(t, mismatched, "DCIM/C0002.MP4", "Videos/C0002.MP4", "clip two", "mismatch")
+	e := wantRow(t, mismatched, "DCIM/C0002.MP4", "Videos/C0002.MP4", "clip two", "mismatch")
 	if e.VerifiedAt <= reverified["DCIM/C0002.MP4"].VerifiedAt {
 		t.Errorf("mismatch did not stamp verified_at: %d → %d", reverified["DCIM/C0002.MP4"].VerifiedAt, e.VerifiedAt)
 	}
@@ -457,7 +482,7 @@ func TestCopyExitStatus(t *testing.T) {
 			},
 			flags:   []string{"--dry-run"},
 			want:    0,
-			stdout:  []string{"(dry-run; 1 files would be copied, 0 recorded as deduped, 1 collisions skipped)"},
+			stdout:  []string{"(dry-run; 1 files would be copied, 0 recorded as deduped, 1 collisions skipped, 0 verified kept, 0 owned destinations skipped, 0 through symlinks skipped)"},
 			noFiles: true,
 		},
 		{
@@ -612,4 +637,378 @@ func TestExitCodeOrdering(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestVerifiedDestinationNeverOverwritten is B23(b), the defect behind the
+// 2,668 SonyA6700 photos lost on 2026-09-01: the camera's counter wrapped, a
+// second card carried different photos under the same DCIM names, and a copy
+// run under the same <disk> name treated them as changed files - recopy
+// replaced the verified destinations in place, no collision policy was
+// consulted, and the old hashes left the manifest with the bytes.
+//
+// Decided 2026-09-17 (DECISIONS.md): a verified destination is never
+// overwritten. Same (source_disk, source_path), different content is a
+// collision: the archived copy and its row stay exactly as they were, the
+// file is skipped and counted in INCOMPLETE:, exit 1.
+func TestVerifiedDestinationNeverOverwritten(t *testing.T) {
+	for _, policy := range []string{"skip", "rename-mtime-year"} {
+		t.Run(policy, func(t *testing.T) {
+			cfg, src, dst := t.TempDir(), t.TempDir(), t.TempDir()
+			const april = "DSC06245 as shot in April - the certified bytes"
+			const sept = "DSC06245 as shot in September"
+			writeFile(t, filepath.Join(src, "DCIM", "DSC06245.ARW"), april, t0)
+			writeFile(t, filepath.Join(src, "DCIM", "DSC06246.ARW"), "untouched sibling", t0)
+
+			if _, _, code := vault(t, cfg, "copy", "sony", src, dst); code != 0 {
+				t.Fatalf("first copy: exit %d", code)
+			}
+			if _, _, code := vault(t, cfg, "verify", "sony", dst); code != 0 {
+				t.Fatalf("verify: exit %d", code)
+			}
+			if _, _, code := vault(t, cfg, "certify", "sony"); code != 0 {
+				t.Fatalf("certify: exit %d", code)
+			}
+			before := rowsOf(t, cfg, "sony")
+			wantRow(t, before, "DCIM/DSC06245.ARW", "DCIM/DSC06245.ARW", april, "verified")
+
+			// The second card: same name, different (smaller) bytes, later mtime.
+			writeFile(t, filepath.Join(src, "DCIM", "DSC06245.ARW"), sept, t0.AddDate(0, 5, 0))
+
+			_, errOut, code := vault(t, cfg, "copy", "sony", src, dst, "--on-collision", policy)
+			if got := readFile(t, filepath.Join(dst, "DCIM", "DSC06245.ARW")); got != april {
+				t.Errorf("verified destination was overwritten: now %q, want the April bytes", got)
+			}
+			after := rowsOf(t, cfg, "sony")
+			if !reflect.DeepEqual(after["DCIM/DSC06245.ARW"], before["DCIM/DSC06245.ARW"]) {
+				t.Errorf("verified row changed:\n before %+v\n after  %+v", before["DCIM/DSC06245.ARW"], after["DCIM/DSC06245.ARW"])
+			}
+			if !reflect.DeepEqual(after["DCIM/DSC06246.ARW"], before["DCIM/DSC06246.ARW"]) {
+				t.Errorf("unrelated row changed: %+v", after["DCIM/DSC06246.ARW"])
+			}
+			if code != 1 || !strings.Contains(errOut, "INCOMPLETE:") || !strings.Contains(errOut, "verified") {
+				t.Errorf("exit %d, stderr %q; want 1 with INCOMPLETE: naming the verified-row skip", code, errOut)
+			}
+			noPartials(t, dst)
+			// The certificate's claim still holds: verify and certify pass.
+			if _, _, code := vault(t, cfg, "verify", "sony", dst); code != 0 {
+				t.Errorf("verify after the refused copy: exit %d, want 0", code)
+			}
+			if _, _, code := vault(t, cfg, "certify", "sony"); code != 0 {
+				t.Errorf("certify after the refused copy: exit %d, want 0", code)
+			}
+		})
+	}
+}
+
+// TestVerifiedDestinationOwnedByAnotherRow is review #5 finding 1: the
+// guard is by destination, not by source row. Every path copy.File would
+// write - the final name and the .vault-partial staging name - is refused
+// when a verified row of any disk records it as its archived copy.
+func TestVerifiedDestinationOwnedByAnotherRow(t *testing.T) {
+	// The Reviewer's scenario: disk A's x.mov is verified; disk B's identical
+	// x.mov is copied with --dedupe-content and lands as a deduped row
+	// pointing at A's file; B's source then changes and B is copied again.
+	// B's row is not verified, so the source-row check does not fire - but
+	// the recopy's destination is A's certified file.
+	t.Run("deduped row recopy over another disk's verified file", func(t *testing.T) {
+		cfg, srcA, srcB, dst := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(srcA, "x.mov"), "the clip", t0)
+		writeFile(t, filepath.Join(srcB, "x.mov"), "the clip", t0)
+		if _, _, code := vault(t, cfg, "copy", "A", srcA, dst); code != 0 {
+			t.Fatalf("copy A: exit %d", code)
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
+			t.Fatalf("verify A: exit %d", code)
+		}
+		out, _, code := vault(t, cfg, "copy", "B", srcB, dst, "--dedupe-content")
+		if code != 0 || !strings.Contains(out, "Recorded 1 already-archived files") {
+			t.Fatalf("copy B deduped: exit %d\n%s", code, out)
+		}
+		wantRow(t, rowsOf(t, cfg, "B"), "x.mov", "x.mov", "the clip", "deduped")
+		aBefore := rowsOf(t, cfg, "A")
+
+		writeFile(t, filepath.Join(srcB, "x.mov"), "B re-exported, longer", t0.Add(time.Hour))
+		for _, policy := range []string{"skip", "rename-mtime-year"} {
+			for _, extra := range [][]string{nil, {"--dedupe-content"}} {
+				args := append([]string{"copy", "B", srcB, dst, "--on-collision", policy}, extra...)
+				out, errOut, code := vault(t, cfg, args...)
+				if got := readFile(t, filepath.Join(dst, "x.mov")); got != "the clip" {
+					t.Fatalf("%v: A's verified file overwritten: %q", args[4:], got)
+				}
+				if code != 1 || !strings.Contains(errOut, "1 file(s) skipped because a verified row owns their destination path") {
+					t.Errorf("%v: exit %d, stderr %q", args[4:], code, errOut)
+				}
+				if !strings.Contains(out, "Dst owned:        1") {
+					t.Errorf("%v: count not reported:\n%s", args[4:], out)
+				}
+				if got := rowsOf(t, cfg, "A"); !reflect.DeepEqual(got, aBefore) {
+					t.Errorf("%v: A's row changed: %+v", args[4:], got)
+				}
+				noPartials(t, dst)
+			}
+		}
+		// The dry-run names the owner.
+		out, _, code = vault(t, cfg, "copy", "B", srcB, dst, "--dry-run")
+		if code != 0 || !strings.Contains(out, "x.mov → x.mov (owned by A:x.mov)") {
+			t.Errorf("dry-run: exit %d\n%s", code, out)
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
+			t.Errorf("verify A afterwards: exit %d", code)
+		}
+	})
+
+	// An archived file that happens to be named like a staging file: a new
+	// x.mov would open x.mov.vault-partial with O_TRUNC before anything
+	// else - the certified bytes gone before the copy even starts.
+	t.Run("new file whose staging path is a verified file", func(t *testing.T) {
+		cfg, srcA, srcB, dst := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(srcA, "x.mov.vault-partial"), "archived under an unlucky name", t0)
+		writeFile(t, filepath.Join(srcB, "x.mov"), "new clip", t0)
+		if _, _, code := vault(t, cfg, "copy", "A", srcA, dst); code != 0 {
+			t.Fatalf("copy A: exit %d", code)
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
+			t.Fatalf("verify A: exit %d", code)
+		}
+		for _, policy := range []string{"skip", "rename-mtime-year"} {
+			_, errOut, code := vault(t, cfg, "copy", "B", srcB, dst, "--on-collision", policy)
+			if got := readFile(t, filepath.Join(dst, "x.mov.vault-partial")); got != "archived under an unlucky name" {
+				t.Fatalf("%s: verified file truncated as a staging file: %q", policy, got)
+			}
+			if code != 1 || !strings.Contains(errOut, "verified row owns their destination path") {
+				t.Errorf("%s: exit %d, stderr %q", policy, code, errOut)
+			}
+			if _, err := os.Stat(filepath.Join(dst, "x.mov")); err == nil {
+				t.Errorf("%s: x.mov was written anyway", policy)
+			}
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
+			t.Errorf("verify A afterwards: exit %d", code)
+		}
+	})
+
+	// A verified row whose file is missing still owns its path: writing new
+	// bytes there would put a mismatch under a certified hash. The file is
+	// absent, so the on-disk collision check sees nothing - only the
+	// manifest knows.
+	t.Run("new file at a verified row's missing destination", func(t *testing.T) {
+		cfg, srcA, srcB, dst := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(srcA, "x.mov"), "the clip", t0)
+		writeFile(t, filepath.Join(srcB, "x.mov"), "other bytes", t0)
+		if _, _, code := vault(t, cfg, "copy", "A", srcA, dst); code != 0 {
+			t.Fatalf("copy A: exit %d", code)
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
+			t.Fatalf("verify A: exit %d", code)
+		}
+		if err := os.Remove(filepath.Join(dst, "x.mov")); err != nil {
+			t.Fatal(err)
+		}
+		_, errOut, code := vault(t, cfg, "copy", "B", srcB, dst)
+		if code != 1 || !strings.Contains(errOut, "verified row owns their destination path") {
+			t.Errorf("exit %d, stderr %q", code, errOut)
+		}
+		if _, err := os.Stat(filepath.Join(dst, "x.mov")); err == nil {
+			t.Errorf("x.mov was written under A's verified row")
+		}
+		if len(rowsOf(t, cfg, "B")) != 0 {
+			t.Errorf("B got a row for a file that was not written")
+		}
+	})
+
+	// The rename policy resolves an on-disk collision, but the renamed path
+	// is checked against the manifest too. While A's x_2023.mov is on disk
+	// the ordinary collision check refuses it; once it is missing, only the
+	// verified row knows the path is spoken for.
+	t.Run("renamed destination owned by a verified row", func(t *testing.T) {
+		cfg, srcA, srcB, dst := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(srcA, "x_2023.mov"), "archived renamed", t0)
+		writeFile(t, filepath.Join(srcB, "x.mov"), "new clip", t0)
+		writeFile(t, filepath.Join(dst, "x.mov"), "foreign", t0)
+		if _, _, code := vault(t, cfg, "copy", "A", srcA, dst); code != 0 {
+			t.Fatalf("copy A: exit %d", code)
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
+			t.Fatalf("verify A: exit %d", code)
+		}
+		_, errOut, code := vault(t, cfg, "copy", "B", srcB, dst, "--on-collision", "rename-mtime-year")
+		if code != 1 || !strings.Contains(errOut, "unresolved destination collisions") {
+			t.Errorf("with the file present: exit %d, stderr %q", code, errOut)
+		}
+		if err := os.Remove(filepath.Join(dst, "x_2023.mov")); err != nil {
+			t.Fatal(err)
+		}
+		_, errOut, code = vault(t, cfg, "copy", "B", srcB, dst, "--on-collision", "rename-mtime-year")
+		if code != 1 || !strings.Contains(errOut, "verified row owns their destination path") {
+			t.Errorf("with the file missing: exit %d, stderr %q", code, errOut)
+		}
+		if _, err := os.Stat(filepath.Join(dst, "x_2023.mov")); err == nil {
+			t.Errorf("x_2023.mov was written under A's verified row")
+		}
+		if len(rowsOf(t, cfg, "B")) != 0 {
+			t.Errorf("B got a row for a file that was not written")
+		}
+	})
+}
+
+// TestVerifiedDestinationAliases is review #6: ownership is by physical
+// location. A verified file reachable under another spelling - a case
+// alias on a folding filesystem, a `..` in a routing rule - must still
+// refuse the write. The plan's fold is unconditional, so the refusal is
+// expected whatever the temp filesystem does; the writer's own Lstat is
+// the second line on a folding filesystem (internal/copy tests it).
+func TestVerifiedDestinationAliases(t *testing.T) {
+	t.Run("case alias of a verified staging-named file", func(t *testing.T) {
+		cfg, srcA, srcB, dst := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(srcA, "X.mov.vault-partial"), "archived, capital X", t0)
+		writeFile(t, filepath.Join(srcB, "x.mov"), "new clip", t0)
+		if _, _, code := vault(t, cfg, "copy", "A", srcA, dst); code != 0 {
+			t.Fatalf("copy A: exit %d", code)
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
+			t.Fatalf("verify A: exit %d", code)
+		}
+		for _, policy := range []string{"skip", "rename-mtime-year"} {
+			out, errOut, code := vault(t, cfg, "copy", "B", srcB, dst, "--on-collision", policy)
+			if got := readFile(t, filepath.Join(dst, "X.mov.vault-partial")); got != "archived, capital X" {
+				t.Fatalf("%s: verified file destroyed through its case alias: %q", policy, got)
+			}
+			if code != 1 || !strings.Contains(errOut, "verified row owns their destination path") {
+				t.Errorf("%s: exit %d, stderr %q", policy, code, errOut)
+			}
+			if !strings.Contains(out, "Dst owned:        1") {
+				t.Errorf("%s: not reported as owned:\n%s", policy, out)
+			}
+			if _, err := os.Stat(filepath.Join(dst, "x.mov")); err == nil {
+				t.Errorf("%s: x.mov written", policy)
+			}
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
+			t.Errorf("verify A afterwards: exit %d", code)
+		}
+	})
+
+	// --rule vault-partial=../archive: A's file is stored as
+	// ../archive/x.mov.vault-partial relative to base/archive, which is
+	// base/archive/x.mov.vault-partial on disk - exactly B's staging path.
+	t.Run("dot-dot in a routing rule", func(t *testing.T) {
+		cfg, srcA, srcB, base := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		dst := filepath.Join(base, "archive")
+		writeFile(t, filepath.Join(srcA, "x.mov.vault-partial"), "archived via a .. rule", t0)
+		writeFile(t, filepath.Join(srcB, "x.mov"), "new clip", t0)
+		if _, _, code := vault(t, cfg, "copy", "A", srcA, dst, "--rule", "vault-partial=../archive"); code != 0 {
+			t.Fatalf("copy A: exit %d", code)
+		}
+		if got := rowsOf(t, cfg, "A")["x.mov.vault-partial"].DestPath; got != "../archive/x.mov.vault-partial" {
+			t.Fatalf("A's stored dest_path = %q; the test needs the .. spelling", got)
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
+			t.Fatalf("verify A: exit %d", code)
+		}
+		_, errOut, code := vault(t, cfg, "copy", "B", srcB, dst)
+		if got := readFile(t, filepath.Join(dst, "x.mov.vault-partial")); got != "archived via a .. rule" {
+			t.Fatalf("verified file destroyed through its .. spelling: %q", got)
+		}
+		if code != 1 || !strings.Contains(errOut, "verified row owns their destination path") {
+			t.Errorf("exit %d, stderr %q", code, errOut)
+		}
+		if _, err := os.Stat(filepath.Join(dst, "x.mov")); err == nil {
+			t.Errorf("x.mov written")
+		}
+	})
+
+	// A leftover .vault-partial that no row owns: the plan lets the task
+	// through, the writer refuses it as a FAIL naming the path, and the run
+	// is INCOMPLETE. The leftover is not removed.
+	t.Run("unowned leftover partial", func(t *testing.T) {
+		cfg, src, dst := t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(src, "x.mov"), "new clip", t0)
+		writeFile(t, filepath.Join(dst, "x.mov.vault-partial"), "half of somethi", t0)
+		out, errOut, code := vault(t, cfg, "copy", "B", src, dst)
+		if code != 1 || !strings.Contains(errOut, "INCOMPLETE: 1 file(s) failed to copy") || !strings.Contains(out, "interrupted run") {
+			t.Errorf("exit %d, stderr %q\n%s", code, errOut, out)
+		}
+		if got := readFile(t, filepath.Join(dst, "x.mov.vault-partial")); got != "half of somethi" {
+			t.Errorf("leftover touched: %q", got)
+		}
+		if len(rowsOf(t, cfg, "B")) != 0 {
+			t.Errorf("row written for a refused file")
+		}
+	})
+}
+
+// TestDestinationThroughSymlink is review #9: a symlinked directory under
+// the root makes two spellings one file. The Reviewer's case: A's verified
+// real/x.mov, dst/alias -> real, B's deduped row for alias/x.mov whose
+// source then changes - the recopy's key is dst/alias/x.mov, its bytes
+// would land on dst/real/x.mov.
+func TestDestinationThroughSymlink(t *testing.T) {
+	t.Run("recopy through an aliased directory onto another disk's verified file", func(t *testing.T) {
+		cfg, srcA, srcB, dst := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(srcA, "real", "x.mov"), "the clip", t0)
+		writeFile(t, filepath.Join(srcB, "alias", "x.mov"), "the clip", t0)
+		if _, _, code := vault(t, cfg, "copy", "A", srcA, dst); code != 0 {
+			t.Fatalf("copy A: exit %d", code)
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
+			t.Fatalf("verify A: exit %d", code)
+		}
+		if err := os.Symlink(filepath.Join(dst, "real"), filepath.Join(dst, "alias")); err != nil {
+			t.Fatal(err)
+		}
+		out, _, code := vault(t, cfg, "copy", "B", srcB, dst, "--dedupe-content")
+		if code != 0 || !strings.Contains(out, "Recorded 1 already-archived files") {
+			t.Fatalf("copy B deduped: exit %d\n%s", code, out)
+		}
+		wantRow(t, rowsOf(t, cfg, "B"), "alias/x.mov", "real/x.mov", "the clip", "deduped")
+		aBefore := rowsOf(t, cfg, "A")
+
+		writeFile(t, filepath.Join(srcB, "alias", "x.mov"), "B re-exported, longer", t0.Add(time.Hour))
+		for _, policy := range []string{"skip", "rename-mtime-year"} {
+			out, errOut, code := vault(t, cfg, "copy", "B", srcB, dst, "--on-collision", policy)
+			if got := readFile(t, filepath.Join(dst, "real", "x.mov")); got != "the clip" {
+				t.Fatalf("%s: A's verified file overwritten through the alias: %q", policy, got)
+			}
+			if code != 1 || !strings.Contains(errOut, "1 file(s) skipped because their destination path passes through a symlink") {
+				t.Errorf("%s: exit %d, stderr %q", policy, code, errOut)
+			}
+			if !strings.Contains(out, "Dst via symlink:  1") {
+				t.Errorf("%s: not reported:\n%s", policy, out)
+			}
+			if got := rowsOf(t, cfg, "A"); !reflect.DeepEqual(got, aBefore) {
+				t.Errorf("%s: A's row changed", policy)
+			}
+			noPartials(t, filepath.Join(dst, "real"))
+		}
+		out, _, code = vault(t, cfg, "copy", "B", srcB, dst, "--dry-run")
+		if code != 0 || !strings.Contains(out, "alias/x.mov → alias/x.mov (alias is a symlink)") {
+			t.Errorf("dry-run: exit %d\n%s", code, out)
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
+			t.Errorf("verify A afterwards: exit %d", code)
+		}
+	})
+
+	// A brand-new file whose path passes through a link is refused too, at
+	// any depth: the write would land somewhere other than its spelling.
+	t.Run("new file through a nested aliased directory", func(t *testing.T) {
+		cfg, src, dst, elsewhere := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(src, "DCIM", "100MSDCF", "y.mov"), "new clip", t0)
+		if err := os.MkdirAll(filepath.Join(dst, "DCIM"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(elsewhere, filepath.Join(dst, "DCIM", "100MSDCF")); err != nil {
+			t.Fatal(err)
+		}
+		_, errOut, code := vault(t, cfg, "copy", "B", src, dst)
+		if code != 1 || !strings.Contains(errOut, "passes through a symlink") {
+			t.Errorf("exit %d, stderr %q", code, errOut)
+		}
+		if entries, _ := os.ReadDir(elsewhere); len(entries) != 0 {
+			t.Errorf("wrote through the link: %v", entries)
+		}
+		if len(rowsOf(t, cfg, "B")) != 0 {
+			t.Errorf("row written for a refused file")
+		}
+	})
 }
