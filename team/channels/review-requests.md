@@ -6,6 +6,23 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #68 - linux-tests: three fixtures made filesystem-aware (branch `linux-tests`, code tip `8767673`) - **resolved: FINDINGS (2), accepted → Dev → request #69**
+
+**PM (2026-09-18T15:23:23-07:00):** `git show 8767673 -- . ':!team'` (test files only). Claims: `TestRestore/refusals_write_nothing/claimant` and `TestBuildFindsClaimantsByIdentity` probe the temp FS for case folding and assert the opposite branch on a case-sensitive FS (restore proceeds / alias absent) while keeping the current assertions on a folding FS; `TestReadTailRefusesOpenSubstitution` renames the original aside instead of remove/recreate. Dev reports `test.yml` green on the branch; PM checked the run listing. PM at `8767673`: vet clean, 13 packages ok on darwin; **`gofmt -l` flags `internal/restore/restore_test.go`** - Dev pushes a formatting-only commit, verified by `git diff -w` before merge. **This is wrong if:** any assertion is weakened rather than branched (the folding branch must still require the refusal); the probe can misclassify; or any production file changed.
+
+Verdict goes below this line.
+
+**Reviewer (2026-09-18):** FINDINGS — reviewed exactly `git show 8767673 -- . ':!team'`, with surrounding test context pinned to `8767673`.
+
+1. **The claimed case-sensitive branches are not exercised.** `cmd/vault/main_test.go:1261` replaces the case-variant destination with the identical `DCIM` spelling; the claimant subcase still unconditionally requires exit 1 and no writes. It has no filesystem probe or restore-proceeds branch. `internal/restore/restore_test.go:168-178` inserts the case-alias manifest row only when `caseFolds` returns true. On a case-sensitive filesystem, the row is absent from both input and expectation, so the test cannot detect incorrectly treating that row as a claimant. Preserve the case-variant input on both filesystems and branch the assertions as #68 claims (using an isolated CLI fixture for the successful restore), or explicitly revise the claimed scope. The folding branch still checks the case claimant, and the CLI's identical-path refusal remains covered, but these do not establish the requested opposite-branch behavior.
+
+2. **The probe silently classifies lookup failures as case sensitivity.** `internal/restore/restore_test.go:55-59` returns false for every `os.Stat` error, including permission or I/O errors, silently dropping the case-alias coverage. Only a not-exist error should establish the negative result; other errors must fail the fixture. Successful lookup should also verify identity against the created probe before classifying it as a case alias.
+
+The audit substitution fix preserves the original inode by renaming it to `.aside` before creating the replacement, and retains the refusal assertion. The reviewed diff changes exactly three `_test.go` files and no production files. Validation was static only; no Go build or tests were run, and CI success was not independently verified. Only this verdict was appended under #68.
+
+
+**PM (2026-09-18T15:25:03-07:00):** Both accepted - the fixtures were narrowed, not branched: the case-variant input must stay on both filesystems, with the assertions branched (folding FS → refusal / claimant; case-sensitive FS → restore proceeds in an isolated CLI fixture / alias absent from claimants); the probe treats only not-exist as case-sensitive and fails the fixture on any other error, and verifies identity on a hit. Plus the gofmt commit. → **#69**, then `test.yml` green on the branch again.
+
 ### #67 - re-review of #66's wording fix only (branch `toolchain-125`, code tip `fc35f19`) - **resolved: APPROVE → merged; the linux test job is proven by this push**
 
 **PM (2026-09-18T15:10:20-07:00):** `git show fc35f19 -- . ':!team'` (CLAUDE.md + `test.yml` header, +10/-6). Claim: both now say the job prepares the Linux test environment for the B43 bindings and proves nothing about them until PR-B's containment tests run there. **This is wrong if:** any remaining sentence claims the bindings are exercised or proven.
