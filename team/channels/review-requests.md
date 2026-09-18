@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #63 - re-review of #62's fixes only (branch `audit`, code tip `6c00b39`)
+
+**PM (2026-09-18T14:06:38-07:00):** `git diff 6685d2a..6c00b39 -- . ':!team'`. Claims: twins are counted only from media rows that pass the resolve-under-root + regular-file checks (missing and symlinked twin fixtures → REVIEW); the SKIPPED aggregate appears in the TSV as one row per extension and a CLI test on an MP4-only disk asserts it; the three regressions exist: substitution at open (leaf swapped for a symlink between `Lstat` and `Open` via a test hook) → ERROR, truncation after `Lstat` → short read → ERROR and `--strict` exit 1, tee bypass on a non-empty copy → refused before a row is returned; the parent-directory residual is documented in CLAUDE.md. PM at `6c00b39`: vet/gofmt clean, 13 packages ok. **This is wrong if:** any of the three regressions does not reach the operation it claims; a twin can still be counted from an unsafe row; or the TSV lacks the SKIPPED rows.
+
+Verdict goes below this line.
+
 ### #62 - re-review of #61's fixes only (branch `audit`, code tip `6685d2a`) - **resolved: FINDINGS (3), accepted → Dev → request #63**
 
 **PM (2026-09-18T13:53:56-07:00):** `git diff 3e11150..6685d2a -- . ':!team'` (the fix commit(s) after the gofmt commit). Claims: JPEG PLAUSIBLE only when `FF D9` is followed by nothing but `0x00` through EOF (garbage-after-EOI → SUSPECT, fixture); the leaf is opened `O_NOFOLLOW|O_RDONLY`, size taken from the open file's `Stat`, identity compared to the `Lstat` result, mismatch refused, directory substitution documented as the residual race; empty `.SRT` PLAUSIBLE only with a media twin resolving under the root, else REVIEW (both fixtures); SKIPPED types aggregated as `ext:count` on the summary and in the TSV, asserted by the CLI test; `readTail` requires the full requested length (or the whole file), a short read → ERROR (fails `--strict`), truncation fixture; the copy assertion compares the tee's byte count with bytes written and refuses otherwise, with a bypass test that fails. PM at `6685d2a`: vet/gofmt clean, 13 packages ok. **This is wrong if:** any of the six #61 cases still classifies as before; the open can still follow a link; or the tee assertion can pass when the tee is bypassed.
