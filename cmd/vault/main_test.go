@@ -1380,3 +1380,292 @@ func TestRestoreContainmentAndAliases(t *testing.T) {
 		}
 	})
 }
+
+// TestVerifyOnlyUnverified is the F4 "done when" list through main(): the
+// flag anywhere among the positionals, wrong arity still 2, the skip
+// announced with the newest single-row date (labeled as such), a bare
+// verify still reading everything, and the incremental pass as the route
+// to certify.
+func TestVerifyOnlyUnverified(t *testing.T) {
+	cfg, src, dst := t.TempDir(), t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(src, "a.mov"), "clip a", t0)
+	writeFile(t, filepath.Join(src, "b.mov"), "clip bee", t0)
+	if _, _, code := vault(t, cfg, "copy", "cam", src, dst); code != 0 {
+		t.Fatalf("copy: exit %d", code)
+	}
+	// First pass with the flag on an all-copied disk: a full sweep, and
+	// it says so.
+	out, _, code := vault(t, cfg, "--only-unverified", "cam", dst)
+	if code != 2 {
+		t.Errorf("flag before the command name is not a command: exit %d, want 2", code)
+	}
+	out, _, code = vault(t, cfg, "verify", "--only-unverified", "cam", dst)
+	if code != 0 || !strings.Contains(out, "(no verified rows to skip — this is a full sweep)") || !strings.Contains(out, "Verified: 2   Mismatch: 0   Missing: 0   Errors: 0   Bytes read: 14 B") {
+		t.Fatalf("first incremental pass: exit %d\n%s", code, out)
+	}
+	first := rowsOf(t, cfg, "cam")
+	newest := first["a.mov"].VerifiedAt
+	if first["b.mov"].VerifiedAt > newest {
+		newest = first["b.mov"].VerifiedAt
+	}
+
+	// New files arrive one at a time; each incremental pass reads only the
+	// new one, and names what it skipped with the newest single row's
+	// date, not a sweep date. The flag is accepted after or between the
+	// positionals.
+	writeFile(t, filepath.Join(dst, "a.mov"), "clip A", t0) // rot under a verified row, invisible to the incremental pass
+	skipped := 2
+	for i, args := range [][]string{
+		{"verify", "cam", dst, "--only-unverified"},
+		{"verify", "cam", "--only-unverified", dst},
+	} {
+		name := []string{"c.mov", "d.mov"}[i]
+		writeFile(t, filepath.Join(src, name), "clip "+name[:1], t0)
+		if _, _, code := vault(t, cfg, "copy", "cam", src, dst); code != 0 {
+			t.Fatalf("copy %s: exit %d", name, code)
+		}
+		out, _, code := vault(t, cfg, args...)
+		if code != 0 || !strings.Contains(out, "Verified: 1   Mismatch: 0   Missing: 0   Errors: 0   Bytes read: 6 B") {
+			t.Fatalf("%v: exit %d\n%s", args, code, out)
+		}
+		for _, want := range []string{
+			"Re-hashing ONLY unverified rows",
+			fmt.Sprintf("skipping %d already-verified row(s) — NOT an integrity check.", skipped),
+			"newest verified row: " + time.Unix(0, newest).Format("2006-01-02 15:04") + " (the newest single row, not a full-sweep date)",
+			"verified   " + name,
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%v: output missing %q:\n%s", args, want, out)
+			}
+		}
+		if strings.Contains(out, "a.mov") || strings.Contains(out, "b.mov") {
+			t.Errorf("%v: a verified row was listed:\n%s", args, out)
+		}
+		skipped++
+		rows := rowsOf(t, cfg, "cam")
+		for _, src := range []string{"a.mov", "b.mov"} {
+			if !reflect.DeepEqual(rows[src], first[src]) {
+				t.Errorf("incremental pass touched verified row %s", src)
+			}
+		}
+		if rows[name].VerifiedAt > newest {
+			newest = rows[name].VerifiedAt
+		}
+	}
+	// The incremental pass promoted the last row: certify succeeds - and
+	// attests a.mov's old hash, which is the documented cost of skipping.
+	if _, _, code := vault(t, cfg, "certify", "cam"); code != 0 {
+		t.Errorf("certify after the incremental pass: exit %d, want 0", code)
+	}
+
+	// Arity is still enforced with the flag present.
+	if _, _, code := vault(t, cfg, "verify", "--only-unverified", "cam"); code != 2 {
+		t.Errorf("wrong arity with the flag: exit %d, want 2", code)
+	}
+	if _, _, code := vault(t, cfg, "verify", "cam", dst, "extra", "--only-unverified"); code != 2 {
+		t.Errorf("three positionals with the flag: exit %d, want 2", code)
+	}
+
+	// A bare verify reads all four and finds the rot.
+	out, _, code = vault(t, cfg, "verify", "cam", dst)
+	if code != 1 || !strings.Contains(out, "Re-hashing destination files") || !strings.Contains(out, "Verified: 3   Mismatch: 1   Missing: 0   Errors: 0   Bytes read: 26 B") || !strings.Contains(out, "MISMATCH   a.mov") {
+		t.Fatalf("bare verify: exit %d\n%s", code, out)
+	}
+	if strings.Contains(out, "skipping") {
+		t.Errorf("bare verify claimed to skip something:\n%s", out)
+	}
+	// The mismatch row is in the next incremental pass (it is not
+	// verified), so a fixed file gets promoted without a full sweep.
+	writeFile(t, filepath.Join(dst, "a.mov"), "clip a", t0)
+	out, _, code = vault(t, cfg, "verify", "cam", dst, "--only-unverified")
+	if code != 0 || !strings.Contains(out, "skipping 3 already-verified row(s)") || !strings.Contains(out, "verified   a.mov") || !strings.Contains(out, "Bytes read: 6 B") {
+		t.Fatalf("incremental pass over a mismatch row: exit %d\n%s", code, out)
+	}
+	if _, _, code := vault(t, cfg, "certify", "cam"); code != 0 {
+		t.Errorf("certify after repairing the mismatch incrementally: exit %d", code)
+	}
+}
+
+// TestCertifyRefusesOutputInsideArchive is B25 through main(): a certificate
+// written under the destination root exits 1 before signing; beside the
+// manifest it succeeds; stdout mode is untouched.
+func TestCertifyRefusesOutputInsideArchive(t *testing.T) {
+	cfg, src, dst, certs := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(src, "DCIM", "DSC0001.JPG"), "a photo", t0)
+	if _, _, code := vault(t, cfg, "copy", "sony", src, dst); code != 0 {
+		t.Fatalf("copy: exit %d", code)
+	}
+	if _, _, code := vault(t, cfg, "verify", "sony", dst); code != 0 {
+		t.Fatalf("verify: exit %d", code)
+	}
+	for _, out := range []string{
+		filepath.Join(dst, "media-sonya6700.cert.json"),
+		filepath.Join(dst, "DCIM", "cert.json"),
+	} {
+		_, errOut, code := vault(t, cfg, "certify", "sony", out)
+		if code != 1 || !strings.Contains(errOut, "Cannot certify: certificate output is inside the archive it certifies") {
+			t.Errorf("certify %s: exit %d, stderr %q", out, code, errOut)
+		}
+		if _, err := os.Stat(out); err == nil {
+			t.Errorf("certificate written anyway at %s", out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(cfg, "key.pem")); err == nil {
+		t.Errorf("refusal should happen before the signing key is created")
+	}
+	out := filepath.Join(certs, "media-sonya6700.cert.json")
+	if _, errOut, code := vault(t, cfg, "certify", "sony", out); code != 0 || !strings.Contains(errOut, "Wrote signed certificate") {
+		t.Fatalf("certify beside the manifest: exit %d, stderr %q", code, errOut)
+	}
+	if stdout, _, code := vault(t, cfg, "certify", "sony"); code != 0 || !strings.Contains(stdout, `"source_disk": "sony"`) {
+		t.Errorf("stdout certify: exit %d", code)
+	}
+	// The next scan of the tree finds no stray certificate.
+	if stdout, _, code := vault(t, cfg, "scan", "sony", src, dst); code != 0 || !strings.Contains(stdout, "Dst collisions:   0") {
+		t.Errorf("scan after certify: exit %d\n%s", code, stdout)
+	}
+}
+
+// TestRulesRefuseEscapes is B34 through main(): a --rule whose subdir
+// climbs out of the destination root, or is absolute, is a bad flag value
+// (exit 1) for scan, copy and move.
+func TestRulesRefuseEscapes(t *testing.T) {
+	cfg := t.TempDir()
+	for _, c := range []struct {
+		name string
+		args []string
+	}{
+		{"copy ..", []string{"copy", "--rule", "MP4=../archive", "d", "s", "x"}},
+		{"copy nested ..", []string{"copy", "--rule", "MP4=Videos/../../x", "d", "s", "x"}},
+		{"scan absolute", []string{"scan", "--rule", "MP4=/volume1/other", "d", "s", "x"}},
+		{"move ..", []string{"move", "--rule", "MP4=../x", "a", "b", t.TempDir(), t.TempDir()}},
+	} {
+		if _, errOut, code := vault(t, cfg, c.args...); code != 1 || !strings.Contains(errOut, "invalid rule") {
+			t.Errorf("%s: exit %d, stderr %q", c.name, code, errOut)
+		}
+	}
+	// A dot in the middle of a name is not a climb.
+	src, dst := t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(src, "a.MP4"), "clip", t0)
+	if _, _, code := vault(t, cfg, "copy", "--rule", "MP4=v..ideos/2024", "d", src, dst); code != 0 {
+		t.Errorf("rule with .. inside a component: exit %d, want 0", code)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "v..ideos", "2024", "a.MP4")); err != nil {
+		t.Errorf("routed file missing: %v", err)
+	}
+}
+
+// TestCertifyOutputLeafAndRoot is review #12: a symlink at the output name
+// is refused whatever it points at (os.WriteFile would follow it), --root
+// refuses by containment even when the tree's files no longer match their
+// rows, and the content heuristic remains the fallback without --root.
+func TestCertifyOutputLeafAndRoot(t *testing.T) {
+	setup := func(t *testing.T) (cfg, dst, certs string) {
+		cfg, src, dst, certs := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(src, "DCIM", "a.JPG"), "a photo", t0)
+		if _, _, code := vault(t, cfg, "copy", "sony", src, dst); code != 0 {
+			t.Fatalf("copy: exit %d", code)
+		}
+		if _, _, code := vault(t, cfg, "verify", "sony", dst); code != 0 {
+			t.Fatalf("verify: exit %d", code)
+		}
+		return cfg, dst, certs
+	}
+
+	t.Run("symlink leaf to a verified photo", func(t *testing.T) {
+		cfg, dst, certs := setup(t)
+		out := filepath.Join(certs, "out.json")
+		if err := os.Symlink(filepath.Join(dst, "DCIM", "a.JPG"), out); err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range [][]string{
+			{"certify", "sony", out},
+			{"certify", "sony", out, "--root", dst},
+		} {
+			_, errOut, code := vault(t, cfg, args...)
+			if code != 1 || !strings.Contains(errOut, "Cannot certify: certificate output path is not a regular file") || !strings.Contains(errOut, "is a symlink") {
+				t.Errorf("%v: exit %d, stderr %q", args[3:], code, errOut)
+			}
+		}
+		if got := readFile(t, filepath.Join(dst, "DCIM", "a.JPG")); got != "a photo" {
+			t.Fatalf("verified photo overwritten through the output symlink: %q", got)
+		}
+		if _, _, code := vault(t, cfg, "verify", "sony", dst); code != 0 {
+			t.Errorf("verify afterwards: exit %d", code)
+		}
+	})
+
+	t.Run("symlink leaf into the tree, and dangling", func(t *testing.T) {
+		cfg, dst, certs := setup(t)
+		into := filepath.Join(certs, "into.json")
+		if err := os.Symlink(filepath.Join(dst, "new.cert.json"), into); err != nil { // dangling, would create inside the tree
+			t.Fatal(err)
+		}
+		_, errOut, code := vault(t, cfg, "certify", "sony", into)
+		if code != 1 || !strings.Contains(errOut, "is a symlink") {
+			t.Errorf("exit %d, stderr %q", code, errOut)
+		}
+		if _, err := os.Lstat(filepath.Join(dst, "new.cert.json")); err == nil {
+			t.Errorf("certificate created inside the tree through the link")
+		}
+		dir := filepath.Join(certs, "dir.json")
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if _, errOut, code := vault(t, cfg, "certify", "sony", dir); code != 1 || !strings.Contains(errOut, "is a directory") {
+			t.Errorf("directory at out: exit %d, stderr %q", code, errOut)
+		}
+		// An existing regular file is fine: a previous certificate is superseded.
+		out := filepath.Join(certs, "prev.json")
+		writeFile(t, out, "old cert", t0)
+		if _, errOut, code := vault(t, cfg, "certify", "sony", out); code != 0 {
+			t.Errorf("existing regular file: exit %d, stderr %q", code, errOut)
+		}
+	})
+
+	t.Run("--root refuses by containment even with stale rows", func(t *testing.T) {
+		cfg, dst, certs := setup(t)
+		// Every archived file changes size: the content heuristic no longer
+		// recognises the tree, --root still does.
+		writeFile(t, filepath.Join(dst, "DCIM", "a.JPG"), "a photo, longer", t0)
+		for _, out := range []string{filepath.Join(dst, "c.json"), filepath.Join(dst, "DCIM", "c.json"), filepath.Join(dst, "notyet", "c.json")} {
+			_, errOut, code := vault(t, cfg, "certify", "sony", out, "--root", dst)
+			if code != 1 || !strings.Contains(errOut, "certificate output is inside the archive it certifies") {
+				t.Errorf("%s: exit %d, stderr %q", out, code, errOut)
+			}
+			if _, err := os.Lstat(out); err == nil {
+				t.Errorf("%s written", out)
+			}
+		}
+		// Through a directory symlink into the tree, with --root.
+		link := filepath.Join(certs, "link")
+		if err := os.Symlink(dst, link); err != nil {
+			t.Fatal(err)
+		}
+		if _, errOut, code := vault(t, cfg, "certify", "sony", filepath.Join(link, "c.json"), "--root", dst); code != 1 || !strings.Contains(errOut, "inside the archive") {
+			t.Errorf("via directory link: exit %d, stderr %q", code, errOut)
+		}
+		// Beside the manifest, with --root: allowed. (Rows are stale, so
+		// certify itself still signs - certification trusts verify's record;
+		// only placement is decided here.)
+		if _, errOut, code := vault(t, cfg, "certify", "sony", filepath.Join(certs, "ok.json"), "--root", dst); code != 0 {
+			t.Errorf("beside the manifest with --root: exit %d, stderr %q", code, errOut)
+		}
+	})
+
+	t.Run("flags", func(t *testing.T) {
+		cfg, dst, certs := setup(t)
+		if _, _, code := vault(t, cfg, "certify", "sony", filepath.Join(certs, "x.json"), "--root"); code != 1 {
+			t.Errorf("--root without a value: exit %d, want 1", code)
+		}
+		if _, _, code := vault(t, cfg, "certify", "sony", filepath.Join(certs, "x.json"), "--bogus"); code != 1 {
+			t.Errorf("unknown flag: exit %d, want 1", code)
+		}
+		if _, _, code := vault(t, cfg, "certify", "--root", dst, "sony", filepath.Join(certs, "x.json")); code != 0 {
+			t.Errorf("--root before the positionals: exit %d, want 0", code)
+		}
+		if _, _, code := vault(t, cfg, "certify", "--root", dst); code != 2 {
+			t.Errorf("no disk: exit %d, want 2", code)
+		}
+	})
+}

@@ -67,7 +67,7 @@ go build -o vault ./cmd/vault
 ./vault verify tars /Volumes/nas-share/archive --only-unverified
 
 # 4. Certify: emit a signed JSON proving the disk is fully archived
-./vault certify tars ./tars-cert.json
+./vault certify tars ./tars-cert.json --root /Volumes/nas-share/archive   # never inside that tree
 ```
 
 The manifest and signing key live under `$VAULT_CONFIG` (default
@@ -82,13 +82,15 @@ unless every file is in `verified` status.
 
 ## How it works
 
-1. **Scan** walks the source directory and looks each file up in the manifest
-   (keyed on `source_disk` + relative path). Files not in the manifest are
-   queued to copy. Files whose size or mtime changed are queued to recopy —
-   unless their row is already `verified`: a verified destination is never
-   overwritten. Such a file is reported as "verified, changed", skipped, and
-   the run exits 1 (a touched file with identical content is hashed and
-   skipped quietly). Everything else is skipped.
+1. **Scan** walks the source directory (skipping `.DS_Store`-style junk and
+   any directory named `reports/` — the video tagger's output, not footage)
+   and looks each file up in the manifest (keyed on `source_disk` + relative
+   path). Files not in the manifest are queued to copy. Files whose size or
+   mtime changed are queued to recopy — unless their row is already
+   `verified`: a verified destination is never overwritten. Such a file is
+   reported as "verified, changed", skipped, and the run exits 1 (a touched
+   file with identical content is hashed and skipped quietly). Everything
+   else is skipped.
 
 2. **Copy** streams each file from source to destination through a
    `sha256.Hash`. The destination is written to a `.vault-partial` file and
@@ -116,7 +118,14 @@ unless every file is in `verified` status.
 4. **Wipe certificate** takes a `source_disk` name, refuses (exit 1) if any
    row for it is not `verified`, and otherwise emits an Ed25519-signed JSON
    listing every file with its destination path, sha256, and verification
-   timestamp. The signing key lives under `$VAULT_CONFIG/key.pem`.
+   timestamp. The signing key lives under `$VAULT_CONFIG/key.pem`. The
+   output path may not be inside the tree it certifies — a certificate in
+   the archive is a file with no manifest row, and once blocked 39,219
+   files as a collision. Pass `--root <dest-dir>` and it refuses (exit 1)
+   any output under that directory, resolved physically; without `--root`
+   it can only recognise the tree by files that still match their rows.
+   A symlink at the output name is refused too. Keep certificates beside
+   the manifest.
 
 ## License
 

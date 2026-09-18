@@ -20,27 +20,26 @@ Maintained by the PM - ordering and scope are theirs alone. Fixed sections below
 - [ ] **B8** `scan --dedupe-content` pass once B6 passes. Tester #12: 3,193 sha groups with >1 row, 3,418 surplus rows already inside the manifest; renames = 1,154 (djiflip 401, gopro 558, sonya6700 195).
 - [ ] **B9** F4 tests (the F4 "done when" list) - lands after B1 merges, on a fresh branch. Owner: Dev (rev 2).
 
-- [ ] **B17** Nightly video tagger → this repo. Take `scripts/run-tagging.sh` + `scripts/tagging-helper.py` from mini-server `d9d677d` (tested) into `scripts/tagging/`; evaluate the WIP `5e7bac7` (newest-first, two tiers, NAS manifest snapshot, `Public` walk) against the batch rules in DECISIONS; fix the stale-manifest read (must snapshot the NAS manifest from `~/mounts/docker/vault-nas-config/`, never open WAL sqlite over SMB). Dev rev 4, after rev 3. Needs B2(a) to test for real.
+- [ ] **B17** Nightly video tagger → this repo. Take `scripts/run-tagging.sh` + `scripts/tagging-helper.py` from mini-server `d9d677d` (tested) into `scripts/tagging/`; evaluate the WIP `5e7bac7` (newest-first, two tiers, NAS manifest snapshot, `Public` walk) against the batch rules in DECISIONS; fix the stale-manifest read (must snapshot the NAS manifest from `~/mounts/docker/vault-nas-config/`, never open WAL sqlite over SMB). **Dev rev 5 item 3, shape approved 2026-09-17 22:44** (WIP `5e7bac7` as base; machine facts from `mini.env`, job policy defaults in `scripts/tagging/run-tagging.sh`; per-run manifest snapshot with `quick_check`; `verified` rows only; bash harness under `go test ./scripts/test/`). Branch `tagger` → **built `6b061f3`, review #26 queued** (Codex 02:38). B18 gate after merge: Tester's 3-file real run.
 - [ ] **B18** Install the tagger LaunchAgent (`launchd/com.varela.video-tagger.plist.example`, 02:00 daily) once B17 is `observed` by the Tester on a real 3-file run from this repo. One act, evidence in channel. Owner: PM (human-approved) or mini-server on request.
 - [ ] **B19** `Public` has 32 video files on disk and zero manifest rows - inventory it (`vault inventory media-public ...`) so manifest-driven selection can reach it. Human runs (writes the NAS manifest), Tester witnesses.
 - [ ] **B20** Tagger residue: GoPro (5 clips, `reports/` 16 files) **and iPhone** (`reports/` 15 dirs, 60 files; 15 `metadata` rows). **Decided 2026-09-17: `scan` skips `reports/` directories at any depth.** Dev rev 4 item 6 (test on temp dirs). Tester documents as fixture.
 
-- [ ] **B25** Certificates out of the trees they certify: `certify` refuses an output path under the dest root; stale `media-sonya6700.cert.json` (2026-04-29) removed once B23/B24 resolve. Dev rev 4.
 - [ ] **B28** `figmaboi` has NOPASSWD `sudo bash`/`nohup`/`docker` on the NAS (Tester #18) - a password-less root shell for the only agent-reachable account. Eddy's call: leave (UGOS default) or restrict to `docker` only. Security, not product.
 - [ ] **B30** *(folded into B23(b) by review #5 finding 1)* a `deduped` row recopy or a colliding `.vault-partial` name can still write over a `verified` destination - the guard must be destination-level. Dev item 1 fixes.
 - [ ] **B33** `repair-dest`: a candidate that is already another row's `dest_path` should be a fourth outcome `OWNED`, never chosen (Dev noticed 2026-09-17; does not arise on the 195). Dev, with the next `repair-dest` change.
 - [ ] **B35** `nas-tars-copy-all.sh` has the same `tee` double-logging pattern as B27 (Dev noticed 2026-09-17). One-line follow-up with the B27 helper. Dev, next small PR.
-- [ ] **B34** `ParseRules` accepts `..` in a rule's subdir, so `--rule` can route writes outside the destination root (Dev noticed 2026-09-17; the guard now sees through it but the rule itself is a foot-gun). Refuse `..` components in `--rule` for `scan`/`copy`/`move`. Dev, one line + test, next small PR.
-- [ ] **B37** `scripts/*.sh` default image tag → `v0.2.1` (release rule in `docs/release.md`); until then runbooks pass `VAULT_IMAGE` explicitly. Dev, in `certs-out`.
 - [ ] **B42** `repair-dest` labels rows without a `dest_path` as `inventoried` in its summary line; the B39 rows are `verified` (Tester #26). Wording only. Dev, next touch of `internal/repair`.
 - [ ] **B43** `certify.WriteOutput` binds the leaf but not the parent directory between check and write (Dev, review #16 fix); binding needs `openat` = `os.Root` (Go 1.24, `Rename` 1.25) - a toolchain bump PR (`go.mod`, `golang:1.23-alpine` → 1.25). Mitigation today: `/volume1/docker/vault-certs` is root-owned. P2.
+- [ ] **B44** `move` exits 0 when it skips a verified-owned or symlinked destination (per-file `Skipped`); align with `copy`'s `INCOMPLETE` → exit 1 (Dev, review #27 note). P2.
+- [ ] **B45** `scripts/*.sh` default image tag → `v0.2.3` (B37 pinned `v0.2.1` before v0.2.2/v0.2.3 existed). Dev, fold into `small-fixes` (#33).
 - [ ] **B32** `move` writes destinations with its own collision handling and does not consult `VerifiedOwner` (Dev noticed 2026-09-17). Until it does, the never-overwrite rule is `copy`'s only. Dev, after rev 4 - or fold into B10-era scrub work.
 - [ ] **B31** `--dry-run` still creates the config dir and initializes `manifest.db` before parsing flags (review #5 finding 2, pre-existing). Read-only open for dry-run. P2.
 - [ ] **B27** `nas-verify-certify-all.sh` writes every log line twice (`tee -a` under a redirecting nohup). Dev, any PR.
 
 ## P2
 - [ ] **B21** 152 probable duplicates (~0.09 TB, DJIFlip/GoPro broken-clock names); `vault dedup` exists. Deletion is Eddy's call - PM to stage the list with hashes for a decision after B6.
-- [ ] **B22** `run-backup.sh`, report-only (see DECISIONS 2026-09-15): on attach of a known SSD, content gap check → report, copy nothing. Template `launchd/com.varela.media-backup.plist.example`, gap tool `scripts/archive-gap.py` in mini-server. After B17.
+- [ ] **B22** `run-backup.sh`, report-only (see DECISIONS 2026-09-15): on attach of a known SSD, content gap check → report, copy nothing. **Shape approved 2026-09-17 23:08**: `vault gap <dir>` (Go, read-only, verified rows only, per-folder arithmetic) + `scripts/backup/run-backup.sh` (mini.env machine facts, snapshot first, allow-list `BACKUP_DISKS`, once per attach + per day, copies nothing, `go build` into state when stale). Branch `backup`, review #28.
 
 - [ ] **B10** Scrub schedule: re-verify rows older than N days (from the F4 design notes - a different feature, kept out of F4 on purpose).
 - [ ] **B11** HTML rendering of the certificate (README roadmap).
@@ -60,6 +59,9 @@ Maintained by the PM - ordering and scope are theirs alone. Fixed sections below
 
 ## Done (PM-verified)
 
+- [x] **B25/B34/B37** `certs-out` merged `0422b01` (Reviewer #12→#16→#21, resolution #25→#29→#31), `v0.2.3`: `certify` refuses output inside the archive (physical check + `--root`), writes without following the leaf; `--rule` never leaves the root; NAS certify script writes to `/volume1/docker/vault-certs/`. The six stale in-tree certs are removed in B6's runbook (PM act).
+- [x] **B9/B27/B20** `f4-tests` merged `7672b04` (#13, resolution #22): F4 tests, single logging, `scan` skips `reports/`.
+- [x] **B23(b)** overwrite guard `314416d` = `v0.2.1` (#5→#11). **B24 tool** `repair-dest` `88d75d7` = `v0.2.2` (#7→#15). **B26 script** `nas-kipp-copy-all.sh` `6fbf20a` (#18→#19).
 - [x] **B2** NAS access: SMB shares `media`+`docker` mounted on the Mini; SSH as `figmaboi` with key (Tester #18, 2026-09-17); `sudo -n docker` NOPASSWD. `observed` by the Tester.
 - [x] **B3/B4/B5/B14/B15/B16** tests-and-pinning merged `e4a4aed` (Reviewer APPROVE #4 after FINDINGS #2, #3), `v0.2.0` tagged 2026-09-17: test harness + NAS guard (`internal/testguard`), scripts pinned to `v0.2.0`, `CLAUDE.md`, CI on `v*` tags only with `latest=false`, gofmt, README present tense. Rung: `tested` (Dev) + PM re-run at `52d30b0` + Reviewer source trace; CI tag-only + no-`latest` **observed** on the real `v0.2.0` push (run 35298191638: tags `v0.2.0`, `sha-e4a4aed`, digest `fe3c2724…`).
 - [x] **B7** Source SSDs mapped from the logs (Tester #6, 2026-09-17): `tars` (Apr 27), `noahsarc` (Apr 28), `case` (Sep 1), `Eddy's Media Vault` (Sep 2, the 195 rows); `kipp` never copied → B26. `source_disk` is per camera, not per SSD.
