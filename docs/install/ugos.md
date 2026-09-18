@@ -20,7 +20,9 @@ In the **Docker** app:
 1. Open **Image** in the left sidebar
 2. Click **Pull** (or "Add" / "+", depending on the firmware)
 3. Image name: `ghcr.io/eddyvarelae/media-vault`
-4. Tag: `latest`
+4. Tag: `v0.2.0` — always a release tag, never `latest` (the image is only
+   published on tags). The current one is whatever `scripts/*.sh` default
+   `IMG` to on `main`; the full list is under Releases/Tags on GitHub.
 5. Wait for the pull to finish (~30 s on home internet)
 
 The image is multi-arch (`linux/amd64` for the DXP2800/4800/6800,
@@ -33,7 +35,7 @@ In the **Docker** app, **Container** → **Create** (or "+"):
 
 | Field           | Value                                                            |
 | --------------- | ---------------------------------------------------------------- |
-| Image           | `ghcr.io/eddyvarelae/media-vault:latest`                         |
+| Image           | `ghcr.io/eddyvarelae/media-vault:v0.2.0` (the tag you pulled)    |
 | Container name  | `media-vault`                                                    |
 | Restart policy  | `No` (v0.1 is one-shot CLI, not a long-running service)          |
 

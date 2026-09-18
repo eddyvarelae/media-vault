@@ -1,7 +1,7 @@
 # Releasing
 
-1. Merge to `main` only through `team/channels/review-requests.md` (APPROVE first). A merge builds `:latest`/`:main`/`:sha-*`, but the NAS scripts no longer pull those.
-2. The PM tags the release on the `main` tip: `git tag v0.2.0 && git push origin v0.2.0`. CI (`.github/workflows/docker.yml`) publishes `ghcr.io/eddyvarelae/media-vault:v0.2.0` for linux/amd64 + arm64.
+1. Merge to `main` only through `team/channels/review-requests.md` (APPROVE first). A merge builds nothing: CI runs on `v*` tags and manual dispatch only, and never publishes `:latest`.
+2. The PM tags the release on the `main` tip: `git tag v0.2.0 && git push origin v0.2.0`. CI (`.github/workflows/docker.yml`) publishes `ghcr.io/eddyvarelae/media-vault:v0.2.0` (plus `:sha-<commit>`) for linux/amd64 + arm64.
 3. Bump the default in all five `scripts/*.sh` (`IMG="${VAULT_IMAGE:-…:vX.Y.Z}"`) **in the same PR** as the release, so `main` never points the NAS at a tag that does not exist.
 4. Override per run with `VAULT_IMAGE=ghcr.io/eddyvarelae/media-vault:sha-… sudo ./scripts/…` — never edit the default for a one-off.
 5. A "deploy" is: the tag exists, and a `vault` command runs against the NAS manifest with it. Announce start and finish in your channel (`date -Iseconds`), one at a time.

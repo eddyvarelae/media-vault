@@ -113,8 +113,8 @@ number nobody can recompute is a finding, not a fact.
   worktree. Never `git add -A`; stage only your paths.
 - Nothing merges to `main` without an `APPROVE` in
   `team/channels/review-requests.md`; the PM merges (never rewriting).
-- `.github/workflows/docker.yml` publishes on every push to `main` and on `v*`
-  tags. The NAS scripts pin a release tag
+- `.github/workflows/docker.yml` publishes on `v*` tags and manual dispatch
+  only, and never `:latest`. The NAS scripts pin a release tag
   (`IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:vX.Y.Z}"`), so a merge
   to `main` is not a deploy; cutting a tag is. Bump the scripts' default in the
   same PR as the release — `docs/release.md`.
