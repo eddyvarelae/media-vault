@@ -135,6 +135,62 @@ func TestBuildVerifiedRowsAreNeverRecopied(t *testing.T) {
 	}
 }
 
+// TestBuildRefusesDestinationsOwnedByVerifiedRows: the guard is by
+// destination. Any path copy.File would write - final or staging - that a
+// verified row of any disk records as its dest_path goes to DstOwned,
+// whether the task is a new file or a recopy of an unverified row.
+func TestBuildRefusesDestinationsOwnedByVerifiedRows(t *testing.T) {
+	m := openManifest(t)
+	src, dst := t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(src, "a.mov"), "new bytes", t0)       // new; disk B verified "a.mov" (file missing)
+	writeFile(t, filepath.Join(src, "b.mov"), "new bytes", t0)       // new; disk B verified "b.mov.vault-partial"
+	writeFile(t, filepath.Join(src, "c.mov"), "changed!", t0.Add(1)) // deduped row on diskA, dest owned by disk B's verified c.mov
+	writeFile(t, filepath.Join(src, "d.mov"), "changed!", t0.Add(1)) // copied row on diskA, own dest, nobody else verified
+	writeFile(t, filepath.Join(src, "e.mov"), "free", t0)            // new, unowned
+	writeFile(t, filepath.Join(dst, "c.mov"), "the clip", t0)
+	writeFile(t, filepath.Join(dst, "d.mov"), "old bytes", t0)
+	for _, e := range []manifest.Entry{
+		{SourceDisk: "B", SourcePath: "a.mov", DestPath: "a.mov", Status: "verified"},
+		{SourceDisk: "B", SourcePath: "b.mov.vault-partial", DestPath: "b.mov.vault-partial", Status: "verified"},
+		{SourceDisk: "B", SourcePath: "c.mov", DestPath: "c.mov", Status: "verified"},
+		{SourceDisk: "diskA", SourcePath: "c.mov", DestPath: "c.mov", Status: "deduped"},
+		{SourceDisk: "diskA", SourcePath: "d.mov", DestPath: "d.mov", Status: "copied"},
+	} {
+		e.Size, e.MtimeNs, e.SHA256, e.CopiedAt = 8, t0.UnixNano(), "x", 1
+		if err := m.Upsert(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, c := range []CollisionStrategy{CollisionSkip, CollisionRenameMtimeYear} {
+		p := build(t, m, src, dst, c)
+		owned := map[string]OwnedTask{}
+		for _, o := range p.DstOwned {
+			owned[o.Task.RelPath] = o
+		}
+		if len(owned) != 3 {
+			t.Errorf("policy %d: DstOwned = %v, want a.mov b.mov c.mov", c, owned)
+		}
+		if o := owned["a.mov"]; o.Path != "a.mov" || o.Owner.SourceDisk != "B" {
+			t.Errorf("policy %d: a.mov owned = %+v", c, o)
+		}
+		if o := owned["b.mov"]; o.Path != "b.mov.vault-partial" {
+			t.Errorf("policy %d: b.mov should be refused on its staging path, got %+v", c, o)
+		}
+		if o := owned["c.mov"]; o.Owner.SourceDisk != "B" || o.Owner.SourcePath != "c.mov" {
+			t.Errorf("policy %d: c.mov owner = %+v, want B:c.mov", c, o.Owner)
+		}
+		if got := rels(p.ToRecopy); len(got) != 1 || got["d.mov"] == "" {
+			t.Errorf("policy %d: ToRecopy = %v, want d.mov only", c, got)
+		}
+		if got := rels(p.ToCopy); len(got) != 1 || got["e.mov"] == "" {
+			t.Errorf("policy %d: ToCopy = %v, want e.mov only", c, got)
+		}
+		if len(p.DstCollisions) != 0 {
+			t.Errorf("policy %d: DstCollisions = %v, want none", c, rels(p.DstCollisions))
+		}
+	}
+}
+
 func sha(content string) string {
 	sum := sha256.Sum256([]byte(content))
 	return hex.EncodeToString(sum[:])

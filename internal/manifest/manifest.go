@@ -509,6 +509,33 @@ func (m *Manifest) listByDisk(disk string, onlyUnverified bool) ([]Entry, error)
 	return out, rows.Err()
 }
 
+// VerifiedOwner returns the verified row, of any disk, whose dest_path is
+// destPath - or nil. dest_path is relative to that row's own dest root, which
+// the manifest does not record, so a hit from another disk may be a
+// different physical file under another root; callers treat a hit as a
+// refusal anyway, because the cost of the other mistake is a certified file
+// overwritten. idx_files_dest makes this a point lookup.
+func (m *Manifest) VerifiedOwner(destPath string) (*Entry, error) {
+	row := m.db.QueryRow(`
+		SELECT source_disk, source_path, dest_path, size, mtime_ns, sha256,
+		       copied_at, COALESCE(verified_at, 0), status
+		FROM files
+		WHERE dest_path = ? AND status = 'verified'
+		ORDER BY source_disk, source_path
+		LIMIT 1
+	`, destPath)
+	var e Entry
+	err := row.Scan(&e.SourceDisk, &e.SourcePath, &e.DestPath, &e.Size, &e.MtimeNs,
+		&e.SHA256, &e.CopiedAt, &e.VerifiedAt, &e.Status)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &e, nil
+}
+
 func (m *Manifest) MarkVerified(disk, sourcePath string, verifiedAt int64) error {
 	_, err := m.db.Exec(`
 		UPDATE files SET verified_at = ?, status = 'verified'

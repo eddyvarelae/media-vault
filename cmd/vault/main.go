@@ -211,6 +211,12 @@ func reportVerifiedChanged(plan *scan.Plan) {
 		fmt.Println("        another card, copy that card under its own <disk> name with")
 		fmt.Println("        --on-collision rename-mtime-year so they land beside the originals.")
 	}
+	fmt.Printf("Dst owned:        %d  (destination or its .vault-partial path belongs to a verified row; never written)\n", len(plan.DstOwned))
+	if len(plan.DstOwned) > 0 {
+		fmt.Println("  note: a verified row of some disk records that path as its archived copy.")
+		fmt.Println("        Nothing is written there by any policy. Copy under a --rule or --prefix")
+		fmt.Println("        that routes elsewhere, or resolve the owning row first.")
+	}
 }
 
 // reportDedupe prints the dedupe summary for both scan and copy. Always prints
@@ -247,9 +253,12 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 		die("scan: %v", err)
 	}
 	reportDedupe(plan, dedupeContent)
+	// Always, and before the no-op return: a zero is a statement too, and
+	// a run of nothing but retouched files must still say what it saw.
+	reportVerifiedChanged(plan)
 
 	todo := append(plan.ToCopy, plan.ToRecopy...)
-	if len(todo) == 0 && len(plan.DstCollisions) == 0 && len(plan.Deduped) == 0 && len(plan.VerifiedChanged) == 0 {
+	if len(todo) == 0 && len(plan.DstCollisions) == 0 && len(plan.Deduped) == 0 && len(plan.VerifiedChanged) == 0 && len(plan.DstOwned) == 0 {
 		fmt.Println("Nothing to copy. Manifest is up to date.")
 		return 0
 	}
@@ -258,9 +267,6 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 	fmt.Printf("Copying %d files (%s) from %s → %s\n", len(todo), human(totalBytes), src, dst)
 	if len(plan.DstCollisions) > 0 {
 		fmt.Printf("(%d files SKIPPED — dst path already exists; use --on-collision rename-mtime-year to disambiguate)\n", len(plan.DstCollisions))
-	}
-	if len(plan.VerifiedChanged) > 0 || plan.Retouched > 0 {
-		reportVerifiedChanged(plan)
 	}
 	if dryRun {
 		for _, f := range todo {
@@ -278,6 +284,12 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 				fmt.Printf("  %s → %s (archived copy kept)\n", f.RelPath, f.DstRel)
 			}
 		}
+		if len(plan.DstOwned) > 0 {
+			fmt.Println("\nDestination owned by a verified row (never written):")
+			for _, o := range plan.DstOwned {
+				fmt.Printf("  %s → %s (owned by %s:%s)\n", o.Task.RelPath, o.Path, o.Owner.SourceDisk, o.Owner.SourcePath)
+			}
+		}
 		if len(plan.Deduped) > 0 {
 			fmt.Println("\nAlready archived (would be recorded as deduped, not copied):")
 			for _, d := range plan.Deduped {
@@ -288,8 +300,8 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 				}
 			}
 		}
-		fmt.Printf("\n(dry-run; %d files would be copied, %d recorded as deduped, %d collisions skipped, %d verified kept)\n",
-			len(todo), len(plan.Deduped), len(plan.DstCollisions), len(plan.VerifiedChanged))
+		fmt.Printf("\n(dry-run; %d files would be copied, %d recorded as deduped, %d collisions skipped, %d verified kept, %d owned destinations skipped)\n",
+			len(todo), len(plan.Deduped), len(plan.DstCollisions), len(plan.VerifiedChanged), len(plan.DstOwned))
 		return 0
 	}
 
@@ -396,7 +408,7 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 	}
 
 	fmt.Printf("\nDone. Copied %d/%d files, %s.\n", copied, len(todo), human(copiedBytes))
-	if failed > 0 || orphaned > 0 || len(plan.DstCollisions) > 0 || len(plan.VerifiedChanged) > 0 {
+	if failed > 0 || orphaned > 0 || len(plan.DstCollisions) > 0 || len(plan.VerifiedChanged) > 0 || len(plan.DstOwned) > 0 {
 		// Exit non-zero so callers can tell. scripts/nas-tars-copy-all.sh runs
 		// four cards sequentially and unattended, branching on this status —
 		// exiting 0 after a partial copy made it log "done" for a card that
@@ -414,7 +426,7 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 		// VerifiedChanged counts for the opposite reason: the file on the
 		// source is NOT archived and never will be under this disk name,
 		// and a silent 0 here is how 2,668 photos were lost (B23(b)).
-		reasons := make([]string, 0, 4)
+		reasons := make([]string, 0, 5)
 		if failed > 0 {
 			reasons = append(reasons, fmt.Sprintf("%d file(s) failed to copy", failed))
 		}
@@ -423,6 +435,9 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 		}
 		if len(plan.VerifiedChanged) > 0 {
 			reasons = append(reasons, fmt.Sprintf("%d file(s) skipped because their verified archive copy holds different content (kept)", len(plan.VerifiedChanged)))
+		}
+		if len(plan.DstOwned) > 0 {
+			reasons = append(reasons, fmt.Sprintf("%d file(s) skipped because a verified row owns their destination path", len(plan.DstOwned)))
 		}
 		if orphaned > 0 {
 			reasons = append(reasons, fmt.Sprintf("%d duplicate(s) left unarchived", orphaned))

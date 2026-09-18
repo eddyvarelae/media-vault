@@ -80,6 +80,21 @@ type Plan struct {
 	VerifiedChanged      []FileTask
 	BytesVerifiedChanged int64
 	Retouched            int
+
+	// DstOwned holds files whose destination - the final path or the
+	// .vault-partial staging path copy.File would truncate first - is the
+	// dest_path of a verified row, of any disk. That row may not be this
+	// file's own (a deduped row points at another disk's file; a stray name
+	// can match an archived file), so the check is by destination, not by
+	// source row. Never written under any policy.
+	DstOwned []OwnedTask
+}
+
+// OwnedTask is a file refused because a verified row owns its destination.
+type OwnedTask struct {
+	Task  FileTask
+	Path  string         // the path that is owned: DstRel or DstRel + ".vault-partial"
+	Owner manifest.Entry // the verified row that references it
 }
 
 type CollisionStrategy int
@@ -236,6 +251,12 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 				p.BytesVerifiedChanged += task.Size
 				return nil
 			}
+			if owned, err := ownedByVerified(m, task); err != nil {
+				return err
+			} else if owned != nil {
+				p.DstOwned = append(p.DstOwned, *owned)
+				return nil
+			}
 			p.ToRecopy = append(p.ToRecopy, task)
 			p.BytesToRecopy += task.Size
 			return nil
@@ -297,6 +318,18 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 			}
 		}
 
+		// The destination is free on disk; make sure the manifest agrees.
+		// A verified row whose file is missing still owns the path (verify
+		// reports it missing; writing other bytes there would make it a
+		// mismatch under a certified hash), and the staging path may be an
+		// archived file that merely ends in .vault-partial.
+		if owned, err := ownedByVerified(m, task); err != nil {
+			return err
+		} else if owned != nil {
+			p.DstOwned = append(p.DstOwned, *owned)
+			return nil
+		}
+
 		if pendingHash != "" {
 			seenThisRun[pendingHash] = task.RelPath
 		}
@@ -308,6 +341,22 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 		return nil, err
 	}
 	return p, nil
+}
+
+// ownedByVerified reports whether either path copy.File would write for
+// task - the staging file first, then the final name - is the dest_path of
+// a verified row. Both are checked because both are truncated or replaced.
+func ownedByVerified(m *manifest.Manifest, task FileTask) (*OwnedTask, error) {
+	for _, path := range []string{task.DstRel + ".vault-partial", task.DstRel} {
+		owner, err := m.VerifiedOwner(path)
+		if err != nil {
+			return nil, err
+		}
+		if owner != nil {
+			return &OwnedTask{Task: task, Path: path, Owner: *owner}, nil
+		}
+	}
+	return nil, nil
 }
 
 func renameWithMtimeYear(rel string, mtimeNs int64) string {
