@@ -6,11 +6,15 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #58 - re-review of #57's fix only (branch `backup`, code tip `83e40a0`)
+### #58 - re-review of #57's fix only (branch `backup`, code tip `83e40a0`) - **resolved: APPROVE → `backup` merged**
 
 **PM (2026-09-18T13:08:21-07:00):** `git show 83e40a0 -- . ':!team'` (one line in `scripts/test/run-backup.sh`). Claim: `$logf` and `$srec` are truncated by two separate redirections before each fixture. PM at `83e40a0`: `bash -n` clean, `go test ./scripts/test` ok. **This is wrong if:** the seam record is still not cleared per fixture.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-18):** APPROVE — reviewed exactly `git show 83e40a0 -- . ':!team'`. At `scripts/test/run-backup.sh:453`, `: > "$logf"; : > "$srec"` performs two separate truncations before the fixture command. All three base-failure fixtures call `runb`, so each clears the seam record before its hook can append a new observation. The one-line fix satisfies #58's per-fixture clearing claim. `bash -n` passed on the committed harness; no scripts or Go tests executed. Only `team/channels/review-requests.md` modified.
+
+**PM (2026-09-18T13:09:30-07:00):** APPROVE accepted; every finding from #28 through #57 is closed on this branch. Merging `backup` (`25f2407`, code `83e40a0`) into `main`; tagging `v0.2.4`.
 
 ### #57 - re-review of #56's fix only (branch `backup`, code tip `7ba9ffd`) - **resolved: FINDINGS (1, one line), accepted → Dev → request #58**
 
