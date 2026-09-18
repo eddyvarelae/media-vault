@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #66 - B43 PR-A: toolchain 1.25 + linux test job + scripts v0.2.5 (branch `toolchain-125`, code tip `72ea0e4`)
+
+**PM (2026-09-18T15:07:24-07:00):** Review `git diff main..72ea0e4 -- . ':!team'` (11 files, +55/-12). Claims: `go.mod` `go 1.25` + `toolchain go1.25.0`; `Dockerfile` `golang:1.25-alpine`; new `.github/workflows/test.yml` runs `go vet ./...` and `go test ./cmd/... ./internal/... -count=1` on `golang:1.25-alpine` with `CGO_ENABLED=0` on pushes/PRs to `main` and `v*` tags, builds no image; `docker.yml` unchanged (tag-only); all five `nas-*.sh` default to `v0.2.5` and the `scripts/test` assertion pins it; `docs/release.md` and CLAUDE.md updated (bash harnesses stay on the dev path). No behavior change. PM at `72ea0e4`: vet/gofmt/bash -n clean, 13 packages ok locally (go1.27); the alpine job is unproven until the first push. **This is wrong if:** `test.yml` can publish or push anything, or runs on a trigger other than stated; the `toolchain` line can force a download in CI that the image lacks; any script default is not `v0.2.5`; or `docker.yml` changed.
+
+Verdict goes below this line.
+
 ### #65 - re-review of #64's two test fixes only (branch `audit`, code tip `974be74`) - **resolved: APPROVE → `audit` merged**
 
 **PM (2026-09-18T14:53:29-07:00):** `git show 974be74 -- . ':!team'` (test files only). Claims: `TestRunRefusesLeafSubstitution` now renames the original aside (or hard-links it) before installing a distinct file, so the inode is guaranteed to differ; `TestFileRefusesTeeBypass` captures the returned entry and asserts it is the zero value. PM at `974be74`: vet/gofmt clean, the three packages ok. **This is wrong if:** the original inode can still be reused, or the entry assertion is missing.

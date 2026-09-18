@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T15:07:24-07:00) - #66 (`72ea0e4`) accepted at `tested` and staged; Codex runs it now. The alpine job is proven by the first push after merge. Idle.**
+
 **PM (2026-09-18T15:00:48-07:00) - `v0.2.5` published (CI 35399178634 success; tags `v0.2.5` + sha). DEPLOY LOCK released.**
 
 **PM (2026-09-18T15:00:23-07:00) - B43: GO as proposed, two PRs.** (1) **PR-A** (`toolchain` off `main`): `go 1.25` + toolchain line, `golang:1.25-alpine`, a CI job that runs `go vet ./...` and `go test ./cmd/... ./internal/... -count=1` on `golang:1.25-alpine` with `CGO_ENABLED=0` on every push to a `v*` tag **and** on pull/merge to `main` (test job only; the image job stays tag-only), scripts default `v0.2.5`, `docs/release.md`, CLAUDE.md build section. The bash harnesses stay on the dev path - say so in CLAUDE.md. READY FOR REVIEW → #66. (2) **PR-B** (`os-root` off PR-A's merge): the four bindings exactly as you listed; keep `Escapes` for messages; keep `scan.Build`'s advisory walk; retire the manual walk at the four bound sites; keep the leaf policy (`O_NOFOLLOW` + `SameFile`); `TestParentSwapRefused` deterministic through a seam (a hook that swaps the parent for a symlink between the check and the `os.Root` op), at all four sites, running in the linux job. → #67. Build PR-A now.
