@@ -26,17 +26,17 @@ func TestClassify(t *testing.T) {
 		tail []byte
 		want Verdict
 	}{
-		{"DCIM/a.JPG", 7_000_000, append([]byte("imagedata"), eoi...), Plausible},         // EOI present
+		{"DCIM/a.JPG", 7_000_000, append([]byte("imagedata"), eoi...), Plausible},             // EOI present
 		{"DCIM/pad.jpg", 7_000_000, append(append([]byte("x"), eoi...), zeros...), Plausible}, // EOI then zero padding (DJI)
-		{"DCIM/torn.JPG", 7_285_047, zeros, Suspect},                                      // no EOI in the tail
-		{"DCIM/empty.jpg", 0, nil, Suspect},                                               // zero-length image
-		{"CLIP/x.ARW", 28 << 20, zeros, Plausible},                                        // exact MiB multiple
-		{"CLIP/short.arw", (28 << 20) + 1, zeros, Review},                                 // off the MiB signature
-		{"CLIP/C1431.RSV", 128 << 20, zeros, Plausible},                                   // Sony reserve
-		{"Backup/PRIVATE/DATABASE/DATABASE.BIN", 9_670_656, zeros, Plausible},             // Sony DB, zero-padded
-		{"FlightLogs/x.SRT", 0, nil, Plausible},                                           // empty SRT twin
-		{"FlightLogs/notes.srt", 40, []byte("00:00"), Skipped},                            // non-empty SRT text
-		{"Videos/clip.MP4", 1_000_000, zeros, Skipped},                                    // type not audited
+		{"DCIM/torn.JPG", 7_285_047, zeros, Suspect},                                          // no EOI in the tail
+		{"DCIM/empty.jpg", 0, nil, Suspect},                                                   // zero-length image
+		{"CLIP/x.ARW", 28 << 20, zeros, Plausible},                                            // exact MiB multiple
+		{"CLIP/short.arw", (28 << 20) + 1, zeros, Review},                                     // off the MiB signature
+		{"CLIP/C1431.RSV", 128 << 20, zeros, Plausible},                                       // Sony reserve
+		{"Backup/PRIVATE/DATABASE/DATABASE.BIN", 9_670_656, zeros, Plausible},                 // Sony DB, zero-padded
+		{"FlightLogs/x.SRT", 0, nil, Plausible},                                               // empty SRT twin
+		{"FlightLogs/notes.srt", 40, []byte("00:00"), Skipped},                                // non-empty SRT text
+		{"Videos/clip.MP4", 1_000_000, zeros, Skipped},                                        // type not audited
 	}
 	for _, c := range cases {
 		got, reason := Classify(c.name, c.size, c.tail)
@@ -59,14 +59,14 @@ func TestRun(t *testing.T) {
 	}
 	eoi := []byte{0xFF, 0xD9}
 	write("DCIM/good.JPG", append([]byte("photo"), eoi...))
-	write("DCIM/torn.JPG", make([]byte, 4096))                 // all zeros, no EOI → SUSPECT
-	write("CLIP/raw.ARW", make([]byte, 1<<20))                 // 1 MiB exactly → PLAUSIBLE
-	write("CLIP/short.ARW", make([]byte, (1<<20)+1))           // off MiB → REVIEW
-	write("CLIP/C1.RSV", make([]byte, 4096))                   // reserve → PLAUSIBLE
-	write("Backup/DATABASE.BIN", make([]byte, 4096))           // Sony DB → PLAUSIBLE
-	write("Logs/empty.SRT", nil)                               // empty SRT → PLAUSIBLE
-	write("Logs/notes.SRT", []byte("subtitle"))               // SRT text → SKIPPED
-	write("Videos/clip.MP4", []byte("moov"))                  // unknown → SKIPPED
+	write("DCIM/torn.JPG", make([]byte, 4096))       // all zeros, no EOI → SUSPECT
+	write("CLIP/raw.ARW", make([]byte, 1<<20))       // 1 MiB exactly → PLAUSIBLE
+	write("CLIP/short.ARW", make([]byte, (1<<20)+1)) // off MiB → REVIEW
+	write("CLIP/C1.RSV", make([]byte, 4096))         // reserve → PLAUSIBLE
+	write("Backup/DATABASE.BIN", make([]byte, 4096)) // Sony DB → PLAUSIBLE
+	write("Logs/empty.SRT", nil)                     // empty SRT → PLAUSIBLE
+	write("Logs/notes.SRT", []byte("subtitle"))      // SRT text → SKIPPED
+	write("Videos/clip.MP4", []byte("moov"))         // unknown → SKIPPED
 	// and one row whose file is missing → ERROR
 
 	m, err := manifest.Open(filepath.Join(t.TempDir(), "manifest.db"))
