@@ -257,3 +257,26 @@ func TestFileRefusesWhateverExists(t *testing.T) {
 		}
 	})
 }
+
+// Review #9: the writer refuses a destination whose directory path passes
+// through a symlink, whatever the plan said.
+func TestFileRefusesSymlinkedDirectory(t *testing.T) {
+	src, dst, real := t.TempDir(), t.TempDir(), t.TempDir()
+	mtime := time.Date(2024, 3, 9, 10, 0, 0, 0, time.UTC)
+	writeFile(t, filepath.Join(src, "x.mov"), "new clip", mtime)
+	writeFile(t, filepath.Join(real, "x.mov"), "precious", mtime)
+	if err := os.Symlink(real, filepath.Join(dst, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	for _, replace := range []bool{false, true} {
+		task := scan.FileTask{RelPath: "x.mov", DstRel: "alias/x.mov", Size: 8, MtimeNs: mtime.UnixNano(), Replace: replace}
+		_, err := File(context.Background(), src, dst, task, "B")
+		if err == nil || !strings.Contains(err.Error(), "through a symlink") {
+			t.Errorf("Replace=%v: err = %v, want refusal", replace, err)
+		}
+		if got, _ := os.ReadFile(filepath.Join(real, "x.mov")); string(got) != "precious" {
+			t.Fatalf("Replace=%v: wrote through the link: %q", replace, got)
+		}
+		noPartials(t, real)
+	}
+}

@@ -93,6 +93,19 @@ type Plan struct {
 	// source row, and by physical location, not spelling. Never written
 	// under any policy.
 	DstOwned []OwnedTask
+
+	// DstThroughLink holds files whose destination path passes through a
+	// symlinked directory component under the root. Two spellings then
+	// name one physical file, which neither the ownership key nor a leaf
+	// Lstat can see; the writer refuses such a path too. Never written.
+	DstThroughLink []LinkedTask
+}
+
+// LinkedTask is a file refused because a directory on its destination path
+// is a symlink.
+type LinkedTask struct {
+	Task FileTask
+	Link string // the symlink component, relative to the root
 }
 
 // OwnedTask is a file refused because a verified row owns its destination.
@@ -265,6 +278,12 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 				p.DstOwned = append(p.DstOwned, *owned)
 				return nil
 			}
+			if link, err := SymlinkComponent(dstRoot, task.DstRel); err != nil {
+				return err
+			} else if link != "" {
+				p.DstThroughLink = append(p.DstThroughLink, LinkedTask{Task: task, Link: link})
+				return nil
+			}
 			p.ToRecopy = append(p.ToRecopy, task)
 			p.BytesToRecopy += task.Size
 			return nil
@@ -335,6 +354,12 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 			p.DstOwned = append(p.DstOwned, *owned)
 			return nil
 		}
+		if link, err := SymlinkComponent(dstRoot, task.DstRel); err != nil {
+			return err
+		} else if link != "" {
+			p.DstThroughLink = append(p.DstThroughLink, LinkedTask{Task: task, Link: link})
+			return nil
+		}
 
 		if pendingHash != "" {
 			seenThisRun[pendingHash] = task.RelPath
@@ -391,6 +416,36 @@ func (idx ownerIndex) claims(dstRoot string, task FileTask) *OwnedTask {
 		}
 	}
 	return nil
+}
+
+// SymlinkComponent walks the directories of rel under root, one Lstat per
+// component, and returns the first one that is a symlink (relative to
+// root), or "" when every existing component is a real directory. A
+// component that does not exist yet ends the walk: nothing below it can be
+// a link, and the writer's MkdirAll will create real directories. Called by
+// Build before admitting a task and by copy.File before writing, because a
+// symlinked directory makes two spellings one file and no per-path check
+// can tell.
+func SymlinkComponent(root, rel string) (string, error) {
+	dir := filepath.Dir(filepath.Clean(rel))
+	if dir == "." {
+		return "", nil
+	}
+	cur := root
+	for i, c := range strings.Split(dir, string(filepath.Separator)) {
+		cur = filepath.Join(cur, c)
+		fi, err := os.Lstat(cur)
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return filepath.Join(strings.Split(dir, string(filepath.Separator))[:i+1]...), nil
+		}
+	}
+	return "", nil
 }
 
 func renameWithMtimeYear(rel string, mtimeNs int64) string {

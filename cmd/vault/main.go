@@ -212,6 +212,7 @@ func reportVerifiedChanged(plan *scan.Plan) {
 		fmt.Println("        --on-collision rename-mtime-year so they land beside the originals.")
 	}
 	fmt.Printf("Dst owned:        %d  (destination or its .vault-partial path belongs to a verified row; never written)\n", len(plan.DstOwned))
+	fmt.Printf("Dst via symlink:  %d  (a directory on the destination path is a symlink; never written)\n", len(plan.DstThroughLink))
 	if len(plan.DstOwned) > 0 {
 		fmt.Println("  note: a verified row of some disk records that path as its archived copy.")
 		fmt.Println("        Nothing is written there by any policy. Copy under a --rule or --prefix")
@@ -258,7 +259,7 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 	reportVerifiedChanged(plan)
 
 	todo := append(plan.ToCopy, plan.ToRecopy...)
-	if len(todo) == 0 && len(plan.DstCollisions) == 0 && len(plan.Deduped) == 0 && len(plan.VerifiedChanged) == 0 && len(plan.DstOwned) == 0 {
+	if len(todo) == 0 && len(plan.DstCollisions) == 0 && len(plan.Deduped) == 0 && len(plan.VerifiedChanged) == 0 && len(plan.DstOwned) == 0 && len(plan.DstThroughLink) == 0 {
 		fmt.Println("Nothing to copy. Manifest is up to date.")
 		return 0
 	}
@@ -290,6 +291,12 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 				fmt.Printf("  %s → %s (owned by %s:%s)\n", o.Task.RelPath, o.Path, o.Owner.SourceDisk, o.Owner.SourcePath)
 			}
 		}
+		if len(plan.DstThroughLink) > 0 {
+			fmt.Println("\nDestination through a symlink (never written):")
+			for _, l := range plan.DstThroughLink {
+				fmt.Printf("  %s → %s (%s is a symlink)\n", l.Task.RelPath, l.Task.DstRel, l.Link)
+			}
+		}
 		if len(plan.Deduped) > 0 {
 			fmt.Println("\nAlready archived (would be recorded as deduped, not copied):")
 			for _, d := range plan.Deduped {
@@ -300,8 +307,8 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 				}
 			}
 		}
-		fmt.Printf("\n(dry-run; %d files would be copied, %d recorded as deduped, %d collisions skipped, %d verified kept, %d owned destinations skipped)\n",
-			len(todo), len(plan.Deduped), len(plan.DstCollisions), len(plan.VerifiedChanged), len(plan.DstOwned))
+		fmt.Printf("\n(dry-run; %d files would be copied, %d recorded as deduped, %d collisions skipped, %d verified kept, %d owned destinations skipped, %d through symlinks skipped)\n",
+			len(todo), len(plan.Deduped), len(plan.DstCollisions), len(plan.VerifiedChanged), len(plan.DstOwned), len(plan.DstThroughLink))
 		return 0
 	}
 
@@ -408,7 +415,7 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 	}
 
 	fmt.Printf("\nDone. Copied %d/%d files, %s.\n", copied, len(todo), human(copiedBytes))
-	if failed > 0 || orphaned > 0 || len(plan.DstCollisions) > 0 || len(plan.VerifiedChanged) > 0 || len(plan.DstOwned) > 0 {
+	if failed > 0 || orphaned > 0 || len(plan.DstCollisions) > 0 || len(plan.VerifiedChanged) > 0 || len(plan.DstOwned) > 0 || len(plan.DstThroughLink) > 0 {
 		// Exit non-zero so callers can tell. scripts/nas-tars-copy-all.sh runs
 		// four cards sequentially and unattended, branching on this status —
 		// exiting 0 after a partial copy made it log "done" for a card that
@@ -426,7 +433,7 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 		// VerifiedChanged counts for the opposite reason: the file on the
 		// source is NOT archived and never will be under this disk name,
 		// and a silent 0 here is how 2,668 photos were lost (B23(b)).
-		reasons := make([]string, 0, 5)
+		reasons := make([]string, 0, 6)
 		if failed > 0 {
 			reasons = append(reasons, fmt.Sprintf("%d file(s) failed to copy", failed))
 		}
@@ -438,6 +445,9 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 		}
 		if len(plan.DstOwned) > 0 {
 			reasons = append(reasons, fmt.Sprintf("%d file(s) skipped because a verified row owns their destination path", len(plan.DstOwned)))
+		}
+		if len(plan.DstThroughLink) > 0 {
+			reasons = append(reasons, fmt.Sprintf("%d file(s) skipped because their destination path passes through a symlink", len(plan.DstThroughLink)))
 		}
 		if orphaned > 0 {
 			reasons = append(reasons, fmt.Sprintf("%d duplicate(s) left unarchived", orphaned))

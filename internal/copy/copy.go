@@ -27,6 +27,16 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 	}
 	dstPath := filepath.Join(dstRoot, dstRel)
 
+	// No directory on the way may be a symlink: through one, this path and
+	// another spelling are the same file, and every check below would be
+	// looking at the wrong name. The plan refused these already; the writer
+	// refuses again on the filesystem it is about to touch.
+	if link, err := scan.SymlinkComponent(dstRoot, dstRel); err != nil {
+		return manifest.Entry{}, err
+	} else if link != "" {
+		return manifest.Entry{}, fmt.Errorf("refusing to write through a symlink: %s is a symlink; destination directories must be real", filepath.Join(dstRoot, link))
+	}
+
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
 		return manifest.Entry{}, fmt.Errorf("mkdir: %w", err)
 	}

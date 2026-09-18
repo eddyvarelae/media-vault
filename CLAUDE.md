@@ -30,7 +30,7 @@ runs them, so `go test ./...` is still the one command.
 |---|---|
 | `cmd/vault/main.go` | Hand-rolled arg parsing (`parseScanFlags` style — no flag frameworks), one `runX` per command, `die()` for fatal errors |
 | `internal/manifest` | SQLite schema + queries. Single writer per config dir (WAL, `busy_timeout`). Rows keyed `(source_disk, source_path)` |
-| `internal/scan` | Walk source, diff against manifest and destination → `Plan{ToCopy, ToRecopy, SkipCount, Deduped, DstCollisions, VerifiedChanged, Retouched, DstOwned}` |
+| `internal/scan` | Walk source, diff against manifest and destination → `Plan{ToCopy, ToRecopy, SkipCount, Deduped, DstCollisions, VerifiedChanged, Retouched, DstOwned, DstThroughLink}` |
 | `internal/copy` | One file: `Lstat` both targets, stream + sha256 → `<dst>.vault-partial` (`O_EXCL`), fsync, chtimes, rename. A failed copy leaves no partial; a refused one touches nothing |
 | `internal/verify` | Re-hash destination rows → `verified` / `mismatch`; missing rows counted, not touched |
 | `internal/certify` | Refuses unless every row is `verified`; signs with `$VAULT_CONFIG/key.pem` (created on first use, mode 600) |
@@ -75,8 +75,17 @@ manifest does not record, so a hit from another disk under another root is
 a false refusal — accepted: the safe direction, and the output names the
 owning row.
 
+Neither the key nor a leaf `Lstat` can see a **symlinked directory**
+under the root (`dst/alias → real` makes `alias/x.mov` and `real/x.mov`
+one file), so every destination path is walked component by component
+from the root with `Lstat` (`scan.SymlinkComponent`) — in `Build` before
+admitting, and again in `copy.File` before writing — and a symlink
+component refuses the file (`DstThroughLink`, never written). A component
+that does not exist yet ends the walk: `MkdirAll` creates real
+directories.
+
 The writer (`copy.File`) is the last line and checks the filesystem
-itself: `Lstat` on the staging path — anything there refuses the file
+itself: the component walk above, then `Lstat` on the staging path — anything there refuses the file
 (a leftover partial from a crash and an archived file that happens to end
 in `.vault-partial` are indistinguishable to the writer, so both refuse;
 the message says to look, then remove a leftover by hand); `Lstat` on the
@@ -112,7 +121,7 @@ command:
 | Command | Exits 1 when | Exits 0 even though |
 |---|---|---|
 | `scan` | scan error (unreadable source, cancelled) | collisions/recopies/verified-changed are predicted — it only reports |
-| `copy` | run finished `INCOMPLETE:` — any file failed, any unresolved destination collision, any file whose verified archive copy holds different content (kept, never overwritten), any file whose destination or staging path a verified row owns, any intra-run duplicate left unarchived (stderr names which); interrupted between files; `die` on scan or manifest-write error | no-op (including only retouched files), `--dry-run` (even with predicted collisions, verified-changed or owned files). `--dry-run` writes **no archive file and no manifest row**; it does still create the config dir and open/initialize `manifest.db` (pre-existing, every command does — B31) |
+| `copy` | run finished `INCOMPLETE:` — any file failed, any unresolved destination collision, any file whose verified archive copy holds different content (kept, never overwritten), any file whose destination or staging path a verified row owns, any file whose destination path passes through a symlinked directory, any intra-run duplicate left unarchived (stderr names which); interrupted between files; `die` on scan or manifest-write error | no-op (including only retouched files), `--dry-run` (even with predicted collisions, verified-changed or owned files). `--dry-run` writes **no archive file and no manifest row**; it does still create the config dir and open/initialize `manifest.db` (pre-existing, every command does — B31) |
 | `verify` | any mismatch, missing, or read error; `die` on cancel | — |
 | `certify` | any row not `verified` (`Cannot certify: …`); no rows for the disk; key/sign/marshal/write error | — |
 | `inventory` | `die` on walk error | per-file hash errors — counted in `Errors:`, exit 0 |
@@ -148,7 +157,8 @@ number nobody can recompute is a finding, not a fact.
 - Atomic destination writes only (`.vault-partial` created `O_EXCL` → fsync
   → rename). The staging path must be empty; the writer never truncates.
 - A `verified` destination is never overwritten. Not by recopy, not by any
-  collision policy, not through another row's route, not as a staging file.
+  collision policy, not through another row's route, not as a staging file,
+  not through a symlinked directory.
   Both checks — by source row and by destination path — live in
   `scan.Build`, so `scan` and `copy` agree and every write `copy.File`
   makes was admitted there.

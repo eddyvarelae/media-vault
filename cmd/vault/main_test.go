@@ -482,7 +482,7 @@ func TestCopyExitStatus(t *testing.T) {
 			},
 			flags:   []string{"--dry-run"},
 			want:    0,
-			stdout:  []string{"(dry-run; 1 files would be copied, 0 recorded as deduped, 1 collisions skipped, 0 verified kept, 0 owned destinations skipped)"},
+			stdout:  []string{"(dry-run; 1 files would be copied, 0 recorded as deduped, 1 collisions skipped, 0 verified kept, 0 owned destinations skipped, 0 through symlinks skipped)"},
 			noFiles: true,
 		},
 		{
@@ -930,6 +930,82 @@ func TestVerifiedDestinationAliases(t *testing.T) {
 		}
 		if got := readFile(t, filepath.Join(dst, "x.mov.vault-partial")); got != "half of somethi" {
 			t.Errorf("leftover touched: %q", got)
+		}
+		if len(rowsOf(t, cfg, "B")) != 0 {
+			t.Errorf("row written for a refused file")
+		}
+	})
+}
+
+// TestDestinationThroughSymlink is review #9: a symlinked directory under
+// the root makes two spellings one file. The Reviewer's case: A's verified
+// real/x.mov, dst/alias -> real, B's deduped row for alias/x.mov whose
+// source then changes - the recopy's key is dst/alias/x.mov, its bytes
+// would land on dst/real/x.mov.
+func TestDestinationThroughSymlink(t *testing.T) {
+	t.Run("recopy through an aliased directory onto another disk's verified file", func(t *testing.T) {
+		cfg, srcA, srcB, dst := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(srcA, "real", "x.mov"), "the clip", t0)
+		writeFile(t, filepath.Join(srcB, "alias", "x.mov"), "the clip", t0)
+		if _, _, code := vault(t, cfg, "copy", "A", srcA, dst); code != 0 {
+			t.Fatalf("copy A: exit %d", code)
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
+			t.Fatalf("verify A: exit %d", code)
+		}
+		if err := os.Symlink(filepath.Join(dst, "real"), filepath.Join(dst, "alias")); err != nil {
+			t.Fatal(err)
+		}
+		out, _, code := vault(t, cfg, "copy", "B", srcB, dst, "--dedupe-content")
+		if code != 0 || !strings.Contains(out, "Recorded 1 already-archived files") {
+			t.Fatalf("copy B deduped: exit %d\n%s", code, out)
+		}
+		wantRow(t, rowsOf(t, cfg, "B"), "alias/x.mov", "real/x.mov", "the clip", "deduped")
+		aBefore := rowsOf(t, cfg, "A")
+
+		writeFile(t, filepath.Join(srcB, "alias", "x.mov"), "B re-exported, longer", t0.Add(time.Hour))
+		for _, policy := range []string{"skip", "rename-mtime-year"} {
+			out, errOut, code := vault(t, cfg, "copy", "B", srcB, dst, "--on-collision", policy)
+			if got := readFile(t, filepath.Join(dst, "real", "x.mov")); got != "the clip" {
+				t.Fatalf("%s: A's verified file overwritten through the alias: %q", policy, got)
+			}
+			if code != 1 || !strings.Contains(errOut, "1 file(s) skipped because their destination path passes through a symlink") {
+				t.Errorf("%s: exit %d, stderr %q", policy, code, errOut)
+			}
+			if !strings.Contains(out, "Dst via symlink:  1") {
+				t.Errorf("%s: not reported:\n%s", policy, out)
+			}
+			if got := rowsOf(t, cfg, "A"); !reflect.DeepEqual(got, aBefore) {
+				t.Errorf("%s: A's row changed", policy)
+			}
+			noPartials(t, filepath.Join(dst, "real"))
+		}
+		out, _, code = vault(t, cfg, "copy", "B", srcB, dst, "--dry-run")
+		if code != 0 || !strings.Contains(out, "alias/x.mov → alias/x.mov (alias is a symlink)") {
+			t.Errorf("dry-run: exit %d\n%s", code, out)
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
+			t.Errorf("verify A afterwards: exit %d", code)
+		}
+	})
+
+	// A brand-new file whose path passes through a link is refused too, at
+	// any depth: the write would land somewhere other than its spelling.
+	t.Run("new file through a nested aliased directory", func(t *testing.T) {
+		cfg, src, dst, elsewhere := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(src, "DCIM", "100MSDCF", "y.mov"), "new clip", t0)
+		if err := os.MkdirAll(filepath.Join(dst, "DCIM"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(elsewhere, filepath.Join(dst, "DCIM", "100MSDCF")); err != nil {
+			t.Fatal(err)
+		}
+		_, errOut, code := vault(t, cfg, "copy", "B", src, dst)
+		if code != 1 || !strings.Contains(errOut, "passes through a symlink") {
+			t.Errorf("exit %d, stderr %q", code, errOut)
+		}
+		if entries, _ := os.ReadDir(elsewhere); len(entries) != 0 {
+			t.Errorf("wrote through the link: %v", entries)
 		}
 		if len(rowsOf(t, cfg, "B")) != 0 {
 			t.Errorf("row written for a refused file")

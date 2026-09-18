@@ -235,6 +235,35 @@ func TestBuildOwnershipIsPhysical(t *testing.T) {
 	}
 }
 
+func TestSymlinkComponent(t *testing.T) {
+	root, elsewhere := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "real", "deep"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "real"), filepath.Join(root, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(elsewhere, filepath.Join(root, "real", "out")); err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]string{
+		"x.mov":                 "",
+		"real/x.mov":            "",
+		"real/deep/x.mov":       "",
+		"real/notyet/x.mov":     "", // missing components are created as real dirs by the writer
+		"alias/x.mov":           "alias",
+		"alias/deep/x.mov":      "alias",
+		"real/out/x.mov":        "real/out",
+		"real/out/deeper/x.mov": "real/out",
+	}
+	for rel, want := range cases {
+		got, err := SymlinkComponent(root, rel)
+		if err != nil || got != want {
+			t.Errorf("SymlinkComponent(%q) = %q, %v; want %q", rel, got, err, want)
+		}
+	}
+}
+
 func sha(content string) string {
 	sum := sha256.Sum256([]byte(content))
 	return hex.EncodeToString(sum[:])
