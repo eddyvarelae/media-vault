@@ -4,7 +4,6 @@ Maintained by the PM - ordering and scope are theirs alone. Fixed sections below
 
 ## P0 - blockers
 
-- [ ] **B1** F4 `verify --only-unverified` (`verify-incremental` @ `f964b60`) - **Reviewer APPROVE 2026-09-17**; merge to `main` blocked for the PM's session → `ACTION (human):` merge. Unblocks B6, B8, B9.
 - [ ] **B2** NAS reachability for the Tester. Two halves: **(a)** read path via SMB - `ACTION (human):` set `NAS_SHARES="media docker"` in mini-server's `config/mini.env` so `~/mounts/docker` mounts (manifest snapshot + logs become readable, no SSH needed); **(b)** SSH on the UGREEN - nobody has ever had it (mini-server PM, 2026-09-17); needed only to *run* `vault` on the NAS. `ACTION (human):` is SSH enabled in UGOS (Control Panel → Terminal)? If not, say how you run the `nas-*.sh` scripts today.
 
 ## P1
@@ -44,6 +43,8 @@ Maintained by the PM - ordering and scope are theirs alone. Fixed sections below
 - Designer / Cloud seats - no standing work for them.
 
 ## Done (PM-verified)
+
+- [x] **B1** F4 `verify --only-unverified` - Reviewer APPROVE #1 (Codex, 2026-09-17), merged `--no-ff` as `7cca025` on 2026-09-17; `go build && go vet` clean on the merge (PM). Rung: `tested` (author) + independent source review; `observed` pending the first NAS run (B6).
 
 - [x] **F3** `copy` exits 1 when a collision leaves a file unarchived - `9518230` on `main`, pushed. Evidence: `tested` (author, pre-framework); `go build && go vet` clean on 2026-09-16 (PM). Not independently reviewed under the framework - predates it.
 - [x] **F1/F2, content-dedupe** - merged `44fbf67..d0163a9` on 2026-09-15 (pre-framework). Evidence: handoff notes in `team/archive/`.

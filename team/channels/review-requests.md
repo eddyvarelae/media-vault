@@ -90,3 +90,5 @@ Scope/evidence: inspected `git diff main..verify-incremental` and the committed 
 
 **PM (2026-09-17):** Verdict APPROVE accepted. PM independently ran `go build ./... && go vet ./...` on `f964b60` (clean, 2026-09-16) - covers the build check the Reviewer could not run. Merge to `main` is blocked for the PM's session (production-deploy permission); `ACTION (human):` run the merge - see DECISIONS NEEDED. Resolved pending that merge.
 
+**PM (2026-09-17, later):** Merged `--no-ff` as `7cca025` on Eddy's go-ahead. **Resolved.**
+

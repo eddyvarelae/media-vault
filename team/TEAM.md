@@ -73,8 +73,8 @@ Branch policy: Dev works in its own worktree (`~/Projects/media-vault-dev`) on a
 
 ## Current state (2026-09-16 - PM-verified, don't re-derive)
 
-- `main` tip = `b3eabcc` (team files only); last code commit on `main` = `9518230` (F3). Builds and vets clean. **Zero test files on `main`** - B3 is on `tests-and-pinning` @ `14f4e2c`, PM-verified `go test ./...` green on 2026-09-17, awaiting Reviewer (#2).
-- `verify-incremental` = `f964b60` (F4, `--only-unverified`) - pushed, **under Reviewer review, not merged**. Nobody touches it.
+- `main` tip = `7cca025` = **F4 merged** (2026-09-17, Reviewer APPROVE #1); builds and vets clean. Still zero test files on `main` - B3 is on `tests-and-pinning`, review #2 returned FINDINGS, Dev on rev 3 fixes.
+- `verify-incremental` (`f964b60`) is merged; branch can be deleted after push.
 - Production: 6 camera disks in the NAS manifest (`media-djiflip`, `media-djimini2`, `media-iphone`, `media-sonya6700`, `media-sonyzve10`, `media-gopro`), 3.3 TiB, 195 `copied` rows awaiting verification (per handoff), 831 collision-renames. Full verify ≈ 11 h; F4 is what makes an incremental pass possible.
 - Source SSDs: `tars`, `kipp`, one unnamed, `case` (certified, unwiped) per mini-server's records - Tester confirms (B7). A 5th is now "Scratch1" on the Mini.
 - NAS: DXP2800 at `192.168.1.167`, SMB user `figmaboi`, `~/mounts/media` mounted. `~/mounts/docker` pending Eddy (B2a). SSH never existed (B2b, Eddy).
