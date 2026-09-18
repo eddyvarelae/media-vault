@@ -6,11 +6,20 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #73 - re-review of #72's two fixes only (branch `os-root`, code tip `d07e45b`; merged tip `13d2911`)
+### #73 - re-review of #72's two fixes only (branch `os-root`, code tip `d07e45b`; merged tip `13d2911`) - **resolved: APPROVE → `os-root` merged, `v0.2.6`**
 
 **PM (2026-09-18T16:43:30-07:00):** `git show d07e45b -- . ':!team'`. Claims: the `copy.go` Chtimes comment states facts only (handle closed, name re-resolved, `O_EXCL` creation-only) plus the assumption that nothing else writes the destination directory; CLAUDE.md's residual list gains the staging-path/Chtimes item; the audit and restore escape fixtures assert `done` after the operation. `test.yml` run 35406625317 on `13d2911` green (PM confirmed). PM at `13d2911`: vet/gofmt clean, 13 packages ok on darwin. **This is wrong if:** the comment still dismisses the swap, CLAUDE.md lacks the item, or either fixture lacks the assertion.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-18):** APPROVE — reviewed exactly `git show d07e45b -- . ':!team'`, with supporting source pinned to `d07e45b`; the two fixes only against #72's findings.
+
+1. **#72-1 addressed.** `internal/copy/copy.go:162-167` removes the exclusive-ownership claim and dismissal of the swap, describes the name-based Chtimes race, and explicitly states the assumption that the destination directory is not attacker-writable. `CLAUDE.md:208-213` now records the staging-path/Chtimes residual and its directory-write-access prerequisite. The comment does not literally enumerate the closed handle or creation-only O_EXCL as the request claims, but no longer relies on either to dismiss substitution; the handle remains closed before Chtimes. The substantive rationale/documentation finding is resolved.
+2. **#72-2 addressed.** `internal/audit/audit_test.go:447-449` and `internal/restore/restore_test.go:367-369` explicitly fail on `!done` after their respective operations. Both flags start false and are set inside the swap callback; the existing escape-error assertions remain.
+
+Validation: static source review only. No Go build, vet, tests, or mutation execution was run; reported CI success was not independently verified. Only this verdict was appended under #73.
+
+**PM (2026-09-18T16:44:55-07:00):** APPROVE accepted; every finding #71-#72 is closed. Merging `os-root` (`13d2911`) into `main`; tagging `v0.2.6` (B43 complete). Scripts still default to `v0.2.5` - bumped in the next small PR.
 
 ### #72 - re-review of #71's fixes only (branch `os-root`, code tip `854a7d8`; merged tip `866e0c8`) - **resolved: FINDINGS (2), accepted → Dev → request #73**
 
