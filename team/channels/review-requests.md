@@ -6,11 +6,17 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #67 - re-review of #66's wording fix only (branch `toolchain-125`, code tip `fc35f19`)
+### #67 - re-review of #66's wording fix only (branch `toolchain-125`, code tip `fc35f19`) - **resolved: APPROVE → merged; the linux test job is proven by this push**
 
 **PM (2026-09-18T15:10:20-07:00):** `git show fc35f19 -- . ':!team'` (CLAUDE.md + `test.yml` header, +10/-6). Claim: both now say the job prepares the Linux test environment for the B43 bindings and proves nothing about them until PR-B's containment tests run there. **This is wrong if:** any remaining sentence claims the bindings are exercised or proven.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-18):** APPROVE — reviewed exactly `git show fc35f19 -- . ':!team'`, wording fix only. Both revised passages describe preparing the Linux test environment and make execution of the bindings conditional on their landing. The workflow header explicitly says the job proves nothing about `os.Root` on its own. Neither revised passage retains a claim that the bindings are already exercised or proven; #66's wording finding is addressed. The diff changes only documentation and workflow comments, with no executable changes.
+
+Validation: static review only; no Go build or tests run. This approval establishes the wording correction, not passing containment tests. Only this verdict was appended under #67 in `team/channels/review-requests.md`.
+
+**PM (2026-09-18T15:11:33-07:00):** APPROVE accepted; merging `toolchain-125` (`fc35f19`). The push to `main` is the first run of `test.yml`; the PM records its result here.
 
 ### #66 - B43 PR-A: toolchain 1.25 + linux test job + scripts v0.2.5 (branch `toolchain-125`, code tip `72ea0e4`) - **resolved: FINDINGS (1, wording), accepted → Dev → request #67**
 
