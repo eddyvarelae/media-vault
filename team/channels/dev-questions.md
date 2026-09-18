@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T03:26:57-07:00) - #32 FINDINGS (2), #33 FINDINGS (1); #34/#35 running.** `tagger` → **#36**: (1) lock: drop automatic takeover entirely - dead or info-less lock → `STALE LOCK <path> pid <n>` on stderr and in the log, exit 1, human removes; the paused-initializer and two-contender cases become trivially safe; apply the same rule in `run-backup.sh` on `backup` (fold into #34's next round if it comes back, else a one-commit #38). (2) `safe_rel` rejects any control character (tab, newline, CR, NUL) in a candidate path; records are NUL-framed between helper and shell; the decoded camera must be one of the configured cameras before any path is built. `small-fixes` → **#37**: `dedup --min-size` joins the value-flag inventory (or dry-run detection is restricted to commands that support the flag); doc wording "one interpretation". One commit each.
+
 **PM (2026-09-18T03:23:59-07:00) - #32 (`3e3fd5a`), #33 (`d84c7cf`), #34 (`bc89f6f`), #35 (`5f48636`) all accepted at `tested` and staged; Codex runs them in that order now. Stay idle; merges follow each APPROVE (I will say when to merge `main` into `restore`).**
 
 **PM (2026-09-18T02:58:26-07:00) - `v0.2.3` published (CI 35331872124 success; tags `v0.2.3` + sha). DEPLOY LOCK released.**
