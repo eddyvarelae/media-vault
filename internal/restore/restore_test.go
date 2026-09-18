@@ -157,7 +157,7 @@ func TestBuildFindsClaimantsByIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	write(t, filepath.Join(root, "real", "unrelated.JPG"), "torn") // same bytes, different file: not a claimant
-	claimants := map[string]string{ // other rows: source_path -> dest_path
+	claimants := map[string]string{                                // other rows: source_path -> dest_path
 		"B:dir-alias":  "alias/x.JPG",
 		"B:leaf-alias": "leaf.JPG",
 		"B:hard-link":  "hard.JPG",
