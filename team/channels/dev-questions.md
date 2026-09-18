@@ -62,6 +62,16 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-18T12:45-07:00) - #52 done. READY FOR REVIEW. backup → `5d91a91`** (merge main `f8d2853` + fix `5d91a91`). All green (`go build`/`go vet`/`gofmt`/`go test ./... -count=1`). Nothing merged; merged `main` first (channel-only). Built to the design in your 09:45 note:
+
+- **Slugs are assigned + persisted** in `$STATE_DIR/slugs.tsv` (`name<TAB>slug`, append-only via temp + rename). `assign_slug(name)`: recorded → return it; else base (the bounded hex/sha) then `-2`, `-3`, … until no *other* name holds it; record; return (idempotent). Every report/TSV/marker path — known and unknown volumes — uses it, so **two names can never share a slug** however their bases hash; the #51 planned-collision cases can't arise. `slug()` is now only the first-choice base.
+- **Corrupt registry aborts.** `check_slugs` refuses (exit 1, touch nothing) if `slugs.tsv` maps one name to two slugs or one slug to two names (only a hand-edit can).
+- **Header check stays as defense in depth** — a file at a volume's assigned path whose line 1 names a different volume is `FOREIGN OUTPUT` (corruption/tamper), logged, left, exit 1. Not the primary mechanism now.
+
+Harness: the hook forces Alpha/Beta to one base → they get `S` and `S-2`, **both report in one tick, both files survive**, and the mapping **persists across ticks and a re-attach**; a hand-corrupted registry (both directions) aborts touching nothing; the three foreign-header cases (report/TSV/marker) stay with **cmp-exact** bytes + byte-identical `backup-state.tsv`; clean-tick pruning kept. Mutations: dropping the `-N` disambiguation fails the assignment cases; a no-op `check_slugs` fails the corrupt-registry cases. Also caught a `gap-*` glob matching the `gap-manifest` snapshot dir in one test check. README (the contract) rewritten.
+
+Idle until the merge.
+
 **PM (2026-09-18T09:45:32-07:00) - #51 on `backup`: FINDINGS (3). Design change instead of guard number seven → **#52**.** The slug becomes an assigned, persisted identifier: `$STATE_DIR/slugs.tsv` (`name<TAB>slug`, append-only, written via temp + rename). `assign_slug(name)`: recorded → return it; else base = the bounded hex/sha form, then `-2`, `-3`, … until no *other* name holds it; record; return. Every report/TSV/marker path uses `assign_slug`, for known and unknown volumes alike, so planned-owner conflicts cannot exist and the #51-1/#51-2 cases disappear. Keep the line-1 header and the abort-on-foreign-header pass as defense in depth (it is now a corruption detector, not the primary mechanism). Refuse (exit 1, touch nothing) if `slugs.tsv` maps one name to two slugs or one slug to two names. Harness: Alpha/Beta forced to one base via the hook get `S` and `S-2`, both report in the same tick, both files survive, the mapping persists across ticks and survives a re-attach; a hand-corrupted mapping aborts; the header cases stay. Merge `main` first if it moved. One commit + note.
 
 **PM (2026-09-18T09:43:26-07:00) - #51 (`a290beb`) accepted at `tested` and staged; Codex runs it now. Idle.**
