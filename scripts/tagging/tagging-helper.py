@@ -36,7 +36,8 @@ is a new id and gets tagged again, same as a re-copied manifest row would.
 The manifest is never opened where it lives: it is WAL-mode sqlite on an SMB
 share, and opening that directly writes a -shm file next to it and can read a
 torn WAL. `snapshot` rsyncs db + wal to $TAG_STATE_DIR, checkpoints the copy,
-and quick_checks it; everything else reads the snapshot with mode=ro.
+and quick_checks it (a fresh copy each run, never an rsync-skipped stale
+one); everything else reads the snapshot with mode=ro.
 Copied-at values are unix nanoseconds, as media-vault stores them.
 
 Run with the video-tagger venv python (or any python >= 3.9); stdlib only.
@@ -136,7 +137,12 @@ def take_snapshot(src, dst):
     Returns (source mtime ns, row count, newest copied_at ns).
     """
     os.makedirs(os.path.dirname(dst), exist_ok=True)
-    for suffix in ("-shm", "-wal"):
+    # Remove the previous snapshot and its sidecars first. rsync -a decides
+    # to copy by size+mtime, and a manifest edited within the same second as
+    # the last snapshot, reusing pages so the size is unchanged, would be
+    # skipped - a stale snapshot that silently misses the newest rows. A
+    # fresh dst is always written in full.
+    for suffix in ("", "-shm", "-wal"):
         try:
             os.remove(dst + suffix)
         except FileNotFoundError:
@@ -185,6 +191,29 @@ def cmd_snapshot(a):
 VIDEO_STATUS = "verified"   # only rows media-vault has hash-checked against the NAS copy
 
 
+JUNK_COMPONENTS = {"reports", "#recycle", ".DS_Store", ".AppleDouble", ".Trashes", ".Spotlight-V100", ".fseventsd"}
+
+
+def safe_rel(rel):
+    """A candidate path is used twice - appended to the camera folder on the
+    NAS and to the run dir on scratch - and written through (tags, marker,
+    reports/). So it must stay inside both: relative, no empty or `..`
+    component, no absolute form; and it must not be our own output or
+    platform junk: no `reports` component, no hidden or AppleDouble name,
+    never the NAS trash. Applies to manifest rows (dest_path or the
+    source_path fallback) exactly as to walked files - a manifest spelling
+    is data, not trust (review #26)."""
+    if not rel or os.path.isabs(rel) or rel.startswith(("/", "\\")):
+        return False
+    parts = rel.replace("\\", "/").split("/")
+    for c in parts:
+        if c in ("", ".", ".."):
+            return False
+        if c in JUNK_COMPONENTS or c.startswith(".") or c.startswith("._"):
+            return False
+    return True
+
+
 def disk_of(folder):
     """media-vault names a folder's source disk `media-<folder lowercased>`
     (`media-sonya6700` -> `SonyA6700`) and stores dest_path relative to the
@@ -210,7 +239,16 @@ def manifest_rows(man, folders, exts):
         f"AND ({ext_clauses})"
     )
     params = [VIDEO_STATUS] + list(by_disk) + ["%" + e.lower() for e in exts]
-    return [(i, by_disk[d], dp, sz, ca, "manifest") for i, d, dp, sz, ca in man.execute(sql, params)]
+    out = []
+    for i, d, dp, sz, ca in man.execute(sql, params):
+        if not safe_rel(dp):
+            UNSAFE.append((by_disk[d], dp))
+            continue
+        out.append((i, by_disk[d], dp, sz, ca, "manifest"))
+    return out
+
+
+UNSAFE = []   # (folder, path) of rows refused by safe_rel this run - announced, never silently dropped
 
 
 def folders_without_rows(man, folders):
@@ -244,6 +282,9 @@ def walk_rows(media_root, folder, exts):
                 continue
             full = os.path.join(dirpath, name)
             rel = os.path.relpath(full, root)
+            if not safe_rel(rel) or os.path.islink(full):
+                UNSAFE.append((folder, rel))
+                continue
             st = os.stat(full)
             out.append((walk_id(folder, rel), folder, rel, st.st_size, st.st_mtime_ns, "walk"))
     return out
@@ -292,8 +333,9 @@ def cmd_select(a):
     for row in picked:
         print("\t".join(str(x) for x in row))
     walked_note = f" (walked: {' '.join(walked)})" if walked and tier == 2 else ""
+    unsafe_note = f"; skipped {len(UNSAFE)} candidate(s) with unsafe or junk paths (first: {UNSAFE[0][0]}/{UNSAFE[0][1]})" if UNSAFE else ""
     print(f"selected {len(picked)} files, {total / 1e9:.2f} GB from tier {tier}{walked_note}; "
-          f"pending before this run: tier 1 {len(t1)}, tier 2 {len(t2)}", file=sys.stderr)
+          f"pending before this run: tier 1 {len(t1)}, tier 2 {len(t2)}{unsafe_note}", file=sys.stderr)
 
 
 def cmd_record(a):

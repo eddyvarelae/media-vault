@@ -148,7 +148,7 @@ leftover_dirs() { ls -d "$SCRATCH_DIR"/tagging/*/ 2>/dev/null || true; }
 
 # ── --dry-run: show the batch, touch nothing (no lock, no log, no state) ──
 if (( dry_run )); then
-  SNAPSHOT="$(mktemp -d)/manifest.snapshot.db"; trap 'rm -rf "$(dirname "$SNAPSHOT")"' EXIT   # a dry run leaves no state behind
+  SNAPSHOT="$(mktemp -d)/manifest.snapshot.db"; trap 'rm -rf "$(dirname "$SNAPSHOT")"' EXIT   # a dry run leaves no state behind - everything temporary lives in this one dir
   echo "DRY RUN — the batch a real run would process now"
   echo "  manifest:  $MANIFEST_DB"
   snap=$(take_snapshot) || die "manifest snapshot failed"
@@ -162,8 +162,9 @@ if (( dry_run )); then
   [[ -d "$LOCK_DIR" ]] && echo "  NOTE: lock held at $LOCK_DIR ($(cat "$LOCK_DIR/info" 2>/dev/null))"
   leftover_dirs | while read -r d; do echo "  NOTE: leftover run dir on scratch (kept after a failed run): $(du -sh "$d" | tr '\t' ' ')"; done
   echo
-  errf=$(mktemp)
-  batch=$(select_batch 2>"$errf"); summary=$(cat "$errf"); rm -f "$errf"
+  errf="$(dirname "$SNAPSHOT")/select.err"   # inside the trapped dir: a failed selection leaves nothing behind
+  batch=$(select_batch 2>"$errf") || { echo "batch selection failed: $(cat "$errf")" >&2; exit 2; }
+  summary=$(cat "$errf")
   while IFS=$'\t' read -r id cam dest size ts source; do
     [[ -n "$id" ]] || continue
     if [[ "$source" == walk ]]; then via="mtime"; ref="walked, id $id"; else via="copied"; ref="manifest id $id"; fi
@@ -180,25 +181,41 @@ mkdir -p "$(dirname "$LOG_FILE")"
 if [[ -t 1 ]]; then exec > >(tee -a "$LOG_FILE") 2>&1; else exec >>"$LOG_FILE" 2>&1; fi
 
 # ── 2. single-instance lock ───────────────────────────────────────────────
+# Ownership and cleanup go together: the traps below are installed the
+# moment the lock is ours, before anything else can fail (review #26 - a
+# corrupt state db used to leave a fresh lock behind). A lock dir with no
+# info yet is one being acquired right now, not a dead one; a dead one is
+# taken over by renaming it away first, which only one competitor can win.
 mkdir -p "$TAG_STATE_DIR"
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-  info=$(cat "$LOCK_DIR/info" 2>/dev/null || echo "no info")
+child="" finishing="" have_lock=""
+selected=0 pulled=0 tagged=0 wroteback=0 failed=0
+acquire_lock() {
+  if mkdir "$LOCK_DIR" 2>/dev/null; then return 0; fi
+  local info lock_pid lock_age_s
+  info=$(cat "$LOCK_DIR/info" 2>/dev/null || true)
+  lock_age_s=$(( $(date +%s) - $(stat -f %m "$LOCK_DIR" 2>/dev/null || date +%s) ))
+  if [[ -z "$info" ]]; then
+    if (( lock_age_s < 60 )); then log "another run is acquiring the lock ($LOCK_DIR, ${lock_age_s}s old, no info yet) — not starting"; return 1; fi
+    info="no info"
+  fi
   lock_pid=${info%% *}
-  lock_age_h=$(( ( $(date +%s) - $(stat -f %m "$LOCK_DIR") ) / 3600 ))
   if [[ "$lock_pid" =~ ^[0-9]+$ ]] && kill -0 "$lock_pid" 2>/dev/null; then
-    log "another run is in progress (lock $LOCK_DIR: $info) — not starting"; exit 1
+    log "another run is in progress (lock $LOCK_DIR: $info) — not starting"; return 1
   fi
-  if (( lock_age_h >= 24 )); then
-    log "STALE LOCK: $LOCK_DIR is ${lock_age_h}h old ($info) and its process is gone. Not clearing it automatically — inspect, then rmdir it."; exit 1
+  if (( lock_age_s >= 24 * 3600 )); then
+    log "STALE LOCK: $LOCK_DIR is $(( lock_age_s / 3600 ))h old ($info) and its process is gone. Not clearing it automatically — inspect, then rmdir it."; return 1
   fi
-  log "lock from a run that is no longer alive ($info, ${lock_age_h}h old) — taking it over"
-fi
-echo "$$ started $(ts) run=$RUN_ID" > "$LOCK_DIR/info"
-helper run-started --state "$STATE_DB" --run-id "$RUN_ID"
+  # Exclusive takeover: rename the dead lock away (atomic; a second taker
+  # loses the rename and stops), then create ours.
+  if ! mv "$LOCK_DIR" "$LOCK_DIR.dead.$$" 2>/dev/null; then log "the dead lock was taken over by another run — not starting"; return 1; fi
+  rm -rf "$LOCK_DIR.dead.$$"
+  if ! mkdir "$LOCK_DIR" 2>/dev/null; then log "lock reappeared during takeover — not starting"; return 1; fi
+  log "lock from a run that is no longer alive ($info, $(( lock_age_s / 3600 ))h old) — taken over"
+}
+acquire_lock || exit 1
+have_lock=1
 
 # ── signals: stop the child, keep scratch, release the lock, summarise ────
-child="" finishing=""
-selected=0 pulled=0 tagged=0 wroteback=0 failed=0
 finish() {
   local rc=$1
   finishing=1
@@ -213,13 +230,16 @@ finish() {
   elif [[ -d "$RUN_DIR" ]]; then
     log "scratch KEPT for inspection: $RUN_DIR ($(du -sh "$RUN_DIR" 2>/dev/null | cut -f1))"
   fi
-  rm -rf "$LOCK_DIR"
+  [[ -n "$have_lock" ]] && rm -rf "$LOCK_DIR"
   log "run $RUN_ID finished rc=$rc"
   exit "$rc"
 }
 trap 'log "interrupted (SIGTERM/SIGINT) — stopping; the file in flight counts as failed"; failed=$((failed+1)); finish 143' TERM INT
 # set -e on an unexpected error must still leave a summary and release the lock.
 trap '[[ -n "$finishing" ]] || { log "UNEXPECTED EXIT (rc=$?) — a command failed outside the per-file handling"; failed=$((failed+1)); finish 1; }' EXIT
+# Only now, with the traps in place, does anything else run under the lock.
+{ echo "$$ started $(ts) run=$RUN_ID" > "$LOCK_DIR/info.tmp" && mv "$LOCK_DIR/info.tmp" "$LOCK_DIR/info"; }
+helper run-started --state "$STATE_DB" --run-id "$RUN_ID"
 # Children get no stdin: ffmpeg (inside tagger.py) reads it otherwise and eats
 # the batch lines the loop below is still reading.
 run_child() { "$@" </dev/null & child=$!; wait "$child"; local rc=$?; child=""; return $rc; }
@@ -249,11 +269,30 @@ record() {  # $1 status, $2 tags-json, $3 error
   helper record --state "$STATE_DB" --id "$id" --source "$source" --camera "$cam" --dest-path "$dest" \
     --size "$size" --copied-at "$ts" --status "$1" --tags "$2" --error "$3" --run-id "$RUN_ID"
 }
+# A candidate path is appended to the NAS camera folder and to the run dir
+# and written through; the helper already refused unsafe spellings, and the
+# shell refuses again on the filesystem: no `..`, nothing absolute, and no
+# symlink anywhere on the NAS-side path (a linked directory or file would
+# make the pull read, and the write-back write, somewhere else).
+path_is_unsafe() {  # path_is_unsafe <folder> <rel>: prints why, or nothing
+  local rel=$2 cur="$MEDIA_ROOT/$1" c
+  case "/$rel/" in */../*|/./*|//*) echo "path climbs or is absolute"; return ;; esac
+  [[ "$rel" == /* ]] && { echo "path is absolute"; return; }
+  [[ -L "$cur" ]] && { echo "$1 is a symlink"; return; }
+  local IFS=/
+  for c in $rel; do
+    cur="$cur/$c"
+    [[ -L "$cur" ]] && { echo "$cur is a symlink"; return; }
+  done
+}
 while IFS=$'\t' read -r -u 3 id cam dest size ts source; do
   [[ -n "$id" ]] || continue
   rel="$cam/$dest"
   src="$MEDIA_ROOT/$rel"
   dst="$RUN_DIR/$rel"
+  if why=$(path_is_unsafe "$cam" "$dest") && [[ -n "$why" ]]; then
+    log "FILE $rel FAILED: refused, $why ($source id $id)"; record failed "" "unsafe path: $why"; failed=$((failed+1)); continue
+  fi
   stem="$(basename "${dest%.*}")"
   report_scratch="$(dirname "$dst")/reports/$stem"   # where tagger.py writes it
   report_nas="$(dirname "$src")/reports/$stem"       # same convention, on the NAS
