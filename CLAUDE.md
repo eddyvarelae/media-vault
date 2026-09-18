@@ -1,6 +1,6 @@
 # media-vault — conventions
 
-Go 1.23 CLI (`cmd/vault`) that mirrors a source SSD to a NAS with a per-file
+Go 1.25 CLI (`cmd/vault`) that mirrors a source SSD to a NAS with a per-file
 sha256 manifest (SQLite), re-verifies the destination, and signs an Ed25519
 **wipe certificate**. This file is the contract external agents read. Keep it
 current **in the same commit** as any behavior it describes.
@@ -12,6 +12,17 @@ go build ./...            # CGO_ENABLED=0 must work; the image is alpine + stati
 go vet ./...
 go test ./... -count=1    # temp dirs + temp manifest only; no NAS, no network
 ```
+
+Go **1.25** (the `os.Root` binding of every check-then-write/read needs it —
+B43). `.github/workflows/test.yml` runs `go vet ./...` and
+`go test ./cmd/... ./internal/... -count=1` under `golang:1.25-alpine`,
+`CGO_ENABLED=0`, on pushes/PRs to `main` and on `v*` tags. It prepares the
+Linux test environment B43 needs: the `os.Root` escape semantics are
+syscall-backed and differ between darwin and linux, so once the bindings land
+they must run where the binary actually does (alpine/linux), not only on a dev's
+darwin box. It builds no image. The `scripts/test/` bash harnesses shell out
+to docker/bash and stay on the local `go test ./...` path (they do not touch
+`os.Root`), so `go test ./...` is still the one command a developer runs.
 
 Tests run the real pipeline against `t.TempDir()`. `cmd/vault` tests re-exec
 the test binary through `main()` (`VAULT_TEST_MAIN=1`) to get real exit codes,
@@ -211,5 +222,8 @@ number nobody can recompute is a finding, not a fact.
   a release tag (`IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:vX.Y.Z}"`),
   so a merge to `main` is not a deploy; cutting a tag is. Bump the scripts'
   default in the same PR as the release — `docs/release.md`.
+  `.github/workflows/test.yml` is separate: it runs the Go suite (vet + the
+  `cmd/`/`internal/` tests) on pushes/PRs to `main` and on `v*` tags, and
+  builds no image.
 - Roles, sacred paths, and the evidence ladder live in `team/TEAM.md`. Author
   evidence caps at `tested`.

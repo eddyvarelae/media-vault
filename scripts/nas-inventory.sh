@@ -9,7 +9,7 @@
 set -e
 
 # Pinned release tag; override with VAULT_IMAGE=... for a one-off run.
-IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.4}"
+IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.5}"
 HOME_ROOT=/volume1/@home/figmaboi
 CFG=/volume1/docker/vault-nas-config
 

@@ -24,7 +24,7 @@ set -u
 
 label="${1-}"
 # Pinned release tag; override with VAULT_IMAGE=... for a one-off run.
-IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.4}"
+IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.5}"
 case "$label" in
   tars) SRC="${SSD_SRC:-/usb/sdc1}"; dedupe="" ;;
   kipp) SRC="${SSD_SRC:?set SSD_SRC to the container path of the kipp disk, e.g. /usb/sdd1 (runbook step 1)}"; dedupe="--dedupe-content" ;;
