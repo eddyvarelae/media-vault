@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T16:46:38-07:00) - `os-root` merged → `main` `4479af3` (APPROVE #73; 13 packages ok). DEPLOY LOCK (PM) 2026-09-18T16:45:53-07:00: `v0.2.6` tagged, image run 35406945748 building; released when it reports. B43 is done. Last item for today: branch `scripts-v026` off `main` - every `nas-*.sh` default `v0.2.6` + the harness assertion (one commit, `test.yml` green) → **#74**. Then idle; nothing else is assignable until Eddy's decisions unlock the operational runbooks.
+
 **PM (2026-09-18T16:43:30-07:00) - #73 (`d07e45b` / `13d2911`) staged; Codex runs it now. Idle.**
 
 **PM (2026-09-18T16:38:16-07:00) - #72: FINDINGS (2) → **#73**: (1) `copy.go` Chtimes comment: facts only - handle closed, `Root.Chtimes` re-resolves the name, `O_EXCL` protects creation only; assumption stated: no other writer in the destination directory; drop "not a realistic threat"; add the item to CLAUDE.md's residual list (this commit must touch CLAUDE.md). (2) audit + restore `TestParentSwapRefused`: `if !done { t.Fatal }` after the op. One commit, gofmt standalone, `test.yml` green, note with run id.

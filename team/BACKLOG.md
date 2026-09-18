@@ -27,7 +27,6 @@ Maintained by the PM - ordering and scope are theirs alone. Fixed sections below
 - [ ] **B28** `figmaboi` has NOPASSWD `sudo bash`/`nohup`/`docker` on the NAS (Tester #18) - a password-less root shell for the only agent-reachable account. Eddy's call: leave (UGOS default) or restrict to `docker` only. Security, not product.
 - [ ] **B30** *(folded into B23(b) by review #5 finding 1)* a `deduped` row recopy or a colliding `.vault-partial` name can still write over a `verified` destination - the guard must be destination-level. Dev item 1 fixes.
 - [ ] **B33** `repair-dest`: a candidate that is already another row's `dest_path` should be a fourth outcome `OWNED`, never chosen (Dev noticed 2026-09-17; does not arise on the 195). Dev, with the next `repair-dest` change.
-- [ ] **B43** `certify.WriteOutput` binds the leaf but not the parent directory between check and write (Dev, review #16 fix); binding needs `openat` = `os.Root` (Go 1.24, `Rename` 1.25) - a toolchain bump PR (`go.mod`, `golang:1.23-alpine` → 1.25). Mitigation today: `/volume1/docker/vault-certs` is root-owned. P2.
 - [ ] **B27** `nas-verify-certify-all.sh` writes every log line twice (`tee -a` under a redirecting nohup). Dev, any PR.
 
 ## P2
@@ -51,6 +50,7 @@ Maintained by the PM - ordering and scope are theirs alone. Fixed sections below
 
 ## Done (PM-verified)
 
+- [x] **B43** Go 1.25 toolchain, `golang:1.25-alpine`, linux test CI job (`test.yml`), and `os.Root`-anchored bindings at `copy.File`, `audit`, `restore.Build`, `certify.WriteOutput` with the Root-anchored component walk kept (PM ruling: os.Root follows in-root symlinks) - merged `882c165`, `ee6a7fa`, `4479af3` (#66→#73). `v0.2.6`. Documented residuals: an in-root symlink swapped in after the walk lands inside the archive; the staging-name Chtimes race needs directory write access.
 - [x] **B38** `audit` merged `fc1d828` (#61→#65): `vault audit <disk> <dest-dir> [--tsv] [--strict]`, report-only per-type plausibility (JPEG EOI + zero padding, Sony fixed-size ARW, `.RSV`/`DATABASE.BIN`, empty SRT with a twin, SKIPPED types named), hardened tail read; `copy` refuses to mint a row unless the tee saw exactly the bytes written. `v0.2.5`.
 - [x] **B44** `move` exits 1 when incomplete (`bd0c85e`, #60). **B45** scripts default `v0.2.4` (`07c32f9`, #59). **B36/B26 scripts** unified into `scripts/nas-ssd-copy-all.sh <label>` (#59).
 - [x] **B22** `backup` merged `a4c2ddd` (#28→#58, thirteen rounds): `vault gap <dir>` (Go, read-only, verified rows only, per-folder arithmetic) + `scripts/backup/run-backup.sh` (mini.env machine facts, snapshot first, allow-list, assigned + persisted slugs, once per attach + per day, copies nothing, managed build confined to state). `v0.2.4`. Install (LaunchAgent) = PM act after the Tester's `observed` tick.
