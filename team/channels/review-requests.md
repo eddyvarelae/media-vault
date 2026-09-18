@@ -6,6 +6,33 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #9 - re-review of #6's fix only (branch `overwrite-guard`, code tip `abc863e`)
+
+**PM (2026-09-17T20:20:48-07:00):** Check that #6's one finding is closed, nothing else. Diff `git diff 539317c..abc863e -- . ':!team'` (1 commit after Dev's merge of `main` at `539317c`; 7 files, +399/-55; `internal/copy` now changes - the writer - which is expected). Dev's note: `team/channels/dev-questions.md`, Dev 2026-09-17T20:14 (worktree `~/Projects/media-vault-dev`, commit `34cc608` on that branch). PM independently at `abc863e` in a detached checkout: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all six test packages.
+
+**Claims:**
+1. Ownership is physical: `scan.Build` indexes every `verified` row (any disk) once per run by `lower(Clean(Join(dstRoot, dest_path)))` and looks up the task's staging and final targets by the same key; `..` collapses to where it lands, case folds unconditionally (no probe file is ever written). `VerifiedOwner` (spelling lookup) is gone.
+2. The writer never truncates: `copy.File` `Lstat`s the staging path and refuses anything there (it cannot distinguish a leftover partial, so it refuses both and says so); the staging file is opened `O_CREATE|O_EXCL|O_WRONLY`, no `O_TRUNC` anywhere; a new file whose final path exists is refused; a recopy (`Replace`) may replace only a regular file. A refused open removes nothing.
+3. Regression: the Reviewer's case-alias example and `--rule vault-partial=../archive` example through `main()`; `TestBuildOwnershipIsPhysical`; `TestFileRefusesWhateverExists` (adapts to the temp FS's case semantics rather than skipping).
+
+**This is wrong if:** any write site in `copy.File` can open an existing path for writing (grep every `os.OpenFile`/`os.Create`/`os.Rename`); the key normalization differs between the index and the lookup (one cleaned, the other not; one folded, the other not); a path that `filepath.Join` does not clean identically on both sides exists (trailing slash, `//`); the recopy `Replace` path can replace a file owned by a verified row of another disk; or the case test can pass on a folding FS without the refusal actually happening.
+
+Verdict goes below this line.
+
+### #10 - re-review of #7's fixes only (branch `repair-dest`, code tip `c6d9d42`)
+
+**PM (2026-09-17T20:20:48-07:00):** Check the three #7 findings and B33 are closed, nothing else. Diff `git diff 6c52d37..c6d9d42 -- . ':!team'` (1 commit after Dev's merge of `main` at `6c52d37`; 7 files, +340/-62). Dev's note: `team/channels/dev-questions.md`, Dev 2026-09-17T20:20 (commit `ce79253` on that branch). PM independently at `c6d9d42`: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all seven test packages.
+
+**Claims:**
+1. (#7-1) Every filesystem look is `Lstat`; a candidate must be a regular file; subdirectories come from `ReadDir` types (a symlinked dir is not a dir); the row's own directory is walked component by component from the root and refused on any symlink component or lexical escape; `under(root, full)` proves `EvalSymlinks(full)` is under `EvalSymlinks(root)` before hashing. Regression: leaf symlink outside, ancestor symlink outside; `BytesHashed` proves nothing behind a symlink was read.
+2. (#7-2) Intact requires a regular file at `root/dest_path`; anything else → `NOT A FILE`, unresolved, `INCOMPLETE:`, exit 1; CLI-tested.
+3. (#7-3) Dry-run output and `CLAUDE.md` say no manifest row written and no archive file ever; initialization is pre-existing (B31).
+4. (B33) `OWNED`: a hash-matching candidate that any row (any disk, any status) already claims by physical key is never chosen, even as the only match; `Apply` writes 0 for it.
+
+**This is wrong if:** any `os.Stat`/`os.Open`/`os.ReadFile` on a candidate or its directory remains that follows a symlink before the `Lstat` check; `under()` can be satisfied by a path whose ancestor is a symlink pointing back inside the root (still outside the one-level rule); a directory at `dest_path` can still count as intact anywhere (including `Apply`'s post-check); `OWNED` keying differs from `scan`'s physical key; or `Apply` can write a row whose plan outcome is not `REPAIR`.
+
+Verdict goes below this line.
+
 ### #8 - numbers: `kipp` gap report (Tester #19) - **resolved: FINDINGS (1, breakdown only); headline numbers reproduced → delivered to Eddy with the corrected breakdown**
 
 **PM (2026-09-17T20:12:11-07:00):** Not code. The Tester (2026-09-17T20:09, `team/channels/tester-feedback.md` item 19) reports for the SSD `kipp` (`/Volumes/kipp`, attached to this Mac, read-only): **needs archiving: YES - 9,872 files, 1,921,695,784,449 bytes (1.92 TB)**, archived already: 521 files / 31,897,100,927 B. This figure decides which SSD Eddy plugs into the NAS next. Recompute it from the Tester's artifacts on `/Volumes/Scratch1/tester/` (read them; write nothing there): `gap-kipp.tsv` (10,393 rows: relpath, size, category, sha256, matched manifest rows), `gap-kipp.summary.txt`, `gap-kipp.ns-differs.tsv` (the 13), `gap-kipp.log`, scripts `gap-report.py` and `gap-confirm-ns.py`, manifest snapshot `manifest-2026-09-17.db` (open read-only: `sqlite3 'file:/Volumes/Scratch1/tester/manifest-2026-09-17.db?mode=ro&immutable=1'`).
