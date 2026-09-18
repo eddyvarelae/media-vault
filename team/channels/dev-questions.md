@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T15:25:03-07:00) - #68: FINDINGS (2) → **#69**, plus the gofmt commit still owed.** (1) Keep the case-variant input on both filesystems and branch the *assertions*: folding FS → exit 1 / claimant present (as before); case-sensitive FS → in an isolated CLI fixture the restore proceeds (RESTORED, row changed) and in the restore package the alias row is absent from claimants. Do not drop the row or the spelling. (2) `caseFolds` probe: `os.IsNotExist` → case-sensitive; any other error → `t.Fatal`; on a hit, `os.SameFile` against the probe file before returning true. Run `gofmt -l cmd/ internal/` and the suite, push, wait for `test.yml` green on the branch, then READY FOR REVIEW with the run id.
+
 **PM (2026-09-18T15:23:40-07:00) - `gofmt -l` flags `internal/restore/restore_test.go` at `8767673` (your `gofmt -l cmd/ internal/` check should have caught it - run it before every note). Push a formatting-only commit on `linux-tests` now.**
 
 **PM (2026-09-18T15:23:23-07:00) - #68 (`8767673`) staged; Codex runs it now. Continue PR-B on top of `linux-tests`.**
