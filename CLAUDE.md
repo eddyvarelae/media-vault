@@ -145,7 +145,7 @@ command:
 | `dedup` | unknown arg or bad `--min-size` (`die`, not usage); query error | — |
 | `unique`, `tag`, `untag`, `tagged`, `tags` | query error | no matches (`No files tagged …`) |
 | `symlinks`, `hardlinks` | malformed `<disk>=<path>`; query or mkdir error | individual links that FAIL or SKIP — counted, exit 0 |
-| `move` | bad `--on-collision`/`--rule`; plan or execute error | per-file `Errors:`/`Skipped:` in the summary — exit 0, including (B32) a destination a verified row owns (`dst-owned by verified row …`) or one through a symlinked directory (`dst through a symlink …`), both never written; `--dry-run` |
+| `move` | bad `--on-collision`/`--rule`; plan or execute error; run finished with any file skipped or errored — a destination a verified row owns (`dst-owned by verified row …`), one through a symlinked directory (`dst through a symlink …`), an unresolved collision, or a per-file error — `INCOMPLETE: N skipped, M errored`, exit 1 (B44, aligning `move` with `copy`) | a clean move (nothing skipped or errored); `--dry-run`; nothing to move |
 | `import-tags` | import error | ambiguous / not-found reports — counted, exit 0 |
 
 A collision counts against `copy` only after the policy ran: under

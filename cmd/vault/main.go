@@ -159,7 +159,9 @@ func main() {
 	case "hardlinks":
 		runLinks(m, args, os.Link, "hardlink")
 	case "move":
-		runMove(ctx, m, args)
+		if code := runMove(ctx, m, args); code != 0 {
+			os.Exit(code)
+		}
 	case "import-tags":
 		runImportTags(ctx, m, args)
 	default:
@@ -1075,7 +1077,12 @@ func runLinks(m *manifest.Manifest, args []string, linkFn func(target, link stri
 	fmt.Printf("Wrote %d %ss for tag %q at %s (skipped %d).\n", made, kind, tag, out, skipped)
 }
 
-func runMove(ctx context.Context, m *manifest.Manifest, args []string) {
+// runMove returns its status like runCopy so the exit decision is testable
+// in-process. 0 on a clean move (or --dry-run, or nothing to move); 1 when any
+// file was skipped or errored — a dst a verified row owns, a dst through a
+// symlinked directory, or an unresolved collision leaves the move INCOMPLETE,
+// the same contract as copy (B44).
+func runMove(ctx context.Context, m *manifest.Manifest, args []string) int {
 	// Pull positional args + flags out of the mixed slice.
 	dryRun := false
 	prefix := ""
@@ -1129,7 +1136,7 @@ func runMove(ctx context.Context, m *manifest.Manifest, args []string) {
 	}
 	if len(plan.Moves) == 0 {
 		fmt.Println("Nothing to move — no manifest entries for that src-disk.")
-		return
+		return 0
 	}
 
 	fmt.Printf("Move plan: %s → %s\n", srcDisk, dstDisk)
@@ -1145,7 +1152,7 @@ func runMove(ctx context.Context, m *manifest.Manifest, args []string) {
 
 	if dryRun {
 		fmt.Println("(dry-run; nothing moved)")
-		return
+		return 0
 	}
 
 	res, err := mvpkg.Execute(ctx, m, plan, dstDisk, collision, func(mv mvpkg.Move, status string) {
@@ -1162,6 +1169,14 @@ func runMove(ctx context.Context, m *manifest.Manifest, args []string) {
 
 	fmt.Printf("\nMoved: %d   Skipped: %d   Errors: %d   Bytes moved: %s\n",
 		res.Moved, res.Skipped, res.Errors, human(res.BytesMoved))
+	// Align with copy's INCOMPLETE (B44): any file the move did not carry over —
+	// skipped (dst owned by a verified row, dst through a symlink, an unresolved
+	// collision) or errored — leaves the move incomplete, so exit non-zero.
+	if res.Skipped > 0 || res.Errors > 0 {
+		fmt.Printf("INCOMPLETE: %d skipped, %d errored — not every file moved (see above)\n", res.Skipped, res.Errors)
+		return 1
+	}
+	return 0
 }
 
 func runImportTags(ctx context.Context, m *manifest.Manifest, args []string) {
