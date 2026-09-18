@@ -62,6 +62,32 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-17T20:08-07:00) - rev 4 item 2 (B24 `repair-dest`) done. READY FOR REVIEW.** Branch **`repair-dest`**, code tip **`e3c694b`**, two commits off `main` at `77964bd` (code-identical to `e4a4aed`; independent of `overwrite-guard`, which stays frozen at `c03eb68` under #6). Worktree clean, live but idle. **Rung: `tested`.** For the Tester's rev-2 item 4: the snapshot dry-run should use this tip once reviewed.
+
+`vault repair-dest <disk> <dest-dir> [--dry-run]`:
+- **`internal/repair`** (`06abba3`): `Build` lists the disk's rows; a row with no `dest_path` (`inventoried`) is counted and not examined; a row whose `dest_path` exists under the root is `intact`; otherwise `locate` reads the row's own directory, and for **each immediate subdirectory** stats `<dir>/<sub>/<basename>` - size must equal the row's (no read otherwise), then sha256 must equal the row's. Exactly one match → `REPAIR`; none → `NOT FOUND`; more → `AMBIGUOUS` (all candidates listed, nothing chosen). One level only, by construction (it never descends). `Apply` calls the new `manifest.UpdateDestPath` - `UPDATE files SET dest_path = ?` and **nothing else**; it errors unless exactly one row was affected - one row at a time, printing each after it is written. Build writes nothing.
+- **Command** (`06abba3`, `e3c694b` for tests/docs): `--dry-run` prints the plan and exits 0. A real run prints the plan, writes, then `Repaired N row(s). Status untouched — run vault verify …`; if any row is still `NOT FOUND`/`AMBIGUOUS`: `INCOMPLETE: N row(s) still without a destination this tool can back with a hash (a not found, b ambiguous)`, exit 1 - the run did not leave every row backed, and a silent 0 there is the pattern this project keeps paying for. A write error mid-run `die`s naming how many rows were already written (each was hash-backed before its write, so they stand). Arity → 2, unknown `--flag` → 1, a disk with no rows → 0. Same status-returning shape as `runCopy`.
+- **Tests:** `internal/repair` (temp dirs): repairable at `CLIP/`+`DCIM/`, same size other bytes (hashed, rejected), other size (never read - `BytesHashed` asserted), ambiguous (both candidates listed), two levels down (not found), row's directory gone, nested row (`Videos/V.MP4` → `Videos/2024/V.MP4`), intact, inventoried, another disk with the same broken shape untouched; `Apply` changes `dest_path` only (DeepEqual on every other field), second `Build` sees the repaired rows intact; `UpdateDestPath` on a missing row errors. `cmd/vault` `TestRepairDest` through `main()`: copy 4 → move 3 down (one with other bytes on disk) → `verify` `Missing: 3` → `--dry-run` shows 2 REPAIR / 1 NOT FOUND and rows DeepEqual → real run exit 1 with the INCOMPLETE line, exactly `dest_path` changed on the two → second run same → `verify` promotes 2 (`Verified: 3 … Missing: 1`) → restore the third by hand → `verify` 0 → `certify` 0; arity/flag/no-rows codes. **Mutation:** accept on size alone (`sum != ""`) fails both `TestBuildFindsOnlyHashBackedCandidatesOneLevelDown` and `TestRepairDest`; restored.
+- **Docs:** CLAUDE.md package-map row + exit-table row; README one paragraph under Verify.
+
+Evidence (Mac mini, `2026-09-17T20:06-07:00`, go1.27.0, at `e3c694b`): `gofmt -l .` empty, `go vet ./...` clean, `go test ./... -count=1` → 7 ok (`internal/repair` new). By hand, the Tester's #7 shape (`go build`, scratch):
+```
+$ vault verify media-sonya6700 dst        → Verified: 0   Mismatch: 0   Missing: 2
+$ vault repair-dest media-sonya6700 dst --dry-run
+Disk media-sonya6700 at dst: 2 rows with a dest_path, 0 intact, 2 missing (0 inventoried rows have no dest_path and were not examined)
+  REPAIR    C2286M01_2025.XML : C2286M01_2025.XML → CLIP/C2286M01_2025.XML
+  REPAIR    DSC04894_2025.JPG : DSC04894_2025.JPG → DCIM/DSC04894_2025.JPG
+Repairable: 2   Not found: 0   Ambiguous: 0   Bytes hashed: 15 B
+(dry-run; nothing written)                                          exit 0
+$ vault repair-dest media-sonya6700 dst   → repaired … ×2; Repaired 2 row(s). Status untouched   exit 0
+$ vault verify media-sonya6700 dst        → Verified: 2   Mismatch: 0   Missing: 0        certify exit 0
+```
+
+For the live run (PM's logged act, after the Tester's snapshot comparison): the container needs the manifest **read-write** and the archive root **read-only** is enough - `repair-dest` only stats and hashes under the root. On the real 195 rows the plan should read `195 rows … 195 missing`? No - it reads *all* `media-sonya6700` rows: `N rows with a dest_path, N-195 intact, 195 missing`, and hashes ≈1.15 GB (the Tester's `check195b.py` total, 1,154,361,035 B) - a few minutes on the NAS, not hours.
+
+Noticed, not acted on:
+- `repair-dest` does not check whether the candidate path is already some *other* row's `dest_path` (a dedupe pointer or another disk's row). A hash match still makes the pointer true, and two rows sharing a `dest_path` is what `deduped` already means, so I left it; the Tester's finding (0 of the 195 shas on any verified row) says it does not arise here. Say if you want it reported as a fourth outcome.
+
 **PM (2026-09-17T19:57:17-07:00) - item 1 accepted at `tested`; staged as review #5; start item 2 in parallel.** PM re-ran vet/gofmt/tests at `a6c74a5`: reproduces. Your schema reading is accepted as the implementation of the decision - the old file always wins, and the rename path is "copy the card under its own `<disk>` name", which the output now says; I am telling Eddy in one line, not reopening it. The same-size hash check stays (Deferred note in BACKLOG). Your `deduped`-recopy observation is **B30**. `overwrite-guard` is frozen under #5 - fixes only if it comes back FINDINGS. Meanwhile: **item 2 (B24 `repair-dest`) on a new branch `repair-dest` off `main`** (`f21b4c5` or later - `main` is team-only past `e4a4aed`), not off `overwrite-guard`. READY FOR REVIEW with the tip SHA as usual.
 
 **PM (2026-09-17T19:25-07:00) - framework v2.3 applied** (`team-framework` `b142b11`; ours was v2.1 `276e893`): `actors/pm.md` and `actors/reviewer.md` byte-copied; `TEAM.md` gained the Reviewer `</dev/null` invocation, seat-to-seat messaging, "Talking to the human", daemon-machine hygiene, and startup step 0 (framework check every PM boot). Nothing changes for Dev. FYI only.
