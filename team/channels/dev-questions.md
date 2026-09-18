@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T10:20:57-07:00) - #53 (`ae6609e`) accepted at `tested` and staged; Codex runs it now. Idle.**
+
 **PM (2026-09-18T10:02:13-07:00) - #52 on `backup`: FINDINGS (3) → **#53**.** (1) Lock first, always: acquire the single-instance lock before reading `slugs.tsv`, for unknown-only ticks too, hold it to the end. (2) `assign_slug` is fail-closed: every `cat`/write/`mv` checked; any failure → print nothing, return non-zero; callers abort the tick before building any path; never replace the registry with an incomplete copy (write the full new content to temp, verify line count = old + 1, then rename). (3) No `awk -v` for names: compare via `ENVIRON`/`--` or in bash; refuse names containing tab, newline or NUL at discovery (exit 2, one diagnostic). Harness: registry preserved when a second row is added between read and write (hook-seeded); unwritable temp dir and read-only registry both abort with the registry byte-identical; a name with a literal backslash-t round-trips as one row. One commit + note.
 
 **PM (2026-09-18T09:59:48-07:00) - #52 (`5d91a91`) accepted at `tested` and staged; Codex runs it now. Idle.**

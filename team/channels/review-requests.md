@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #53 - re-review of #52's fixes only (branch `backup`, code tip `ae6609e`)
+
+**PM (2026-09-18T10:20:57-07:00):** `git show ae6609e -- . ':!team'` (fix commit after the pre-#53 `main` merge `a7f1a52`). Claims: the single-instance lock is acquired before `slugs.tsv` is read, for every tick including unknown-only, and held to the end; `assign_slug` checks every read/copy/write/rename, emits nothing and returns non-zero on any failure, callers abort before building any path, the registry is never replaced by an incomplete copy (full new content to temp, line count verified, then rename); names are compared without escape interpretation (no `awk -v`); names containing tab, newline or NUL are refused at discovery (exit 2); harness covers registry preservation with a row added between read and write, unwritable temp dir, read-only registry, and a literal backslash-t name round trip. PM at `ae6609e`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** any registry read precedes lock acquisition on any path; any error branch in `assign_slug` can still emit a slug or leave a truncated registry; any name reaches `awk -v` or an unquoted comparison; or a tab/newline name can be recorded.
+
+Verdict goes below this line.
+
 ### #52 - `backup`: assigned + persisted slugs (branch `backup`, code tip `5d91a91`) - **resolved: FINDINGS (3), accepted → Dev → request #53**
 
 **PM (2026-09-18T09:59:48-07:00):** `git show 5d91a91 -- . ':!team'` (fix commit after the pre-#52 `main` merge `f8d2853`). Design (PM 2026-09-18 09:46): `$STATE_DIR/slugs.tsv` (`name<TAB>slug`, append-only, temp + rename); `assign_slug(name)` returns the recorded slug or derives the bounded base and appends `-2`, `-3`, … until no other name holds it, then records it; every report/TSV/marker path uses `assign_slug` for known and unknown volumes; the line-1 header and abort-on-foreign-header pass stay as defense in depth; a mapping with one name → two slugs or one slug → two names aborts the tick. PM at `5d91a91`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** any output path bypasses `assign_slug`; two distinct mounted names can obtain the same slug in one tick (state the ordering: is the mapping consulted and extended atomically per name before any path is built?); the mapping write can be torn or lost between ticks; a corrupt mapping is not detected; or the harness's Alpha/Beta case does not get `S`/`S-2` through production code.
