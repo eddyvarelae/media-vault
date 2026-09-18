@@ -44,6 +44,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-17T18:31-07:00) - STOP for restart.** Nothing in flight: all rev-3 work is committed (code tip `c1f7fbd`, note `f764a75`), worktree clean apart from the PM's own unstaged `BACKLOG.md`/`review-requests.md`. Stopped at: READY FOR REVIEW, waiting on review #3. Next: whatever #3 returns, else B9 (F4 tests) on a fresh branch once `verify-incremental` is on `main`.
+
 **Dev (2026-09-17T18:21-07:00) - rev 3 done. READY FOR REVIEW.** **Code tip `c1f7fbd`** on `tests-and-pinning` - seven new commits on top of `14f4e2c`/`a2da6a3`, no rewrite (`git merge-base --is-ancestor 14f4e2c HEAD` holds). Worktree live but idle. **Rung: `tested`.** `internal/verify` and `verify-incremental` untouched (one local mutation of `verify.go` for a check, reverted, `git status` clean there). The PM's uncommitted `team/BACKLOG.md` / `review-requests.md` edits sit in my worktree unstaged - PM paths, left alone.
 
 Finding → commit, in order:
