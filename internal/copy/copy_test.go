@@ -280,3 +280,38 @@ func TestFileRefusesSymlinkedDirectory(t *testing.T) {
 		noPartials(t, real)
 	}
 }
+
+// Review #24: the writer's own containment. A task whose DstRel climbs out
+// of the root, or is absolute, is refused before anything is created; a
+// parent directory that resolves outside the root is refused too.
+func TestFileRefusesDestinationsOutsideTheRoot(t *testing.T) {
+	base := t.TempDir()
+	src, dst := filepath.Join(base, "src"), filepath.Join(base, "archive")
+	mtime := time.Date(2024, 3, 9, 10, 0, 0, 0, time.UTC)
+	writeFile(t, filepath.Join(src, "x.mov"), "new clip", mtime)
+	writeFile(t, filepath.Join(base, "outside.mov"), "precious", mtime)
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"../outside.mov", "../../x.mov", filepath.Join(base, "outside.mov")} {
+		for _, replace := range []bool{false, true} {
+			task := scan.FileTask{RelPath: "x.mov", DstRel: rel, Size: 8, MtimeNs: mtime.UnixNano(), Replace: replace}
+			_, err := File(context.Background(), src, dst, task, "B")
+			if err == nil || !(strings.Contains(err.Error(), "climbs out of") || strings.Contains(err.Error(), "is absolute")) {
+				t.Errorf("DstRel %q Replace=%v: err = %v, want a containment refusal", rel, replace, err)
+			}
+		}
+	}
+	if got, _ := os.ReadFile(filepath.Join(base, "outside.mov")); string(got) != "precious" {
+		t.Fatalf("outside file written: %q", got)
+	}
+	noPartials(t, base)
+	// The physical half: a directory under the root that is a symlink out
+	// is caught by the component walk; Under is the belt.
+	if err := os.Symlink(base, filepath.Join(dst, "out")); err != nil {
+		t.Fatal(err)
+	}
+	if !Under(dst, filepath.Join(dst, "real", "x.mov")) || Under(dst, filepath.Join(dst, "out", "x.mov")) || Under(dst, filepath.Join(base, "outside.mov")) {
+		t.Errorf("Under: inside/through-link/outside decided wrong")
+	}
+}
