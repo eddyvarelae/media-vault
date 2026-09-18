@@ -6,6 +6,16 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #27 - small fixes: B31 dry-run read-only, B32 `move` owner check, B35 tars logging, B42 wording (branch `small-fixes`, code tip `92e1a51`)
+
+**PM (2026-09-17T23:04:41-07:00):** One commit off `main` `70d1fc2`: `git show 92e1a51 -- . ':!team'` (10 files, +387/-37). Dev's note: Dev 2026-09-17T23:05 (commit `1458517` on that branch). PM at `92e1a51`: vet/gofmt/bash -n clean, 9 packages ok (`internal/manifest` now tested).
+
+**Claims:** (B31) with `--dry-run` anywhere in the args, `main` opens an existing manifest via `manifest.OpenReadOnly` (`mode=ro`, no schema init, no journal change; proven by an attempted `CREATE TABLE` that must fail) or, when absent, `manifest.OpenEmpty` (in-memory) with a stderr notice; the config dir is not created; every write method refuses on a read-only handle. Stated: SQLite still creates `-shm`/empty `-wal` beside a WAL db on a read-only open. (B32) `move.Execute` builds the verified-owner index once and skips (per-file, exit 0 per `move`'s contract) any destination a verified row owns or that passes through a symlinked directory; the index also places empty-`dest_path` verified rows at `source_path`, which `copy`'s guard inherits (safe direction). (B35) `nas-tars-copy-all.sh` uses the B27 `log()` helper, one `tee`. (B42) `repair-dest` summary wording.
+
+**This is wrong if:** any `--dry-run` path can still reach a writable handle (trace every `manifest.Open*` call site and the flag detection - an arg like `--dry-run=false` or a positional literally named `--dry-run`?); `OpenReadOnly` can create the file when missing; `move` can rename onto a verified-owned path via a rule-rewritten destination that the index key does not match; the shared index change alters any `copy` refusal beyond adding empty-`dest_path` rows; or the tars script double-logs under nohup.
+
+Verdict goes below this line.
+
 ### #26 - B17 nightly tagger transfer (branch `tagger`, code tip `6b061f3`)
 
 **PM (2026-09-17T22:55:45-07:00):** Two commits off `main` `9a4b867`. Commit 1 `1508f40` is a byte-for-byte port of mini-server `5e7bac7` (`scripts/tagging/run-tagging.sh`, `tagging-helper.py`; Dev states sha256 equal to the originals - confirm against `~/Projects/mini-server` at `5e7bac7`, read-only). Review **Dev's changes**: `git diff 1508f40..6b061f3 -- . ':!team'` (7 files, +1186/-2 vs main; the harness `scripts/test/run-tagging.sh` is new). Design: `team/channels/dev-questions.md` Dev 2026-09-17T22:34 proposal (on the `restore` branch copy) + PM 22:43 GO; batch rules in `team/DECISIONS.md` 2026-09-17. PM at `6b061f3`: vet/gofmt/bash -n/py_compile clean, 8 packages ok (tagging harness ≈ 7 s).

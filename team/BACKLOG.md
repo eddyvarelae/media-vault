@@ -34,13 +34,14 @@ Maintained by the PM - ordering and scope are theirs alone. Fixed sections below
 - [ ] **B37** `scripts/*.sh` default image tag → `v0.2.1` (release rule in `docs/release.md`); until then runbooks pass `VAULT_IMAGE` explicitly. Dev, in `certs-out`.
 - [ ] **B42** `repair-dest` labels rows without a `dest_path` as `inventoried` in its summary line; the B39 rows are `verified` (Tester #26). Wording only. Dev, next touch of `internal/repair`.
 - [ ] **B43** `certify.WriteOutput` binds the leaf but not the parent directory between check and write (Dev, review #16 fix); binding needs `openat` = `os.Root` (Go 1.24, `Rename` 1.25) - a toolchain bump PR (`go.mod`, `golang:1.23-alpine` → 1.25). Mitigation today: `/volume1/docker/vault-certs` is root-owned. P2.
+- [ ] **B44** `move` exits 0 when it skips a verified-owned or symlinked destination (per-file `Skipped`); align with `copy`'s `INCOMPLETE` → exit 1 (Dev, review #27 note). P2.
 - [ ] **B32** `move` writes destinations with its own collision handling and does not consult `VerifiedOwner` (Dev noticed 2026-09-17). Until it does, the never-overwrite rule is `copy`'s only. Dev, after rev 4 - or fold into B10-era scrub work.
 - [ ] **B31** `--dry-run` still creates the config dir and initializes `manifest.db` before parsing flags (review #5 finding 2, pre-existing). Read-only open for dry-run. P2.
 - [ ] **B27** `nas-verify-certify-all.sh` writes every log line twice (`tee -a` under a redirecting nohup). Dev, any PR.
 
 ## P2
 - [ ] **B21** 152 probable duplicates (~0.09 TB, DJIFlip/GoPro broken-clock names); `vault dedup` exists. Deletion is Eddy's call - PM to stage the list with hashes for a decision after B6.
-- [ ] **B22** `run-backup.sh`, report-only (see DECISIONS 2026-09-15): on attach of a known SSD, content gap check → report, copy nothing. Template `launchd/com.varela.media-backup.plist.example`, gap tool `scripts/archive-gap.py` in mini-server. After B17.
+- [ ] **B22** `run-backup.sh`, report-only (see DECISIONS 2026-09-15): on attach of a known SSD, content gap check → report, copy nothing. **Shape approved 2026-09-17 23:08**: `vault gap <dir>` (Go, read-only, verified rows only, per-folder arithmetic) + `scripts/backup/run-backup.sh` (mini.env machine facts, snapshot first, allow-list `BACKUP_DISKS`, once per attach + per day, copies nothing, `go build` into state when stale). Branch `backup`, review #28.
 
 - [ ] **B10** Scrub schedule: re-verify rows older than N days (from the F4 design notes - a different feature, kept out of F4 on purpose).
 - [ ] **B11** HTML rendering of the certificate (README roadmap).
