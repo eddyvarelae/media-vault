@@ -205,6 +205,12 @@ def safe_rel(rel):
     is data, not trust (review #26)."""
     if not rel or os.path.isabs(rel) or rel.startswith(("/", "\\")):
         return False
+    # Any control character (below 0x20, or DEL) is refused: a tab or
+    # newline in a path would forge extra fields or records in the batch
+    # the shell reads (review #36); the rest are never legitimate in a
+    # camera path and would break framing or the log.
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7f for ch in rel):
+        return False
     parts = rel.replace("\\", "/").split("/")
     for c in parts:
         if c in ("", ".", ".."):
@@ -330,8 +336,12 @@ def cmd_select(a):
         total += size
         if a.limit and len(picked) >= a.limit:
             break
+    # Records are NUL-separated, fields tab-separated. safe_rel has already
+    # refused any tab/newline/NUL in a path, so both delimiters are
+    # unambiguous; the NUL framing is the belt to that brace (review #36).
+    import sys as _sys
     for row in picked:
-        print("\t".join(str(x) for x in row))
+        _sys.stdout.write("\t".join(str(x) for x in row) + "\0")
     walked_note = f" (walked: {' '.join(walked)})" if walked and tier == 2 else ""
     unsafe_note = f"; skipped {len(UNSAFE)} candidate(s) with unsafe or junk paths (first: {UNSAFE[0][0]}/{UNSAFE[0][1]})" if UNSAFE else ""
     print(f"selected {len(picked)} files, {total / 1e9:.2f} GB from tier {tier}{walked_note}; "

@@ -127,6 +127,21 @@ sqlite3 "$cfg/manifest.db" "INSERT INTO files (source_disk, source_path, dest_pa
   ('media-sonya6700', 'DCIM/.hidden.MP4', '', 100, 1, 'x', $now_ns, 'verified'),
   ('media-sonya6700', '#recycle/trash.MP4', '#recycle/trash.MP4', 100, 1, 'x', $now_ns, 'verified'),
   ('media-sonya6700', 'DCIM/._app.MP4', 'DCIM/._app.MP4', 100, 1, 'x', $now_ns, 'verified')"
+# Review #36: a row whose dest_path embeds a newline+tab tries to forge a
+# second batch record (id 999, cam '..', dest outside.MP4). safe_rel must
+# refuse the control chars; nothing must reach the forged camera.
+printf 'ok.MP4
+999	..	outside.MP4	1	1	manifest.MP4' > "$work/inject.name"
+python3 - "$cfg/manifest.db" "$work/inject.name" "$now_ns" <<'PY'
+import sqlite3, sys
+db, namef, now = sys.argv[1], sys.argv[2], int(sys.argv[3])
+name = open(namef).read()
+c = sqlite3.connect(db)
+c.execute("INSERT INTO files (source_disk, source_path, dest_path, size, mtime_ns, sha256, copied_at, status) VALUES (?,?,?,?,?,?,?,?)",
+          ("media-sonya6700", "DCIM/inject.MP4", name, 100, 1, "x", now, "verified"))
+c.commit(); c.close()
+PY
+mkfile "$media/outside.MP4" 202609010000 100     # the file a successful injection would reach
 sqlite3 "$cfg/manifest.db" "PRAGMA wal_checkpoint(TRUNCATE)"   # fold into the main db so the snapshot's rsync copies a consistent file
 # Public has files and no rows: walked, newest mtime first.
 mkfile "$media/Public/talk.mp4" 202508010000 700
@@ -135,7 +150,7 @@ mkfile "$media/Public/reports/x.mp4" 202509010000 100        # our own output di
 mkfile "$media/Public/.hidden.mp4" 202509010000 100
 manifest="$cfg/manifest.db"
 check "fixture: the manifest has the expected rows" \
-  test "$(sqlite3 "$manifest" "SELECT COUNT(*) FROM files WHERE status='verified'")" -eq 14
+  test "$(sqlite3 "$manifest" "SELECT COUNT(*) FROM files WHERE status='verified'")" -eq 15
 
 # ── how the script is run ─────────────────────────────────────────────────
 env_file="$work/mini.env"
@@ -194,7 +209,9 @@ check "dry run: the empty-dest_path row is selected by its source_path" grep -q 
 check "dry run: no climbing, absolute, reports/, hidden, #recycle or AppleDouble row is selected (review #26)" \
   test "$(grep -v '^selected ' "$out" | grep -Ec 'escaped|/etc/|reports/|\.hidden|#recycle|\._app')" -eq 0
 check "dry run: the skipped candidates are announced with a count and an example" \
-  grep -q "skipped 8 candidate(s) with unsafe or junk paths (first: " "$out"
+  grep -q "skipped 9 candidate(s) with unsafe or junk paths (first: " "$out"
+check "dry run: the injected row forged no '..' camera record" test "$(grep -cE '^  [.][.] ' "$out")" -eq 0
+check "dry run: nothing reached the outside.MP4 the injection aimed at" test "$(grep -c 'outside.MP4' "$out")" -eq 0
 check "dry run: tier 2 is not touched while tier 1 has pending files" test "$(count 'Public' "$(echo "$out")")" -le 1 -a "$(grep -c '^\s\+Backup\s' "$out")" -eq 0
 check "dry run: summary says selected 4 files from tier 1" grep -q "selected 4 files, .* from tier 1; pending before this run: tier 1 4, tier 2 3" "$out"
 check "dry run: no POLICY OVERRIDE line with defaults" test "$(count 'POLICY OVERRIDE' "$out")" -eq 0
@@ -349,15 +366,17 @@ mkfresh() { mkfile "$src/SonyA6700/DCIM/$1" 202612010000 111; "$vault" copy medi
 # A lock dir with no info yet is one being acquired, not a dead one.
 mkdir -p "$state/tagging.lock"
 run bash "$script" --limit 1 > "$out" 2>&1
-check "young lock without info: exit 1, treated as live, not taken over" bash -c "test $? -eq 1 && grep -q 'another run is acquiring the lock' '$logf' && test -d '$state/tagging.lock' && test ! -e '$state/tagging.lock/info'"
+check "info-less lock: exit 1, not taken over, dir kept" bash -c "test $? -eq 1 && test -d '$state/tagging.lock' && test ! -e '$state/tagging.lock/info'"
+rm -rf "$state/tagging.lock"
 
-# A dead lock (dead pid) is taken over by renaming it away; a fresh file
-# proves the run then proceeds; the dead dir is gone and the lock released.
-echo "999999 started earlier run=dead" > "$state/tagging.lock/info"; touch -t "$(date -v-2H +%Y%m%d%H%M)" "$state/tagging.lock"
+# Review #36: a dead lock is NOT taken over automatically - reported STALE
+# and left for a human; the run does not proceed.
 mkfresh takeover.MP4; : > "$FAKE_TAGGER_CALLS"
+mkdir -p "$state/tagging.lock"; echo "999999 started earlier run=dead" > "$state/tagging.lock/info"; touch -t "$(date -v-2H +%Y%m%d%H%M)" "$state/tagging.lock"
 run bash "$script" --limit 1 > "$out" 2>&1
-check "dead lock: taken over, run proceeds, old dir gone, lock released" \
-  bash -c "grep -q 'is no longer alive .* — taken over' '$logf' && test -s '$FAKE_TAGGER_CALLS' && test ! -e '$state/tagging.lock' && test -z \"\$(ls -d '$state'/tagging.lock.dead.* 2>/dev/null)\""
+check "dead lock: exit 1, STALE LOCK, dir kept, tagger never ran" \
+  bash -c "test $? -eq 1 && grep -q 'STALE LOCK' '$logf' && test -d '$state/tagging.lock' && test ! -s '$FAKE_TAGGER_CALLS'"
+rm -rf "$state/tagging.lock"
 
 # A failure right after acquiring the lock (corrupt state db) still releases it.
 mkfresh corrupt.MP4

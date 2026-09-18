@@ -140,8 +140,16 @@ with_sel() {  # with_sel <helper subcommand> [more args]: the subcommand with th
   local args=(); while IFS= read -r a; do args+=("$a"); done < <(sel_args)
   helper "$sub" "${args[@]}" "$@"
 }
-select_batch() {   # TSV on stdout: id, folder, rel_path, size, ts_ns, source
+select_batch() {   # NUL-separated records; fields tab-separated: id, folder, rel_path, size, ts_ns, source
   with_sel select --max-bytes "$(( TAG_BATCH_MAX_GB * 1000000000 ))" --limit "$limit" $tier2_only
+}
+# The camera field decoded from a record must be one of the folders this run
+# was configured for (review #36): even with framing, nothing downstream
+# builds a path from a camera name the config did not name.
+is_configured_folder() {
+  local f
+  for f in $TAG_SOURCES $TAG_SOURCES_TIER2; do [[ "$f" == "$1" ]] && return 0; done
+  return 1
 }
 iso() { "$TAGGER_PY" -c "import datetime,sys;print(datetime.datetime.fromtimestamp(int(sys.argv[1])/1e9).astimezone().isoformat(timespec='seconds'))" "$1"; }
 leftover_dirs() { ls -d "$SCRATCH_DIR"/tagging/*/ 2>/dev/null || true; }
@@ -162,15 +170,17 @@ if (( dry_run )); then
   [[ -d "$LOCK_DIR" ]] && echo "  NOTE: lock held at $LOCK_DIR ($(cat "$LOCK_DIR/info" 2>/dev/null))"
   leftover_dirs | while read -r d; do echo "  NOTE: leftover run dir on scratch (kept after a failed run): $(du -sh "$d" | tr '\t' ' ')"; done
   echo
-  errf="$(dirname "$SNAPSHOT")/select.err"   # inside the trapped dir: a failed selection leaves nothing behind
-  batch=$(select_batch 2>"$errf") || { echo "batch selection failed: $(cat "$errf")" >&2; exit 2; }
+  errf="$(dirname "$SNAPSHOT")/select.err"       # both inside the trapped dir: a
+  batchf="$(dirname "$SNAPSHOT")/select.batch"   # failed selection leaves nothing behind
+  select_batch > "$batchf" 2>"$errf" || { echo "batch selection failed: $(cat "$errf")" >&2; exit 2; }
   summary=$(cat "$errf")
-  while IFS=$'\t' read -r id cam dest size ts source; do
+  while IFS=$'\t' read -r -d '' id cam dest size ts source; do
     [[ -n "$id" ]] || continue
+    is_configured_folder "$cam" || { echo "  REFUSED: record names camera '$cam', not a configured folder"; continue; }
     if [[ "$source" == walk ]]; then via="mtime"; ref="walked, id $id"; else via="copied"; ref="manifest id $id"; fi
     printf '  %-10s %-52s %8.2f GB  %s %s  (%s)\n' \
       "$cam" "$dest" "$(awk -v b="$size" 'BEGIN{print b/1e9}')" "$via" "$(iso "$ts")" "$ref"
-  done <<< "$batch"
+  done < "$batchf"
   echo
   echo "$summary"
   exit 0
@@ -189,28 +199,24 @@ if [[ -t 1 ]]; then exec > >(tee -a "$LOG_FILE") 2>&1; else exec >>"$LOG_FILE" 2
 mkdir -p "$TAG_STATE_DIR"
 child="" finishing="" have_lock=""
 selected=0 pulled=0 tagged=0 wroteback=0 failed=0
+# The lock is never taken over automatically (review #36): mkdir is the
+# only way to acquire it, and any pre-existing lock - live, dead, or
+# info-less - makes this run refuse and leave the lock for a human to
+# inspect and remove. Automatic recovery cannot be made race-free with a
+# directory lock (two contenders can both believe a dead lock is theirs and
+# then race the snapshot), and a stuck nightly job that refuses loudly is
+# safer than one that silently steps on a peer.
 acquire_lock() {
   if mkdir "$LOCK_DIR" 2>/dev/null; then return 0; fi
   local info lock_pid lock_age_s
-  info=$(cat "$LOCK_DIR/info" 2>/dev/null || true)
-  lock_age_s=$(( $(date +%s) - $(stat -f %m "$LOCK_DIR" 2>/dev/null || date +%s) ))
-  if [[ -z "$info" ]]; then
-    if (( lock_age_s < 60 )); then log "another run is acquiring the lock ($LOCK_DIR, ${lock_age_s}s old, no info yet) — not starting"; return 1; fi
-    info="no info"
-  fi
+  info=$(cat "$LOCK_DIR/info" 2>/dev/null || echo "no info yet")
   lock_pid=${info%% *}
   if [[ "$lock_pid" =~ ^[0-9]+$ ]] && kill -0 "$lock_pid" 2>/dev/null; then
     log "another run is in progress (lock $LOCK_DIR: $info) — not starting"; return 1
   fi
-  if (( lock_age_s >= 24 * 3600 )); then
-    log "STALE LOCK: $LOCK_DIR is $(( lock_age_s / 3600 ))h old ($info) and its process is gone. Not clearing it automatically — inspect, then rmdir it."; return 1
-  fi
-  # Exclusive takeover: rename the dead lock away (atomic; a second taker
-  # loses the rename and stops), then create ours.
-  if ! mv "$LOCK_DIR" "$LOCK_DIR.dead.$$" 2>/dev/null; then log "the dead lock was taken over by another run — not starting"; return 1; fi
-  rm -rf "$LOCK_DIR.dead.$$"
-  if ! mkdir "$LOCK_DIR" 2>/dev/null; then log "lock reappeared during takeover — not starting"; return 1; fi
-  log "lock from a run that is no longer alive ($info, $(( lock_age_s / 3600 ))h old) — taken over"
+  lock_age_s=$(( $(date +%s) - $(stat -f %m "$LOCK_DIR" 2>/dev/null || date +%s) ))
+  log "STALE LOCK: $LOCK_DIR ($info), ${lock_age_s}s old, its process is gone or unknown. Not cleared automatically — inspect, then rmdir it by hand to let the job run again."
+  return 1
 }
 acquire_lock || exit 1
 have_lock=1
@@ -255,9 +261,10 @@ rm -f "$RUN_DIR/.snap"
 read -r _ rows newest mtime <<< "$(head -1 <<< "$snap")"
 log "manifest snapshot: $rows rows, newest copied_at $newest, NAS file modified $mtime (from $MANIFEST_DB)"
 grep '^WARN' <<< "$snap" | while read -r w; do log "$w"; done
-if ! batch=$(select_batch 2>"$RUN_DIR/.select"); then log "batch selection failed: $(cat "$RUN_DIR/.select")"; finish 2; fi
+BATCH="$RUN_DIR/.batch"
+if ! select_batch > "$BATCH" 2>"$RUN_DIR/.select"; then log "batch selection failed: $(cat "$RUN_DIR/.select")"; finish 2; fi
 log "$(cat "$RUN_DIR/.select")"; rm -f "$RUN_DIR/.select"
-selected=$(grep -c . <<< "$batch" || true)
+selected=$(tr -cd '\0' < "$BATCH" | wc -c | tr -d ' ')   # records are NUL-terminated
 if (( selected == 0 )); then log "nothing to do"; finish 0; fi
 
 # ── 4-8. per file: pull → tag → write back → verify → clean ───────────────
@@ -285,8 +292,11 @@ path_is_unsafe() {  # path_is_unsafe <folder> <rel>: prints why, or nothing
     [[ -L "$cur" ]] && { echo "$cur is a symlink"; return; }
   done
 }
-while IFS=$'\t' read -r -u 3 id cam dest size ts source; do
+while IFS=$'\t' read -r -u 3 -d '' id cam dest size ts source; do
   [[ -n "$id" ]] || continue
+  if ! is_configured_folder "$cam"; then
+    log "FILE (id $id) FAILED: record names camera '$cam', not a configured folder — refused"; failed=$((failed+1)); continue
+  fi
   rel="$cam/$dest"
   src="$MEDIA_ROOT/$rel"
   dst="$RUN_DIR/$rel"
@@ -322,7 +332,7 @@ while IFS=$'\t' read -r -u 3 id cam dest size ts source; do
     log "FILE $rel FAILED: $err (scratch copy kept at $dst)"
     record failed "" "$err"; failed=$((failed+1))
   fi
-done 3<<< "$batch"
+done 3< "$BATCH"
 
 # ── 9. summary, pending count, cleanup, exit code (all in finish) ─────────
 find "$RUN_DIR" -type d -empty -delete 2>/dev/null || true   # subtrees left by successes
