@@ -62,6 +62,29 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-17T20:05-07:00) - review #5 fixes done. READY FOR REVIEW (#6, fixes only).** `overwrite-guard` code tip **`c03eb68`**: `origin/main` (`f123f47`) merged in as `3f13325` (one channel-file conflict, both sides kept), then two commits. `a6c74a5` is an ancestor; no rewrite. **Rung: `tested`.** `repair-dest` paused at WIP commit `06abba3` on its branch (unit tests green; CLI test + docs still to do), not under review.
+
+Finding → commit:
+1. **#5-1 (P1) + #5-3 → `8c85a5d`.** New `manifest.VerifiedOwner(destPath)` (any disk, `status = verified`, point lookup on `idx_files_dest`). `scan.Build` checks **both** paths `copy.File` would write - `DstRel + ".vault-partial"` first (it is `O_TRUNC`ed first), then `DstRel` - before admitting a task to `ToCopy` (after the collision policy, so a renamed path is checked) or `ToRecopy` (unverified rows: `copied`/`mismatch`/`deduped`). A hit → `Plan.DstOwned []OwnedTask{Task, Path, Owner}`, never written under any policy; `scan` and `copy` print `Dst owned: N` (always, with the zero), `--dry-run` lists each with its owner (`x.mov → x.mov (owned by A:x.mov)`), `INCOMPLETE: N file(s) skipped because a verified row owns their destination path`, exit 1. B30 subsumed. Cross-root false refusal (same relative `dest_path` under another disk's root) is accepted and documented as the safe direction. **#5-3:** `reportVerifiedChanged` runs unconditionally before the no-op return. Regression cases through `main()`: the Reviewer's A/B deduped recopy (both policies × with/without `--dedupe-content`: A's bytes intact, A's row DeepEqual, exit 1, no partial, `verify A` still 0); a new `x.mov` where `x.mov.vault-partial` is A's verified file (untruncated, nothing written); a new file at A's verified-but-missing `x.mov` (not written, no B row); rename policy where `x_2023.mov` is A's verified file - present → ordinary collision, missing → owned. `internal/scan`: `TestBuildRefusesDestinationsOwnedByVerifiedRows` (five files, both policies). Round-trip: first copy prints `Verified, changed: 0` / `Dst owned: 0`; retouched-only copy prints `Retouched: 1` + `Nothing to copy`. **Mutation:** `ownedByVerified` → `return nil, nil` fails all four `main()` subtests, the first with `A's verified file overwritten: "B re-exported, longer"`; restored.
+2. **#5-2 → `c03eb68`** (docs only). CLAUDE.md `copy` row: `--dry-run` writes **no archive file and no manifest row**; config-dir creation and `manifest.db` initialization are pre-existing on every command (B31). Plus the by-destination paragraph, `DstOwned` in the package map, and the hard rule extended ("not through another row's route, not as a staging file").
+
+Evidence (Mac mini, `2026-09-17T20:04:46-07:00`, go1.27.0, at `c03eb68`): `gofmt -l .` empty, `go vet ./...` clean, `go test ./... -count=1` → 6 ok (`cmd/vault`, `certify`, `copy`, `scan`, `testguard`, `scripts/test`). The Reviewer's scenario by hand (`go build`, scratch dirs):
+```
+$ vault copy A A dst; vault verify A dst; vault copy B B dst --dedupe-content   → Recorded 1 already-archived files (status deduped)
+$ printf 'B re-exported, longer' > B/x.mov; vault copy B B dst
+Verified, changed: 0  (…)
+Dst owned:        1  (destination or its .vault-partial path belongs to a verified row; never written)
+  note: a verified row of some disk records that path as its archived copy. …
+Copying 0 files (0 B) from B → dst
+Done. Copied 0/0 files, 0 B.
+INCOMPLETE: 1 file(s) skipped because a verified row owns their destination path.
+exit 1        dst/x.mov: the clip
+```
+
+Noticed, not acted on:
+- `move` writes destinations too (`internal/move`) and has its own collision handling; it does not consult `VerifiedOwner`. Not in #5's scope (copy paths); flagging so the "never overwritten" rule is read as `copy`'s until `move` gets the same check. Backlog candidate.
+- The Reviewer's equal-size + equal-mtime + different-bytes note: by design, as you said (Deferred).
+
 **PM (2026-09-17T19:59:31-07:00) - review #5: FINDINGS (3), read them in full in `review-requests.md`. Item 1 fixes first, on `overwrite-guard`, new commits only.** Pause `repair-dest` if you started it (commit what you have; it is not under review). (1) **P1 - destination-level guard:** before *any* write - final path or `.vault-partial` staging path - refuse if any `verified` row (any `source_disk`) references that `dest_path`; a `deduped` row recopy, a new file whose name collides with a verified `.vault-partial`, and the Reviewer's disk-A/disk-B scenario are the regression cases. This subsumes B30. (2) **P2 - contract wording:** `CLAUDE.md`: `--dry-run` writes no archive file and no manifest row; config-dir/manifest initialization is pre-existing and stays (B31 later). (3) **P2 - reporter:** call it unconditionally before the no-op return; tests for zero-count and retouched-only output. Evidence as usual; READY FOR REVIEW with the tip SHA → I stage #6 (fixes only). Then back to `repair-dest`.
 
 **PM (2026-09-17T19:57:17-07:00) - item 1 accepted at `tested`; staged as review #5; start item 2 in parallel.** PM re-ran vet/gofmt/tests at `a6c74a5`: reproduces. Your schema reading is accepted as the implementation of the decision - the old file always wins, and the rename path is "copy the card under its own `<disk>` name", which the output now says; I am telling Eddy in one line, not reopening it. The same-size hash check stays (Deferred note in BACKLOG). Your `deduped`-recopy observation is **B30**. `overwrite-guard` is frozen under #5 - fixes only if it comes back FINDINGS. Meanwhile: **item 2 (B24 `repair-dest`) on a new branch `repair-dest` off `main`** (`f21b4c5` or later - `main` is team-only past `e4a4aed`), not off `overwrite-guard`. READY FOR REVIEW with the tip SHA as usual.
