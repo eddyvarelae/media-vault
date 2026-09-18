@@ -6,6 +6,16 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #28 - B22 `vault gap` + `scripts/backup/run-backup.sh` (branch `backup`, code tip `8b0d263`)
+
+**PM (2026-09-17T23:19:08-07:00):** Base pinned at `03d8e81` (= `tagger` #26 + `main` + `small-fixes` #27, which B22 builds on); review `git diff 03d8e81..8b0d263 -- . ':!team'` (13 files, +927/-13: new `internal/gap/{gap.go,gap_test.go}`, `cmd/vault/main.go` + test, new `scripts/backup/{run-backup.sh,README.md,com.varela.media-backup.plist.example}`, new `scripts/test/run-backup.sh`, `scripts/test/scripts_test.go`, `MINI_ENV` rename in `scripts/tagging/*`, `CLAUDE.md`). Design: Dev 2026-09-17T23:05 proposal + PM 23:04 GO (`team/channels/dev-questions.md`); decision 2026-09-15 in `team/DECISIONS.md` (report-only, copy nothing, attach polling). Merge order: #26, #27, then this. PM at `8b0d263`: vet/gofmt/bash -n clean, 10 packages ok.
+
+**Claims:** (1) `vault gap <dir> [--tsv]` is read-only by construction: manifest opened as for `--dry-run` (B31), size index over `verified` rows only, sha256 only on a size match, junk/`reports/`/`#recycle`/symlinks skipped, per-folder + total arithmetic with the `check A+N=M` on the line; exit 0 with the report regardless of the answer, 2 arity, 1 error. (2) `run-backup.sh`: allow-list `BACKUP_DISKS` (`|`-separated, whole-name match), boot/scratch dropped by device, unknown volumes logged once; due = attach identity (`stat -f %d:%i:%B`) not yet reported today; nothing due → exit 0 silent; snapshot via `tagging-helper.py snapshot` (torn → 2); `go build` into `$STATE_DIR/bin` only when missing or stamp ≠ HEAD, never for a `VAULT_BIN` handed in; copies and stages nothing; `--dry-run` creates nothing. (3) 35-check harness with fake volumes and a real manifest; volumes byte-identical after a tick.
+
+**This is wrong if:** any `gap` path can reach a writable manifest handle; a `copied`/`mismatch` row can count as archived; a symlinked volume entry or a volume named with `|` or a leading `-` can defeat the allow-list or the `stat`; the job can write anywhere but `$STATE_DIR` and the log (grep every redirect and `rsync`/`cp`); the `go build` can target the checkout or run for a handed-in binary; a preconditions failure can spam the log more than once an hour; or the 300 s tick can overlap itself (lock).
+
+Verdict goes below this line.
+
 ### #27 - small fixes: B31 dry-run read-only, B32 `move` owner check, B35 tars logging, B42 wording (branch `small-fixes`, code tip `92e1a51`)
 
 **PM (2026-09-17T23:04:41-07:00):** One commit off `main` `70d1fc2`: `git show 92e1a51 -- . ':!team'` (10 files, +387/-37). Dev's note: Dev 2026-09-17T23:05 (commit `1458517` on that branch). PM at `92e1a51`: vet/gofmt/bash -n clean, 9 packages ok (`internal/manifest` now tested).
