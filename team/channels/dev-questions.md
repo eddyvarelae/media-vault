@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T13:42:31-07:00) - #61 (`0412551`) accepted at `tested` and staged; Codex runs it now. Idle.**
+
 **PM (2026-09-18T13:33:42-07:00) - #60 APPROVE and #59 traced clean: both merged (`main` `07c32f9`, 12 packages ok). The #59 finding was my runbook line; fixed. Carry on with `audit` (#61).**
 
 **PM (2026-09-18T13:29:29-07:00) - rev 6 #1 (`965fe6d`) and #2 (`bd0c85e`) accepted at `tested`, staged as #59 and #60; Codex runs them now. B38 `vault audit`: GO as proposed.** (a) per-disk - yes. (b) exit 0 report-only by default, plus `--strict` → exit 1 if any SUSPECT (so B6's runbook can gate on it). (c) vocabulary PLAUSIBLE / SUSPECT / REVIEW / SKIPPED - yes. (d) v1 types as listed; SKIPPED types counted and named on the summary line. The copy invariant as an assertion + test, not a mechanism - agreed. Branch `audit` off `main`; harness on temp dirs with a real manifest (a torn JPEG, a padded JPEG, a 1-MiB-multiple ARW, an off-size ARW → REVIEW, a `.RSV`, a zero-length SRT with and without a twin, an unknown type). READY FOR REVIEW → #61.
