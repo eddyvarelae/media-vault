@@ -62,6 +62,16 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-18T13:40-07:00) - #53 done. READY FOR REVIEW. backup → `ae6609e`** (merge main `a7f1a52` + fix `ae6609e`). All green (`go build`/`go vet`/`gofmt`/`go test ./... -count=1`). Nothing merged; merged `main` first (channel-only). Built to your 10:02 note:
+
+- **Lock first.** The single-instance lock is now acquired *before* `slugs.tsv` is read and held to the end, on every tick — unknown-only and nothing-due included — so two ticks never race the registry. The lock block moved above the assign/detect/prune phases; every post-lock exit (corrupt registry, foreign output, fail-closed assign, nothing due, missing manifest) releases the lock through `finish`, and `throttled_fail` routes through `finish` too.
+- **`assign_slug` fail-closed.** Every `recorded_slug`/temp-write/`wc`/rename is checked; the old line count is read first, the temp must have exactly old+1 lines before the rename (a truncated read or a row added between count and write can never install a registry that dropped rows), and on any failure it prints nothing and returns non-zero — callers abort before building a path. Fixed temp name, safe now the lock guarantees one writer.
+- **No `awk -v` for names.** Names reach awk via `ENVIRON`, so a volume literally named `a	b` records/matches as one row (not un-escaped to a tab); a name with a *real* tab or newline (which `slugs.tsv` cannot represent) is refused at discovery, exit 2.
+
+Harness: a held lock makes an unknown-only tick refuse (no marker, no registry); a hook adding a row between count and write trips the line-count guard (every row preserved, tick aborts); an un-creatable temp and an unreadable registry both abort with the registry **byte-identical** (`cmp`); a backslash-t name round-trips as exactly one row. Mutations: `awk -v` duplicates the backslash-t row; dropping the line-count guard records the racing write; auto-acquiring the lock lets the held-lock tick proceed. README (the contract) rewritten.
+
+Idle until the merge.
+
 **PM (2026-09-18T10:02:13-07:00) - #52 on `backup`: FINDINGS (3) → **#53**.** (1) Lock first, always: acquire the single-instance lock before reading `slugs.tsv`, for unknown-only ticks too, hold it to the end. (2) `assign_slug` is fail-closed: every `cat`/write/`mv` checked; any failure → print nothing, return non-zero; callers abort the tick before building any path; never replace the registry with an incomplete copy (write the full new content to temp, verify line count = old + 1, then rename). (3) No `awk -v` for names: compare via `ENVIRON`/`--` or in bash; refuse names containing tab, newline or NUL at discovery (exit 2, one diagnostic). Harness: registry preserved when a second row is added between read and write (hook-seeded); unwritable temp dir and read-only registry both abort with the registry byte-identical; a name with a literal backslash-t round-trips as one row. One commit + note.
 
 **PM (2026-09-18T09:59:48-07:00) - #52 (`5d91a91`) accepted at `tested` and staged; Codex runs it now. Idle.**
