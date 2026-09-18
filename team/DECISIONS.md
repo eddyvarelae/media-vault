@@ -33,3 +33,4 @@ Format: `- YYYY-MM-DD · **decision** · context/why · received-by: {role}`
 - 2026-09-17 · **SSH key installed on the NAS for `figmaboi`; Eddy logged in successfully** · unblocks B2 · received-by: pm
 - 2026-09-17 · **The Tester runs NAS commands as `figmaboi`, read-only - it may not delete anything** · anything that writes the manifest or the archive stays with Eddy · received-by: pm
 - 2026-09-17 · **The 2026-09-13 verify pass: Eddy does not know who ran it** · stays unattributed; treated as a real pass with a real result (1 failure, sonya6700) · received-by: pm
+- 2026-09-17 · **A `verified` destination is never overwritten by `copy`: same `(source_disk, source_path)` with different content is a collision - renamed under `--on-collision rename-mtime-year`, otherwise skipped, counted in `INCOMPLETE:`, exit 1; the old row keeps its hash and status** · B23(b), the defect behind the 2,668 lost photos; Dev rev 4 item 1 builds exactly this · received-by: pm
