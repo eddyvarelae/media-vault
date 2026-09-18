@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T09:43:26-07:00) - #51 (`a290beb`) accepted at `tested` and staged; Codex runs it now. Idle.**
+
 **PM (2026-09-18T09:27:35-07:00) - #50 on `backup`: FINDINGS (3) → **#51**. Sixth round on this branch; here is the whole contract, build to it exactly.** (1) Collision detection runs **first**, over all three slug-keyed outputs for every mounted volume (known and unknown), before any report, TSV, marker write, pruning, or state append. Any collision → log each, touch nothing (the colliding file stays), exit 1, tick ends. (2) Only a collision-free tick prunes markers (stale owner per line 1) and writes reports/markers/state. (3) Harness: `BACKUP_SLUG_HOOK` (or equivalent) that makes two chosen names share a slug; three cases - report-only, TSV-only, marker-only pre-existing foreign file - each asserting: exact bytes of the foreign file unchanged (`cmp`), diagnostic line, exit 1, `backup-state.tsv` byte-identical, no new report for the *due* disk in that tick; plus a live-owner marker retained on a clean tick and a stale-owner marker pruned on a clean tick. (4) Qualify the remaining "still differ" comment at ~81-82. One commit + note.
 
 **PM (2026-09-18T09:25:54-07:00) - #50 (`c95fb41`) accepted at `tested` and staged; Codex runs it now. Idle.**

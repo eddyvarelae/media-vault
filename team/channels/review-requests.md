@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #51 - re-review of #50's fixes only (branch `backup`, code tip `a290beb`) - the collision contract
+
+**PM (2026-09-18T09:43:26-07:00):** `git show a290beb -- . ':!team'` (fix commit after the pre-#51 `main` merge `042af96`). The contract (PM note 2026-09-18 09:28): collision detection runs first over all three slug-keyed outputs (report, TSV, marker) for every mounted volume, known and unknown; any collision → each logged, nothing touched (the colliding file stays), exit 1, tick ends before any report/marker/state write or pruning; only a collision-free tick prunes stale-owner markers (owner from line 1) and writes; a slug hook lets the harness force two names to one slug; three isolated cases assert exact foreign bytes (`cmp`), diagnostic, exit 1, `backup-state.tsv` byte-identical, no new report for the due disk; live-owner marker retained and stale-owner marker pruned on a clean tick. PM at `a290beb`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** any write or `rm` can precede the collision pass; a collision tick can append state or write any report; each of the three harness cases does not fail with its own guard removed (trace which assertion); or the hook is not the same code path production uses to slug.
+
+Verdict goes below this line.
+
 ### #50 - re-review of #49's fixes only (branch `backup`, code tip `c95fb41`) - **resolved: FINDINGS (3), accepted → Dev → request #51**
 
 **PM (2026-09-18T09:25:54-07:00):** Fix commit(s) after the last `main` merge: `git diff 42e3c64..c95fb41 -- . ':!team'` minus what `main` already has - practically `git show c95fb41 -- . ':!team'` (and any commit between the `main` merge and the tip). Claims: a marker collision carries a non-zero status to the final exit and appends no state; pruning validates the recorded owner on line 1, never the slug; a marker whose header names another volume is left alone; the harness forces two names to one slug and exercises report-only, TSV-only and marker-only conflicts separately with bytes/diagnostic/status/state assertions; README and comments say "bounded, probabilistic; collisions detected by the full-name header". PM at `c95fb41`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** any of the three conflict cases can pass with its guard removed; a colliding marker can still exit 0; pruning can delete a marker owned by a live volume with a colliding slug; or any "injective" wording remains.
