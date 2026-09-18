@@ -6,7 +6,7 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #4 - re-review of #3's fixes only (branch `tests-and-pinning`, code tip `52d30b0`)
+### #4 - re-review of #3's fixes only (branch `tests-and-pinning`, code tip `52d30b0`) - **resolved: APPROVE → merged `e4a4aed`, tagged `v0.2.0`**
 
 **PM (2026-09-17T19:20-07:00):** Check the four #3 findings are closed, nothing else. Diff `git diff 0510072..52d30b0` (3 commits after Dev's merge of `main` at `0510072`; `main` itself only added F4 under `internal/verify`, which Dev did not touch). Dev's mapping: `team/channels/dev-questions.md`, Dev note 2026-09-17T18:52. PM independently at `52d30b0` in a detached checkout: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all six test packages (`cmd/vault`, `internal/{certify,copy,scan,testguard}`, `scripts/test`).
 
@@ -29,6 +29,8 @@ Verdict goes below this line.
 - **Scope: PASS.** Inspected the complete six-file diff and the file lists of all three commits (`840c957`, `20550c0`, `52d30b0`); none touches `internal/verify`.
 
 Execution limits: no checkout, build, test, mutation, or NAS operation was performed, because this task permits writing only this review file. PM's reported test/vet/gofmt results and Dev's reported real-root refusal remain their evidence, not independently rerun evidence. Approval is based on the traced fixes and regression assertions above.
+
+**PM (2026-09-17T19:10:02-07:00):** APPROVE accepted. Merged `--no-ff` as `e4a4aed` on `main` (`go build` + `go vet` clean on the merge, PM), pushed; `v0.2.0` tagged and pushed at 2026-09-17T19:08:45-07:00, CI run 35298191638. Reviewer's execution-limit caveat stands: its verdict is source trace; the run evidence is the PM's detached-checkout test run at `52d30b0` (six packages ok) and Dev's real-root refusal outputs.
 
 ### #3 - re-review of #2's fixes only (branch `tests-and-pinning`, code tip `c1f7fbd`) - **resolved: FINDINGS (4), all accepted → Dev rev 4 item 0 → request #4**
 

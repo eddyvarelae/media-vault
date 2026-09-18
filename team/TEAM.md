@@ -75,10 +75,10 @@ Branch policy: Dev works in its own worktree (`~/Projects/media-vault-dev`) on a
 
 **Resumed 2026-09-17 18:47 after the restart:** PM, Dev (Terminal window 406) and Tester (407) rebooted; worktrees and both NAS mounts survived. Boot lines + in-flight table: `team/archive/2026-09-17-pm-handoff.md`. SSDs attached now: `tars`, `kipp`, `case`, `Eddy's Media Vault`, `Scratch1` - `noahsarc` is not.
 
-- `main` tip = see `git log -1`; last code merge = `7cca025` (**F4 merged**, Reviewer APPROVE #1). Builds and vets clean. Zero test files on `main` until review #3 lands.
-- `tests-and-pinning` (Dev's worktree `~/Projects/media-vault-dev`): review #2 = FINDINGS (5); Dev rev 3 in progress - its last channel note says where it stopped.
-- Tester (`~/Projects/media-vault-tester`, detached): B2/B7 in progress from a manifest snapshot; last item says where it stopped.
-- NAS: DXP2800 `192.168.1.167`, SMB `figmaboi`; `~/mounts/media` and `~/mounts/docker` mount via `com.varela.mount-nas`. SSH enabled 2026-09-17, details unconfirmed.
+- `main` tip = see `git log -1`; last code merge = **`e4a4aed`** (tests-and-pinning, Reviewer APPROVE #4). **`v0.2.0` tagged on it 2026-09-17 19:08** - CI publishes the image; nothing on the NAS has pulled it yet. `go test ./...` covers six packages; CI now runs on `v*` tags only.
+- Dev (`~/Projects/media-vault-dev`): next branch `overwrite-guard` off `e4a4aed` - rev 4 item 1 (B23 defect, policy decided), then B24 `repair-dest`.
+- Tester (`~/Projects/media-vault-tester`, detached): B2 done (SSH as `figmaboi`, `sudo docker` works); B23(a) exhausted on attached disks; waiting on Dev for the B24 dry-run.
+- NAS: DXP2800 `192.168.1.167`, SMB + SSH as `figmaboi` (key); `~/mounts/media` and `~/mounts/docker` mount via `com.varela.mount-nas`. NAS clock is UTC-6 (Mini is UTC-7). `sudo docker` is password-less; so is `sudo bash` (B28).
 - Scope since 2026-09-17: every scheduled batch against the archive is ours (nightly tagger = B17, after rev 3).
 - **P0 (Tester, 2026-09-17): 2,668 SonyA6700 photos overwritten on Sep 1, not found on any attached SSD - B23. Nothing gets wiped.** 195 rows need a dest_path fix before verify can pass - B24. Archive is 8.20 TiB (not 3.3).
 - Source SSDs (B7 done): `tars`, `case`, `Eddy's Media Vault`, `kipp` (never copied, B26), and `Scratch1` = the former `noahsarc`, device-erased 2026-09-02 (Tester #17). The 2026-04-26 SonyA6700 source disk is unidentified. All five attached; agents read only.

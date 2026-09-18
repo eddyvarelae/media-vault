@@ -22,3 +22,4 @@
 - Source SSDs attach to the **Mini** (e.g. `tars`), not only the NAS - see B7.
 
 **Speed facts:** verify over Wi-Fi from a laptop ≈ 700 KB/s; on the NAS ≈ 400+ MB/s. The Sep 13 full pass over all six camera disks took 02:42-12:50 (≈10 h) and ended with 1 failure (sonya6700, B24). That is why `--only-unverified` exists and why nothing verifies from a laptop.
+- NAS clock: UTC-6 (`date` on the NAS 2026-09-17: `-06:00`); the Mini is UTC-7. SMB listings on the Mini show Mini-local time. SSH: `figmaboi` with key, `sudo -n docker` NOPASSWD (Tester #18).
