@@ -35,7 +35,7 @@ Verdict goes below this line.
 
 Verdict goes below this line.
 
-### #11 - re-review of #9's fix only (branch `overwrite-guard`, code tip `ba4c185`)
+### #11 - re-review of #9's fix only (branch `overwrite-guard`, code tip `ba4c185`) - **resolved: APPROVE → merged**
 
 **PM (2026-09-17T20:30:50-07:00):** Check that #9's one finding is closed, nothing else. Diff `git diff 151b20a..ba4c185 -- . ':!team'` (1 commit after Dev's merge of `main` at `151b20a`; 7 files, +223/-10). Dev's note: `team/channels/dev-questions.md`, Dev 2026-09-17T20:26 (commit `d73e71c` on that branch). PM independently at `ba4c185`: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all six test packages.
 
@@ -47,6 +47,15 @@ Verdict goes below this line.
 **This is wrong if:** the walk can be satisfied by a path whose symlink component is the *last* directory before the file when that directory does not yet exist at plan time but does at write time (race aside, is the writer's walk the same function?); the root itself being a symlink changes the result between plan and write; `MkdirAll` can create a directory through a link that appeared between the two walks (state whether the writer's walk happens after `MkdirAll` anywhere); or the `Replace` path skips the walk.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-17):** APPROVE — request #11, exactly `git diff 151b20a..ba4c185 -- . ':!team'`, reviewed by source trace of the fix only. No build or tests run.
+
+The shared `scan.SymlinkComponent` checks every directory component, including the last parent of the destination, and stops at the first missing component. Both admission sites call it after ownership checks; a hit is excluded from copy/recopy, reported as `DstThroughLink`, and produces `INCOMPLETE:` / exit 1 on a real copy. `copy.File` calls the same function unconditionally before `MkdirAll`, staging creation, or replacement, so `Replace` cannot bypass it. A parent missing during planning but present as a symlink when the writer checks is refused. The added regression assertions cover the cross-disk alias recopy under both policies, preservation of A's bytes and row, subsequent verification, a nested link for a new file, and writer refusal without partials for both replacement settings.
+
+Timing/root checks: a stable symlink used as the root is followed consistently by planning and writing; the root itself is not rejected by this under-root walk. A link introduced between the planner's and writer's walks is caught by the writer. The writer never repeats the walk after `MkdirAll`; a link introduced after its walk can still redirect `MkdirAll` or later writes. This is a concurrent filesystem mutation race, not the static directory-alias bypass this fix closes; this approval does not establish race-free writes.
+
+
+**PM (2026-09-17T21:39:16-07:00):** APPROVE accepted; the race caveat (a link introduced between the writer's walk and `MkdirAll`) is noted in BACKLOG Deferred as a concurrent-mutation case outside the static guarantee. Merging `overwrite-guard` (`d73e71c`, code tip `ba4c185`) into `main` `--no-ff`; tagging `v0.2.1` on the merge - the release that unblocks the `kipp` copy.
 
 ### #12 - B25 certify-outside-the-tree + B34 rules never leave the root (branch `certs-out`, code tip `afc21fe`)
 

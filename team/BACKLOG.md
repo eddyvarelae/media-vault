@@ -4,7 +4,7 @@ Maintained by the PM - ordering and scope are theirs alone. Fixed sections below
 
 ## P0 - blockers
 
-- [ ] **B23** **Data loss: 2,668 SonyA6700 photos (51.1 GB) overwritten 2026-09-01** (Tester #5, #14, #17). **(a) recovery - closed 2026-09-17, LOST:** absent from all five attached SSDs (`tars`, `kipp`, `case`, `Eddy's Media Vault`, `Scratch1`); `noahsarc` = `Scratch1`, device-erased 2026-09-02; the 2026-04-26 source disk is unknown to Eddy and no unformatted cards exist. Record: `team/archive/2026-09-01-sonya6700-lost-2668.tsv`. The stale April cert (B25) must not keep attesting them. **(b) defect - open:** decided 2026-09-17: a `verified` destination is never overwritten; same `(source_disk, source_path)` + different content = collision (rename under the flag, else skip + exit 1). Dev rev 4 item 1, in progress on `overwrite-guard`. Owner: Dev.
+- [ ] **B23** **Data loss: 2,668 SonyA6700 photos overwritten 2026-09-01.** (a) recovery **closed 2026-09-17, LOST** (all disks searched; `noahsarc` erased; Apr 26 source unknown; list `team/archive/2026-09-01-sonya6700-lost-2668.tsv`). (b) defect **done**: `overwrite-guard` merged `314416d`, `v0.2.1` (Reviewer #5→#11) - a `verified` destination is never overwritten: physical-path ownership, `O_EXCL` staging, symlink components refused. Item stays open only until the stale April cert is gone (B25).
 - [ ] **B24** 195 `media-sonya6700` rows have `dest_path` missing `CLIP/`/`DCIM/` (Tester #7; bytes verified 195/195). One-off manifest fix, snapshot first, PM-approved, before B6 can pass. Dev rev 4 item 2.
 
 ## P1
@@ -27,6 +27,7 @@ Maintained by the PM - ordering and scope are theirs alone. Fixed sections below
 - [ ] **B33** `repair-dest`: a candidate that is already another row's `dest_path` should be a fourth outcome `OWNED`, never chosen (Dev noticed 2026-09-17; does not arise on the 195). Dev, with the next `repair-dest` change.
 - [ ] **B35** `nas-tars-copy-all.sh` has the same `tee` double-logging pattern as B27 (Dev noticed 2026-09-17). One-line follow-up with the B27 helper. Dev, next small PR.
 - [ ] **B34** `ParseRules` accepts `..` in a rule's subdir, so `--rule` can route writes outside the destination root (Dev noticed 2026-09-17; the guard now sees through it but the rule itself is a foot-gun). Refuse `..` components in `--rule` for `scan`/`copy`/`move`. Dev, one line + test, next small PR.
+- [ ] **B37** `scripts/*.sh` default image tag → `v0.2.1` (release rule in `docs/release.md`); until then runbooks pass `VAULT_IMAGE` explicitly. Dev, in `certs-out`.
 - [ ] **B32** `move` writes destinations with its own collision handling and does not consult `VerifiedOwner` (Dev noticed 2026-09-17). Until it does, the never-overwrite rule is `copy`'s only. Dev, after rev 4 - or fold into B10-era scrub work.
 - [ ] **B31** `--dry-run` still creates the config dir and initializes `manifest.db` before parsing flags (review #5 finding 2, pre-existing). Read-only open for dry-run. P2.
 - [ ] **B27** `nas-verify-certify-all.sh` writes every log line twice (`tee -a` under a redirecting nohup). Dev, any PR.
@@ -42,6 +43,7 @@ Maintained by the PM - ordering and scope are theirs alone. Fixed sections below
 
 ## Deferred (decided, don't build now)
 
+- A symlink introduced under the destination root *between* the writer's component walk and its `MkdirAll` can still redirect the write (Reviewer #11 caveat) - concurrent filesystem mutation, outside the static guarantee; not built against.
 - Equal size + equal mtime + different bytes is not detected by `scan` - by design, scan is metadata-keyed and `verify` is the integrity pass (Reviewer #5 note, 2026-09-17).
 - Same-size + new-mtime verified files are re-hashed on every scan (no row refresh) - accepted 2026-09-17: one read per touched file per run, no unasked manifest write; revisit only if a scan becomes slow (Dev noticed).
 - `defer m.Close()` in `main` is skipped when a command exits non-zero (`os.Exit` bypasses defers) - pre-existing, harmless under WAL; no action (Dev noticed 2026-09-16).
