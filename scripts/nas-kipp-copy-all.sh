@@ -4,7 +4,12 @@
 # thrashes the SATA pool. Same shape as nas-tars-copy-all.sh.
 #
 #   KIPP_SRC=/usb/sdd1 sudo -E nohup ./nas-kipp-copy-all.sh >> /volume1/docker/kipp-copy.log 2>&1 &
-#   KIPP_SRC=/usb/sdd1 DRY_RUN=1 ./nas-kipp-copy-all.sh          # plans only, writes nothing
+#   KIPP_SRC=/usb/sdd1 DRY_RUN=1 sudo -E ./nas-kipp-copy-all.sh
+#     (plans only: no archive file, no manifest row - but the log is
+#      appended and every container still opens the live manifest, B31)
+#
+# docker needs root on the NAS, hence sudo -E for both; the outer >> is
+# opened by the invoking shell, so that user must be able to write the log.
 #
 # KIPP_SRC is the disk's path INSIDE the container (/mnt/@usb is mounted at
 # /usb read-only), found in runbook step 1. There is no default on purpose:
