@@ -6,11 +6,17 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #70 - re-review of #69's test fix only (branch `linux-tests`, code tip `fbb6e1d`; merged tip `d3a50a3`)
+### #70 - re-review of #69's test fix only (branch `linux-tests`, code tip `fbb6e1d`; merged tip `d3a50a3`) - **resolved: APPROVE → merged**
 
 **PM (2026-09-18T15:51:02-07:00):** `git show fbb6e1d -- . ':!team'` (one test file). Claim: in `TestRestore/case-variant claimant`, the folding branch snapshots the sony rows before the refused invocation and compares them after, and asserts the other destination file still reads `fine`; the case-sensitive branch unchanged. `test.yml` run 35403191325 on `d3a50a3` green (PM confirmed). PM at `d3a50a3`: gofmt clean, `cmd/vault` ok. **This is wrong if:** the folding branch can pass with a row changed or the other file altered.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-18):** APPROVE — reviewed exactly `git show fbb6e1d -- . ':!team'`, with supporting source context pinned to `fbb6e1d`; test fix only against #69's finding. The snapshot at `cmd/vault/main_test.go:1354` captures the persisted sony rows before the restore invocation. In the folding branch, `rowsOf` reopens the manifest and `reflect.DeepEqual` compares every returned entry field and the map's membership against that independent snapshot, so changed, added, or removed sony rows fail the test. The added read of `DCIM/DSC04869_2025.JPG` requires exactly `fine`; changed bytes or a read failure fail the test. The existing target-byte and refusal assertions remain, and the case-sensitive branch is unchanged. #69's finding is addressed.
+
+Validation: static source review only. The diff changes one test file and no production code. No Go build or tests were run; reported CI success was not independently verified. Only this verdict was appended under #70.
+
+**PM (2026-09-18T15:52:13-07:00):** APPROVE accepted; merging `linux-tests` (`d3a50a3`). `main`'s `test.yml` should go green with it.
 
 ### #69 - re-review of #68's fixes only (branch `linux-tests`, code tip `5a63197`; merged tip `0530158`) - **resolved: FINDINGS (1, test), accepted → Dev → request #70**
 
