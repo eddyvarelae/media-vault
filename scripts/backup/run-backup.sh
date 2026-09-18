@@ -78,13 +78,21 @@ today() { date +%Y-%m-%d; }
 # point. A re-attach mounts a new device, so the identity changes; a report
 # is owed once per identity and once per day while it stays attached.
 attach_id() { stat -f '%d:%i:%B' "$1"; }
-# slug maps a volume name to an injective, filesystem-safe report slug by
-# hex-encoding every byte. A single-case alphabet [0-9a-f] is used on
+# slug maps a volume name to a bounded, injective, filesystem-safe report
+# slug: the hex of the first 24 bytes (a short name stays legible in the
+# filename) then 16 hex of the whole name's sha256 (names that share that
+# 24-byte head - or run past it - still differ, because the hash is of the
+# whole name, not the head). A single-case alphabet [0-9a-f] throughout, on
 # purpose: a percent/underscore scheme keeps letter case, so "Disk" and
-# "disk" would collide on a case-insensitive $STATE_DIR and one report
-# would delete the other (review #41). od handles any bytes, incl.
-# non-ASCII and spaces.
-slug() { printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n'; }
+# "disk" would collide on a case-insensitive $STATE_DIR and one report would
+# delete the other (review #41). Bounded because hex of an entire long name
+# overran the filename limit and the report - the whole point - never landed
+# (review #43); ~65 chars now, whatever the name's length.
+slug() {
+  printf '%s-%s' \
+    "$(printf '%s' "$1" | head -c 24 | od -An -v -tx1 | tr -d ' \n')" \
+    "$(printf '%s' "$1" | shasum -a 256 | cut -c1-16)"
+}
 boot_dev=$(df -P / | awk 'NR==2 {print $1}')
 scratch_dev=""; [[ -n "$SCRATCH_DIR" && -d "$SCRATCH_DIR" ]] && scratch_dev=$(df -P "$SCRATCH_DIR" | awk 'NR==2 {print $1}')
 in_list() {  # in_list <name> <|-separated list>: whole-name match
@@ -231,7 +239,7 @@ log "manifest snapshot: $rows rows, newest copied_at $newest, NAS file modified 
 
 for name in "${due[@]}"; do
   mp="$VOLUMES_DIR/$name"; id=$(attach_id "$mp"); d=$(today)
-  slug=$(slug "$name")   # hex: distinct disks never share a report file, case included (review #38/#41)
+  slug=$(slug "$name")   # bounded hex+sha: distinct disks never share a report file, case included, any name length (review #38/#41/#43)
   report="$STATE_DIR/gap-$slug-$d.txt"; tsv="$STATE_DIR/gap-$slug-$d.tsv"
   rm -f "$report" "$tsv"   # the job owns its dated output; a --force re-report replaces it (vault gap's --tsv is O_EXCL against aliases, not against our own file)
   log "GAP $name: report starting ($mp, attach $id)"

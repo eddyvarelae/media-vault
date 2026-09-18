@@ -196,6 +196,30 @@ check "hex slug: 'disk' gets its own distinct report file" test -f "$state"/gap-
 check "hex slug: the two reports are different files" test "$(ls "$state"/gap-4469736b-*.tsv "$state"/gap-6469736b-*.tsv 2>/dev/null | sort -u | wc -l | tr -d ' ')" -eq 2
 rm -rf "$vols/disk"
 
+# review #43: the slug is bounded - hex of the first 24 bytes then 16 hex of
+# the whole name's sha256. A long (but legal, <=255-byte) volume name still
+# lands a report; the unbounded per-byte hex overran the 255-byte filename
+# limit so the report - the whole point of the run - never landed. Two names
+# sharing their first 24 bytes are still distinct, told apart by the hash of
+# the whole name (the shared head alone cannot).
+head24="AAAAAAAAAAAAAAAAAAAAAAAA"                       # 24 bytes -> 48 hex '41'
+pfx=$(printf '%s' "$head24" | od -An -v -tx1 | tr -d ' \n')
+longA="$head24$(printf 'a%.0s' $(seq 176))"             # 200-byte names, shared head
+longB="$head24$(printf 'b%.0s' $(seq 176))"
+cat > "$work/mini4.env" <<ENV
+SCRATCH_DIR="$scratch"
+BACKUP_DISKS="$longA|$longB"
+ENV
+runbound() { MINI_ENV="$work/mini4.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; }
+rm -rf "$vols"/*; mkdir -p "$vols/$longA"; mk "$vols/$longA/x.mov" "aaa"
+runbound
+rm -rf "$vols/$longA"; mkdir -p "$vols/$longB"; mk "$vols/$longB/y.mov" "bbb"   # distinct disk, attached after
+runbound
+check "bounded slug: a 200-byte name still lands a report (unbounded hex would overrun the filename)" test -n "$(ls "$state"/gap-"$pfx"-*.tsv 2>/dev/null)"
+check "bounded slug: names sharing a 24-byte head get distinct files" test "$(ls "$state"/gap-"$pfx"-*.tsv 2>/dev/null | sort -u | wc -l | tr -d ' ')" -eq 2
+check "bounded slug: each report filename stays well under the 255-byte limit" test "$(ls "$state"/gap-"$pfx"-*.tsv 2>/dev/null | head -1 | xargs -n1 basename | wc -c | tr -d ' ')" -lt 120
+rm -rf "$vols"/*
+
 echo
 if [ "$failures" -ne 0 ]; then echo "$failures check(s) failed"; exit 1; fi
 echo "all checks passed"
