@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eddyvarelae/media-vault/internal/manifest"
 	"github.com/eddyvarelae/media-vault/internal/scan"
 	"github.com/eddyvarelae/media-vault/internal/testguard"
 )
@@ -367,8 +368,12 @@ func TestFileRefusesTeeBypass(t *testing.T) {
 	defer func() { teeBypass = nil }()
 
 	task := scan.FileTask{RelPath: "f.bin", Size: int64(len("a non-empty clip")), MtimeNs: mtime.UnixNano()}
-	if _, err := File(context.Background(), src, dst, task, "diskA"); err == nil {
+	e, err := File(context.Background(), src, dst, task, "diskA")
+	if err == nil {
 		t.Fatal("File returned a row with the tee bypassed; the hashCovers assertion must refuse it")
+	}
+	if e != (manifest.Entry{}) {
+		t.Errorf("a refused copy returned a non-zero entry, not the zero value: %+v", e)
 	}
 	if _, err := os.Stat(filepath.Join(dst, "f.bin")); !os.IsNotExist(err) {
 		t.Errorf("a refused copy left a destination file: %v", err)

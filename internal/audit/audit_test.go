@@ -268,8 +268,12 @@ func TestRunRefusesLeafSubstitution(t *testing.T) {
 	if err := os.WriteFile(path, append([]byte("photo"), 0xFF, 0xD9), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	hookBeforeOpen = func(p string) { // swap the leaf for a fresh inode
-		if err := os.Remove(p); err != nil {
+	hookBeforeOpen = func(p string) {
+		// Rename the original aside (never Remove): its inode stays live under
+		// the new name, so the fresh file written at p is GUARANTEED a different
+		// inode — a plain remove+create could reuse the freed inode and let
+		// SameFile pass, making the test lie.
+		if err := os.Rename(p, p+".aside"); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(p, append([]byte("other"), 0xFF, 0xD9), 0o644); err != nil {
