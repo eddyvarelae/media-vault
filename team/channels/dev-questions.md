@@ -62,6 +62,18 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-18T21:00-07:00) - #62 done. READY FOR REVIEW. `audit` tip `6685d2a`** (merged `main` first, channel-only). All green (`go build`/`go vet`/`gofmt` [proper `test -z "$(gofmt -l)"` now]/`go test ./... -count=1`). Six findings on #61:
+
+- **JPEG EOI + only zeros to EOF.** PLAUSIBLE only when an `FF D9` is present *and* every byte after the last EOI to EOF is zero; an EOI with non-zero data after it, or none at all, is SUSPECT.
+- **Hardened tail read.** Open `O_NOFOLLOW` (leaf must not be a symlink), `os.SameFile` the opened fd against the Lstat'd file (no swap between stat and open), size from the **open fd**, and a **short read is an ERROR** (a file that shrank mid-read is not audited on a partial tail).
+- **Empty `.SRT` needs a twin.** PLAUSIBLE only when a video twin (same stem, a video ext) exists among the disk's rows; else REVIEW. `Run` builds the video-stem set in a first pass and passes `hasTwin` into the now-pure `Classify`.
+- **SKIPPED named `ext:count`.** `Result.SkippedExt` breaks the skip down by extension; the report prints `SKIPPED (type not audited): .mp4:2 …`.
+- **Copy assertion compares tee bytes to bytes written.** A `byteCounter` on the tee counts what the hasher saw; `copy.File` refuses to record a row unless that count equals the bytes written (and `== task.Size`), so the sha always covers exactly what landed.
+
+Tests: `Classify` gains EOI-then-nonzero (SUSPECT) and empty-SRT with/without twin; `Run` gains the twin/orphan split, the `ext:count` breakdown, and a symlink-leaf → ERROR. Mutations: an EOI-ignoring JPEG rule and a twin-ignoring SRT rule each fail. **Stated:** `O_NOFOLLOW`/`SameFile` are TOCTOU hardening behind the Lstat `IsRegular` check, so not independently black-box observable (a static symlink leaf is already refused). CLAUDE.md audit row updated. Also fixed my gofmt-check habit (`test -z "$(gofmt -l …)"`).
+
+Idle until review.
+
 **PM (2026-09-18T13:45:09-07:00) - #61 on `audit`: FINDINGS (6), all accepted → **#62**.** (1) JPEG PLAUSIBLE only if an `FF D9` is followed by nothing but `0x00` through EOF; `photo FF D9 garbage` → SUSPECT; fixtures for garbage-after-EOI and padded. (2) Read through the checked path: open the leaf with `O_NOFOLLOW` (and `O_RDONLY`), take the size from the opened file's `Stat`, compare its identity to the `Lstat` result (`SameFile`), refuse on mismatch; a directory-substitution case is documented as the residual race (same B43 class), stated in CLAUDE.md. (3) Empty `.SRT`: PLAUSIBLE only when a media twin (`.MP4`/`.MOV` with the same stem) resolves under the root; else REVIEW; fixtures both ways with a real manifest. (4) SKIPPED types aggregated as `ext:count` on the summary line and in the TSV; CLI test asserts the names. (5) `readTail` requires the full requested length (or the whole file when smaller than 64 KiB); a short read → ERROR (fails `--strict`); fixture: file truncated after `Lstat` via a test hook. (6) The copy assertion: compare the tee's byte count with bytes written (equal, including 0 for an empty file) and refuse otherwise; a test that bypasses the tee must fail. One commit + note.
 
 **PM (2026-09-18T13:42:49-07:00) - `gofmt -l` flags `internal/audit/audit_test.go` at `0412551`. Push a formatting-only commit on `audit` now (I check `git diff -w` is empty); Codex reviews the logic at `0412551` meanwhile.**
