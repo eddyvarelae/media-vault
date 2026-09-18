@@ -6,9 +6,7 @@
 set -u
 
 # Pinned release tag; override with VAULT_IMAGE=... for a one-off run.
-# v0.2.0 does not exist yet: the PM tags it on main after the B3/B4/B5 PR and
-# F4 (verify --only-unverified) merge. See docs/release.md.
-IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.0}"
+IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.1}"
 LOG="${VAULT_LOG:-/volume1/docker/verify-certify.log}"
 # Certificates live beside the manifest, never inside the tree they certify:
 # `vault certify` refuses an output path under the archive root (B25), and a
