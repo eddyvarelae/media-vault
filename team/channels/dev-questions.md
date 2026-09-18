@@ -62,6 +62,31 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-17T22:08-07:00) - rev 5 item 2 (B40 `vault restore`) done. READY FOR REVIEW.** Branch **`restore`**, code tip **`b13d6e8`**, one commit off `main` at `a112fcc` (code-identical to `314416d`: no `repair-dest`/`certs-out` code in it - so `manifest.AllRows` here and `AllDestPaths` on `repair-dest` will both exist after the merges; small, different shapes, I can fold one into the other in a follow-up). Worktree clean. **Rung: `tested`.**
+
+Built exactly as proposed, with your two additions: the `RESTORED` line carries `expect=<sha> prior_status=<status> prior_verified_at=<ns>`, and the plan always prints the claimants result - `Claimants:  none (no other row resolves to this file)` on the dry run. `dest-root` positional; no override on claimants (the refusal names each row with its status and says "restore each of them with its own invocation first, or decide").
+
+Order of checks as in the proposal (1 row → 2 destination physically, current bytes hashed and "row attests these bytes: yes/no" → 3 claimants, physical key → 4 replacement vs mandatory `--expect-sha` → 5 dry-run stop → 6 write via `copy.File` `Replace` + landed-hash re-check → 7 row to `copied` → 8 log line). Two details worth your eye: a **missing** destination is refused with "a missing destination is `vault copy`'s case, not restore's" - restore replaces, it does not create; and `dest_path` stays as it was, empty included (B40's row is a B39 empty-`dest_path` row; the file is located by `source_path`, verify's rule, and filling `dest_path` remains B39's repair).
+
+Tests: `cmd/vault` `TestRestore` - the B40 path end to end (torn tail of the same size as the original, as on the NAS; `certify` refuses while the row is `copied`; `verify --only-unverified` promotes only that row; a second `restore` says "already holds the expected bytes" and writes nothing), then eleven refusals (claimant, unknown row, destination missing, wrong `--expect-sha`, replacement not the stated file, replacement missing, short sha, no `--expect-sha`, `--expect-sha` without value, unknown flag → 1; wrong arity → 2) with the destination, the neighbour file and every row proven byte-identical afterwards and no `.vault-partial`. `internal/restore` (new writing package, guarded): empty `dest_path` located by `source_path`; symlinked directory / directory / symlink leaf refused; a case-aliased `deduped` claimant of another disk found while the target row itself is excluded, and the current sha recorded even on that refusal; `Apply` rewrites exactly sha/size/mtime/copied_at/verified_at/status. **Mutations** (restored): `--expect-sha` uncompared → the refusals; claimants ignored → both levels; status left `verified` → both levels. **Not mutation-killable, said plainly:** the post-rename landed-hash check - it guards a race between plan and write that no test can stage; it is the last line, not the first.
+
+Evidence (Mac mini, `2026-09-17T22:06:58-07:00`, at the tip): `gofmt -l .` empty, `go vet ./...` clean, `go test ./... -count=1` → 7 ok (`internal/restore` new). By hand, the B40 shape (`go build`, scratch; sha shortened here only):
+```
+$ vault restore sony DCIM/DSC04868_2025.JPG emv/DSC04868.JPG dst --expect-sha f9b72d9e… --dry-run
+Row:        sony:DCIM/DSC04868_2025.JPG  dest_path "DCIM/DSC04868_2025.JPG" → DCIM/DSC04868_2025.JPG
+            sha 9311b007…  size 24  status verified  verified_at 1789708018730725000  copied_at 1789708018717965000
+Current:    dst/DCIM/DSC04868_2025.JPG  sha 9311b007…  size 24  (row attests these bytes: yes)
+Claimants:  none (no other row resolves to this file)
+Replacement: emv/DSC04868.JPG  sha f9b72d9e…  size 24  (--expect-sha f9b72d9e…: match)
+(dry-run; no archive file, no manifest row)                                       exit 0
+$ vault restore … (same, no --dry-run)
+Row after:  sha f9b72d9e…  size 24  status copied  verified_at 0  copied_at 2026-09-18T05:06:58Z
+RESTORED sony DCIM/DSC04868_2025.JPG old=9311b007…:24 new=f9b72d9e…:24 expect=f9b72d9e… prior_status=verified prior_verified_at=1789708018730725000 from=emv/DSC04868.JPG
+next: vault verify sony dst --only-unverified                                      exit 0
+$ vault verify sony dst --only-unverified   → Verified: 1   Mismatch: 0   Missing: 0    certify exit 0
+```
+For the live act: `vault restore media-sonya6700 DCIM/DSC04868_2025.JPG /usb/<emv>/Backups/SonyA6700/DCIM/DSC04868.JPG /volume1/media/SonyA6700 --expect-sha b7ecf808…` (full sha from Tester #24), `--dry-run` first; the container needs `/volume1` rw and the EMV disk ro. After it, `verify media-sonya6700 … --only-unverified` promotes the row; the Sep 13 certificate still attests the old sha until the next `certify`.
+
 **PM (2026-09-17T22:02:33-07:00) - B40 `vault restore`: GO, as proposed.** (a) `dest-root` positional - agreed, it is not optional. (b) claimants refusal with no override - agreed; the refusal text names the second invocation. Two additions: the `RESTORED` log line also carries `expect=<sha>` and the row's prior `status`/`verified_at`, so the record shows what was attested before; and `--dry-run` must print the claimants check result even when it is empty ("claimants: none"). Branch `restore` off `main`. Tests as you listed. READY FOR REVIEW → next number after #17/#15/#16 are staged. Your three tips (`f54eb59`, `ca8e6b7`, `82d1539`) re-verified by me: vet/gofmt clean, 7 packages ok each; staged as soon as Codex clears #19/#20.
 
 **PM (2026-09-17T21:59:26-07:00) - #19 fixes accepted at `tested`, staged; Codex runs #19 then #20 (numbers).** Order after this: **#17** (`f4-tests` merge - post its tip), **#15**, **#16**. Then **rev 5 item 2 = B40** (read BACKLOG): the Tester found a `verified` NAS file that is a torn write (3 MiB image + 4.1 MB of zeros) whose row and certificate attest the corrupt bytes; the intact original is on an SSD. We need a deliberate, narrow recovery path that the guard does not forbid by accident - propose the shape in your channel before building (one paragraph), I answer within the hour.
