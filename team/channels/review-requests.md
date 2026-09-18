@@ -42,13 +42,22 @@ Verdict goes below this line.
 
 Verdict goes below this line.
 
-### #25 - `certs-out` merge resolution only (branch tip `100297a`; approved content `b0dccb9` #21 on top of `afc21fe` #12 fixes)
+### #25 - `certs-out` merge resolution only (branch tip `100297a`; approved content `b0dccb9` #21 on top of `afc21fe` #12 fixes) - **resolved: FINDINGS (1), accepted → Dev restores the assertion → request #29**
 
 **PM (2026-09-17T22:32:30-07:00):** Base pinned: `main` code tip `7672b04`. Review `git diff 7672b04..100297a -- . ':!team'` - it must be exactly the approved `certs-out` content (B25 `InsideArchive` + `--root` + `WriteOutput`, B34 rule check, B37 tag bump, the certify script routing to `$CERTS`) re-expressed on top of `main`, plus the one reconciliation Dev had to make: the two `scripts/test/nas-verify-certify-all.sh` files (f4-tests' single-logging test and certs-out's `$CERTS` routing test) merged into **one** shell test asserting both, and `scripts/nas-verify-certify-all.sh` carrying both the B27 `log()` helper and the `$CERTS` routing. Dev's note: Dev (commit `bb442aa` on that branch). PM at `100297a`: vet/gofmt/bash -n clean, 9 packages ok (`internal/move` now tested).
 
 **This is wrong if:** any f4-tests assertion (start/all-done once, six `done — cert at` lines, empty non-terminal stdout) or any certs-out assertion (six certify calls under `$CERTS`, none under `/volume1/media`, verify still on camera roots, `--root` passed) is missing from the merged test; the merged script double-logs or writes a cert into the tree; or the diff touches a file neither branch touched.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-18):** FINDINGS — request #25, merge resolution only, `git diff 7672b04..100297a -- . ':!team'`, compared with approved `b0dccb9` (including the `afc21fe` work and subsequent fixes) and f4-tests on `7672b04`.
+
+1. **The merged shell test loses the approved all-six camera-root assertion.** At `100297a:scripts/test/nas-verify-certify-all.sh:52-55`, extraction consumes `--root .*` and then checks only the output filename. The approved `b0dccb9` test required all six calls to match ` $certs/media-[a-z0-9]*\.cert\.json --root /volume1/media/`. Only DJIFlip's root is now checked explicitly (line 61). Failing input: keep DJIFlip correct but pass `--root /wrong` for the other five certify calls; the merged assertions accept those calls, whereas the approved assertion rejects them. Restore the six-call root-prefix assertion alongside the output-path checks. The production loop currently passes the correct root; this finding concerns the explicitly required preservation of approved assertions.
+
+Comparison otherwise found no unexpected paths: all 16 files outside the reconciled production script, shell test, and Go test wrapper have exactly the approved added/deleted lines. The production script retains B27's logging helper and B25's certificate routing; the merged test retains start/all-done counts and empty non-terminal stdout checks. Validation was source/diff comparison only; no builds or tests were run. Only this channel file was modified.
+
+
+**PM (2026-09-18T02:39:53-07:00):** FINDING accepted - the fold dropped the six-call `--root /volume1/media/` assertion. Dev restores it in the merged test (one commit); re-review as **#29, fix only**. Everything else in the resolution verified.
 
 ### #24 - B40 `vault restore` (branch `restore`, code tip `b70f35e`)
 
