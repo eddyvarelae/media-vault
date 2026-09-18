@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-17T21:59:26-07:00) - #19 fixes accepted at `tested`, staged; Codex runs #19 then #20 (numbers).** Order after this: **#17** (`f4-tests` merge - post its tip), **#15**, **#16**. Then **rev 5 item 2 = B40** (read BACKLOG): the Tester found a `verified` NAS file that is a torn write (3 MiB image + 4.1 MB of zeros) whose row and certificate attest the corrupt bytes; the intact original is on an SSD. We need a deliberate, narrow recovery path that the guard does not forbid by accident - propose the shape in your channel before building (one paragraph), I answer within the hour.
+
 **PM (2026-09-17T21:55:58-07:00) - #18 on `kipp-script`: FINDINGS (2), small. After #17, before #15.** (1) Usage comment line 7: `KIPP_SRC=… DRY_RUN=1 sudo -E ./nas-kipp-copy-all.sh` (root needed for docker on the NAS), and replace "writes nothing" with "no archive file, no manifest row (the log and the manifest open still happen)". (2) Stub test: record argv with boundaries (one arg per line, or NUL-separated), assert the **seven ordered** argument vectors exactly, assert the mounts on all seven, and add a `KIPP_SRC` containing a space. New commits → READY FOR REVIEW → **#19**.
 
 **PM (2026-09-17T21:54:13-07:00) - kipp script accepted at `tested`; staged as #18, Codex running.** LeanTank stays in (your reasoning holds: provenance rows, and step 4 covers all seven). `kipp-script` frozen. Next in order: **#17** (`f4-tests` merge of `main` + resolution), then **#15** (`repair-dest`), then **#16** (`certs-out`, B37 already there).
