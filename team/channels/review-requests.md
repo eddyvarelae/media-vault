@@ -6,6 +6,32 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #11 - re-review of #9's fix only (branch `overwrite-guard`, code tip `ba4c185`)
+
+**PM (2026-09-17T20:30:50-07:00):** Check that #9's one finding is closed, nothing else. Diff `git diff 151b20a..ba4c185 -- . ':!team'` (1 commit after Dev's merge of `main` at `151b20a`; 7 files, +223/-10). Dev's note: `team/channels/dev-questions.md`, Dev 2026-09-17T20:26 (commit `d73e71c` on that branch). PM independently at `ba4c185`: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all six test packages.
+
+**Claims:**
+1. `scan.SymlinkComponent(root, rel)` walks `Dir(rel)` under the root with one `Lstat` per component and returns the first symlink component; a missing component ends the walk. `Build` calls it after the ownership check at both admission sites; a hit → `Plan.DstThroughLink`, never written under any policy, reported, `INCOMPLETE:`, exit 1.
+2. `copy.File` runs the same walk first, before `MkdirAll`, and refuses `refusing to write through a symlink`; applies to new files and `Replace`.
+3. Regression: the Reviewer's exact `dst/alias → real` cross-disk recopy under both policies (A's bytes and row intact, exit 1, `verify A` 0); nested link `DCIM/100MSDCF → elsewhere` for a new file; writer test with target untouched and no partial.
+
+**This is wrong if:** the walk can be satisfied by a path whose symlink component is the *last* directory before the file when that directory does not yet exist at plan time but does at write time (race aside, is the writer's walk the same function?); the root itself being a symlink changes the result between plan and write; `MkdirAll` can create a directory through a link that appeared between the two walks (state whether the writer's walk happens after `MkdirAll` anywhere); or the `Replace` path skips the walk.
+
+Verdict goes below this line.
+
+### #12 - B25 certify-outside-the-tree + B34 rules never leave the root (branch `certs-out`, code tip `afc21fe`)
+
+**PM (2026-09-17T20:30:50-07:00):** Review `git diff 638d223..afc21fe -- . ':!team'` (merge-base with `main`; WIP `3ae065d` + `afc21fe`; 15 files, +370/-14: `internal/certify/{certify.go,certify_test.go}`, `internal/scan/scan.go` + test, `internal/move/move.go` + new `rules_test.go`, `cmd/vault/main_test.go`, `scripts/nas-verify-certify-all.sh`, `scripts/nas-test.sh`, new `scripts/test/nas-verify-certify-all.sh`, `scripts/test/scripts_test.go`, `CLAUDE.md`, `README.md`, `docs/install/ugos.md`). Context: six certificates currently live *inside* the trees they certify on the NAS and one stale one attests 51 GB that is gone (Tester #9); a cert row once blocked 39,219 files. Dev's note: Dev 2026-09-17T20:30 (commit `b25aa92` on that branch). PM independently at `afc21fe`: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all seven test packages (`internal/move` now has tests).
+
+**Claims:**
+1. (B25) `certify.InsideArchive(out, rows)` resolves the output directory physically (longest existing ancestor via `EvalSymlinks`, rest re-appended) and refuses if any ancestor up to `/` holds this disk's rows as regular files of the right size; it runs before `Build`, before signing, before `key.pem` is created. Stdout mode untouched.
+2. (B25 scripts) `nas-verify-certify-all.sh` writes certs to `CERTS="${VAULT_CERTS:-/volume1/docker/vault-certs}"` (`mkdir -p`), gains `LOG="${VAULT_LOG:-…}"`; a docker-stub shell test asserts all six certify calls target `$CERTS`, none `/volume1/media`, verify still runs against the camera roots.
+3. (B34) `scan.ParseRules` and `move.ParseRules` refuse an absolute subdir or any `..` component (`invalid rule`, exit 1); `v..ideos` stays legal.
+
+**This is wrong if:** `InsideArchive` can be bypassed by an output path whose *file* component is a symlink into the tree (the dir is resolved, is the leaf?); a tree whose rows all have a different size on disk (a fully overwritten tree) is not recognized as the tree, and whether that matters (state it); the check runs after any write; the script test can pass with the `$CERTS` change reverted; a rule subdir like `a/../b` (net-inside) is refused or accepted inconsistently between `scan` and `move`; or `nas-test.sh` still writes a cert into `/volume1/media`.
+
+Verdict goes below this line.
+
 ### #9 - re-review of #6's fix only (branch `overwrite-guard`, code tip `abc863e`) - **resolved: FINDINGS (1), accepted → Dev fixes → request #11**
 
 **PM (2026-09-17T20:20:48-07:00):** Check that #6's one finding is closed, nothing else. Diff `git diff 539317c..abc863e -- . ':!team'` (1 commit after Dev's merge of `main` at `539317c`; 7 files, +399/-55; `internal/copy` now changes - the writer - which is expected). Dev's note: `team/channels/dev-questions.md`, Dev 2026-09-17T20:14 (worktree `~/Projects/media-vault-dev`, commit `34cc608` on that branch). PM independently at `abc863e` in a detached checkout: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all six test packages.
