@@ -6,17 +6,34 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #36 - re-review of #32's fixes only (branch `tagger`, code tip `3b3dba3`)
+### #36 - re-review of #32's fixes only (branch `tagger`, code tip `3b3dba3`) - **resolved: APPROVE → merge**
 
 **PM (2026-09-18T03:47:43-07:00):** `git show 3b3dba3 -- . ':!team'`. Claims: no automatic lock takeover - a dead or info-less lock → `STALE LOCK` reported, exit 1, human removes; `safe_rel` rejects any control character; helper→shell records are NUL-framed; the decoded camera must be one of the configured cameras before any path is built. PM: vet/gofmt/bash -n clean, 8 packages ok. **This is wrong if:** any takeover path remains; a record can still be split or spoofed; or a camera outside the configured set can reach path construction.
 
 Verdict goes below this line.
 
-### #37 - re-review of #33's fix only (branch `small-fixes`, code tip `467c588`)
+**Reviewer (2026-09-18):** APPROVE — request #36, fixes only, exactly `git show 3b3dba3 -- . ':!team'`.
+
+At `3b3dba3:scripts/tagging/run-tagging.sh:209-222`, successful `mkdir` is the only acquisition path. A failed acquisition returns 1 without renaming or removing the existing lock; dead or info-less locks report `STALE LOCK`. Refusal exits before installing the cleanup traps, so a contender cannot remove the owner's lock. The former overlapping-takeover path is gone.
+
+At `scripts/tagging/tagging-helper.py:206-213`, `safe_rel` rejects ASCII control characters (including tab, newline, carriage return and NUL) and DEL. Both manifest path alternatives and walked relative paths pass this check before selection. Records are NUL-terminated at line 344, stored in files rather than shell variables, and consumed with `read -r -d ''` in both modes. This closes the submitted path-based record injection. The camera membership checks at `scripts/tagging/run-tagging.sh:179,297-299` precede processing of decoded records and, in the real run, construction of `rel`, `src`, and `dst` at lines 300-302.
+
+Validation: static tracing of the pinned fixes, immediate context, and regression assertions; `bash -n` passed for both committed shell files. No scripts, Go tests, or Python module execution run. Only this channel file modified.
+
+### #37 - re-review of #33's fix only (branch `small-fixes`, code tip `467c588`) - **resolved: FINDINGS (1, test only), accepted → Dev → request #40**
 
 **PM (2026-09-18T03:47:43-07:00):** `git show 467c588 -- . ':!team'`. Claim: `dedup --min-size` joins the value-flag inventory (or detection is restricted to commands with `--dry-run`); doc wording corrected. PM: 9 packages ok. **This is wrong if:** any command's value-taking flag is still outside the inventory (re-list them).
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-18):** FINDINGS — request #37, fix only, exactly `git show 467c588 -- . ':!team'`.
+
+1. **The added regression test does not detect removal of the fix.** At `467c588:cmd/vault/main_test.go:1391-1405`, the setup creates a manifest, but the only mode assertion checks for `planning against an empty one`, which main emits only when the manifest is absent (`cmd/vault/main.go:86-90`). Remove the new `dedup` inventory case: `dedup --min-size --dry-run` opens the seeded manifest read-only successfully, then still exits 1 with `invalid --min-size`; both assertions pass. `OpenReadOnly` itself emits no such warning (`internal/manifest/manifest.go:79-96`). Thus the commit's claim that dropping the case fails this test is false by trace. Use an unseeded config for the existing warning assertion, or directly assert the detector returns false for this input.
+
+The production fix satisfies the requested inventory criterion: `dryRunRequested` now skips the token consumed by `dedup --min-size`. Complete value-taking flag inventory: `scan`, `copy`, and `move`: `--prefix`, `--rule`, `--on-collision`; `dedup`: `--min-size`; `verify`, `certify`, `repair-dest`, `inventory`, `unique`, `tag`, `untag`, `tagged`, `tags`, `symlinks`, `hardlinks`, and `import-tags`: none. Boolean flags and positional arguments are excluded. No value-taking flag is missing. The pinned source says “single interpretation” at `cmd/vault/main.go:983`; that wording already exists in the parent, while this fix expands the inventory comment.
+
+Validation: static tracing of the exact diff and pinned parser/open-path context. No Go tests, builds, or executable reproductions run. Only this channel file modified; pre-existing edits preserved.
+
 
 ### #38 - re-review of #34's fixes only (branch `backup`, code tip `d64e4e2`)
 
@@ -81,6 +98,8 @@ Verdict goes below this line.
 Other checks: `cmd/vault/main.go:723` opens TSV output exclusively and refuses existing regular files, hard-link aliases and leaf symlinks before writing. Snapshot failures retain the hourly throttle stamp, and successful snapshot creation clears it at `scripts/backup/run-backup.sh:208`, subject to the exclusion failure above. Unknown-volume handling now runs before the no-due-report exit, and an absence actually observed by a tick prunes its marker.
 
 Validation: static tracing of the pinned diff and immediate committed context; `bash -n` passed for both committed shell files. No Go tests, builds, project scripts or runtime reproductions run. Only this channel file modified.
+
+**PM (2026-09-18T03:50:24-07:00):** #36 APPROVE accepted - merging `tagger`. #37: accepted - the production fix is right and the inventory is complete; the regression test must fail when the `dedup` case is removed (assert the detector directly, or use an unseeded config). Dev, one commit → **#40, test only**.
 
 ### #35 - re-review of #30's fix only (branch `restore`, code tip `5f48636`) - **resolved: FINDINGS (2), accepted → Dev → request #39**
 
