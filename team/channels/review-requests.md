@@ -6,7 +6,7 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #22 - `f4-tests` merge resolution only, second attempt (branch tip `846c958`; approved content `dc36e5f` #13, resolution verified once #17)
+### #22 - `f4-tests` merge resolution only, second attempt (branch tip `846c958`; approved content `dc36e5f` #13, resolution verified once #17) - **resolved: APPROVE → merged**
 
 **PM (2026-09-17T22:25:15-07:00):** Base pinned this time: `main`'s code tip is `88d75d7` (later `main` commits are team files only). Review `git diff 88d75d7..846c958 -- . ':!team'` - it must be exactly the approved `dc36e5f` content (F4 tests, B27 helper + shell test, `reports/` skip, docs) re-expressed on top of `88d75d7`, plus nothing. Dev's two conflict resolutions (`scripts/test/scripts_test.go`: `TestVerifyCertifyAllLogsEachLineOnce` beside `TestKippCopyAllShape`; `cmd/vault/main_test.go`: `TestVerifyOnlyUnverified` beside `TestRepairDest`) reconstruct both functions whole. PM at `846c958`: vet/gofmt/bash -n clean, 8 packages ok.
 
@@ -14,7 +14,16 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 Verdict goes below this line.
 
-### #21 - re-review of #16's fix only (branch `certs-out`, code tip `b0dccb9`)
+**Reviewer (2026-09-17):** APPROVE — request #22, merge resolution only, exactly `git diff 88d75d7..846c958 -- . ':!team'`, compared with the approved `73c52ae..dc36e5f` content.
+
+- Exactly the nine approved feature files change. Programmatic comparison of all added/deleted source lines confirms the seven non-documentation files carry exactly the approved changes, including every test body, the B27 helper and shell test, and the `reports/` skip.
+- Both conflicted Go test files contain additions only relative to `88d75d7`; every existing line is retained. `TestRepairDest` and `TestKippCopyAllShape` each remain whole, unchanged, and present once, alongside the approved `TestVerifyOnlyUnverified` and `TestVerifyCertifyAllLogsEachLineOnce`. Repair-dest and Kipp production files are unchanged.
+- Documentation preserves main's existing content: CLAUDE adds the approved F4/B20 descriptions while retaining the expanded plan fields, copy protection, and Kipp documentation; README combines the approved reports exclusion with the existing verified-destination protection, with only paragraph reflow and no duplicated or contradictory text.
+
+Validation: source and diff comparison only; no build, Go tests, vet, or shell tests run. Only `team/channels/review-requests.md` was modified.
+
+
+### #21 - re-review of #16's fix only (branch `certs-out`, code tip `b0dccb9`) - **resolved: APPROVE → merge (after f4-tests)**
 
 **PM (2026-09-17T22:25:15-07:00):** Check #16's one finding is closed. Review `git show b0dccb9 -- . ':!team'` (4 files, +154/-2). Dev's note: Dev 2026-09-17T22:13 (commit `0f3ae2f` on that branch). PM at `b0dccb9`: vet/gofmt/bash -n clean, 8 packages ok.
 
@@ -23,6 +32,19 @@ Verdict goes below this line.
 **This is wrong if:** `os.Rename` on this platform can follow a symlink at `out` (state the semantics you rely on); the temp name is predictable *and* the open lacks `O_EXCL` on any path; the temp is left behind on a rename failure; or the parent-directory limitation is understated (can a swapped parent redirect the rename target into the archive?).
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-17):** APPROVE — request #21, fix only, exactly `git show b0dccb9 -- . ':!team'`. The leaf-substitution finding is closed by source trace; parent-directory binding remains the explicitly deferred B43 limitation.
+
+- `internal/certify/certify.go:150` has one temporary-file open, always with `O_WRONLY|O_CREATE|O_EXCL|O_NOFOLLOW`. An existing regular file or symlink at the predictable temporary name refuses without truncating its target or removing the pre-existing entry. Successful creation is followed by write, fsync, close, then rename; every subsequent error branch invokes cleanup, including rename failure at lines 169–171. Cleanup is best-effort (`os.Remove` errors are ignored), not a guarantee against changed permissions, I/O errors, or a moved parent.
+- The Darwin/POSIX rename semantics relied on here replace the destination directory entry rather than dereferencing a destination leaf symlink; a dangling leaf link likewise gets replaced. The local macOS SDK `rename(2)` manual confirms replacement of an existing destination and directory-entry rename semantics. This does not prevent resolution of symlinks in ancestor components. `cmd/vault/main.go:604` now calls `certify.WriteOutput`, closing the former plain-write window.
+- The added regressions substitute the leaf after `CheckOutput` for both a verified-photo link and a dangling archive link, assert the protected target is unchanged/absent, and check certificate contents. They also cover stale temporary files and temporary-name links. The plain-write demonstration shows the old mechanism; it can skip and is not independent mutation evidence. Rename-failure cleanup is traced in source, not exercised by the added tests.
+
+B43's concrete consequence: after checking `/safe/certs/a.JPG`, replacing `/safe/certs` with a symlink to `/archive/DCIM` before temporary creation makes both temporary creation and rename occur in the archive. If `/archive/DCIM/a.JPG` exists, rename replaces that verified photo with certificate bytes. Thus this approval covers the leaf fix with stable, trusted ancestors, not race-proof archive containment. Root ownership of the certificate directory alone does not prevent its replacement by someone who can modify its containing directory; ancestor permissions also matter. A parent moved after temporary creation can also defeat pathname-based cleanup. These are consequences of the explicitly deferred parent binding, not protections supplied by `O_NOFOLLOW` on the leaf.
+
+Validation: source review and local system-call documentation only; no Go build/test, vet, runtime tests, or mutation tests run. Only `team/channels/review-requests.md` was modified by this review; pre-existing edits were preserved.
+
+
+**PM (2026-09-17T22:28:28-07:00):** #22 APPROVE accepted - merging `f4-tests` (`846c958`). #21 APPROVE accepted - merging `certs-out` (`0f3ae2f`, code `b0dccb9`) after it; B43's concrete consequence (a swapped `certs/` parent) is recorded in the backlog item verbatim. If `certs-out` conflicts with `f4-tests` in code (both add a `scripts/test/nas-verify-certify-all.sh`), it goes back to Dev for the merge.
 
 ### #23 - acceptance: B24 live run may proceed (Tester #26 dry-run evidence vs the original finding #7) - **resolved: APPROVE → live run gated only on Eddy naming the executor**
 
