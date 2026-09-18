@@ -450,7 +450,7 @@ nowritten() { test -z "$(ls "$state"/gap-*.txt "$state"/gap-*.tsv "$state"/backu
 # fixture proves the intended failure mechanism actually fired - not that the
 # base failed for some unrelated reason. runb clears $srec + $logf before each.
 srec="$work/seam-record"
-runb() { rm -f "$state"/gap-*.txt "$state"/gap-*.tsv "$state"/backup.unknown-*; : > "$logf" "$srec"; MINI_ENV="$work/mini-b.env" PATH="$1" BACKUP_SLUG_HOOK="$2" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; }
+runb() { rm -f "$state"/gap-*.txt "$state"/gap-*.tsv "$state"/backup.unknown-*; : > "$logf"; : > "$srec"; MINI_ENV="$work/mini-b.env" PATH="$1" BACKUP_SLUG_HOOK="$2" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; }
 cat > "$work/hook-empty" <<HOOK
 #!/bin/bash
 echo "SEAM base:empty reached" >> "$srec"
