@@ -87,15 +87,15 @@ Branch policy: Dev works in its own worktree (`~/Projects/media-vault-dev`) on a
 4. Skim `BACKLOG.md` and the `DECISIONS.md` tail.
 5. Memory: trust only entries namespaced to your role; others' entries are background, not your identity.
 
-## Current state (2026-09-18 09:06 - PM-verified, don't re-derive)
+## Current state (2026-09-18 10:50 - PM-verified, don't re-derive)
 
 **Resume file: `team/context/resume-2026-09-18.md` (pending table, traps).** Resumed 2026-09-17 18:47 after the restart: PM, Dev (Terminal window 406) and Tester (407) rebooted; worktrees and both NAS mounts survived. Boot lines + in-flight table: `team/archive/2026-09-17-pm-handoff.md`. SSDs attached now: `tars`, `kipp`, `case`, `Eddy's Media Vault`, `Scratch1` - `noahsarc` is not.
 
 - `main` tip = see `git log -1`; last code merges = `314416d` (overwrite-guard = `v0.2.1`), `6fbf20a` (kipp-script), `88d75d7` (repair-dest = **`v0.2.2`**, published), `0422b01` (certs-out) = `v0.2.3`, `4a028c8` (tagger), `b1277bd` (restore), **`12b5034`** (small-fixes). Next tag `v0.2.4` after `backup` lands. `copy` never overwrites a verified destination; `vault repair-dest` exists. Nothing on the NAS has pulled any image since v0.2.0; scripts default to `v0.2.0` on `main` until `certs-out` (B37) lands - runbooks pass `VAULT_IMAGE`.
-- Dev (`~/Projects/media-vault-dev`): one branch left - `backup` (B22, review #50 pending). Then LaunchAgent installs are PM acts after the Tester's `observed` runs.
+- Dev (`~/Projects/media-vault-dev`): one branch left - `backup` (B22, review #55 staged, Codex resumes 12:41; ten review rounds so far, all shell edge cases). Then LaunchAgent installs are PM acts after the Tester's `observed` runs.
 - Tester (`~/Projects/media-vault-tester`, detached): B29 done (Reviewer #8/#14/#20): to archive `kipp` 9,872 / 1.92 TB, `tars` 5,040 / 1.19 TB, EMV 1 file, `case` 0 = 14,913 / 3.11 TB. Found B40 (a certified torn file); archive-wide zero-tail scan running. B24 dry-run passed (#26) and is Reviewer-accepted (#23): live run per `team/context/runbook-b24.md` waits on Eddy naming the executor.
 - NAS: DXP2800 `192.168.1.167`, SMB + SSH as `figmaboi` (key); `~/mounts/media` and `~/mounts/docker` mount via `com.varela.mount-nas`. NAS clock is UTC-6 (Mini is UTC-7). `sudo docker` is password-less; so is `sudo bash` (B28).
 - Scope since 2026-09-17: every scheduled batch against the archive is ours (nightly tagger = B17, after rev 3).
 - **P0s: 2,668 SonyA6700 photos overwritten Sep 1 are LOST (B23a closed; B23b fixed in v0.2.1). One certified NAS file is a torn write (B40, recovery path being built). 195 rows need the B24 repair before verify can pass.** Archive is 8.20 TiB (not 3.3). Agents never wipe or write an SSD.
 - Source SSDs (B7 done): `tars`, `case`, `Eddy's Media Vault`, `kipp` (never copied, B26), and `Scratch1` = the former `noahsarc`, device-erased 2026-09-02 (Tester #17). The 2026-04-26 SonyA6700 source disk is unidentified. All five attached; agents read only.
-- Reviewer = `codex exec … </dev/null`, run by the PM. Codex has a usage limit: hit 2026-09-17 20:21 (→21:34), 22:30 (→02:35), 2026-09-18 03:53 (→**07:38**); ~11-15 reviews per window; queue them, never two at once. Seats boot in visible Terminal windows with `--remote-control`; nudges need a trailing empty `do script`.
+- Reviewer = `codex exec … </dev/null`, run by the PM. Codex has a usage limit: hit 2026-09-17 20:21 (→21:34), 22:30 (→02:35), 2026-09-18 03:53 (→07:38), 10:49 (→**12:41**); ~11-15 reviews per window; queue them, never two at once. Seats boot in visible Terminal windows with `--remote-control`; nudges need a trailing empty `do script`.
