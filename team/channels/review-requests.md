@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #56 - re-review of #55's fixes only (branch `backup`, code tip `4d7178a`)
+
+**PM (2026-09-18T12:56:52-07:00):** `git show 4d7178a -- . ':!team'` (fix commit after the pre-#56 `main` merge, if any). Claims: the failure seam is honored only when `BACKUP_TEST_MODE=1` is exported by the harness, with a fixture proving a normal tick ignores `BACKUP_FAIL_AT`; every injected operation and the shadowed `shasum` log `SEAM <op> reached` and each fixture asserts it; a `collision` seam fails `slug_held_by_other` after name lookup and base succeed and the fixture asserts the tri-state error abort; base-failure fixtures start from a seeded registry, `cmp` it after, and assert no `gap-*.txt`, no `gap-*.tsv`, no marker; the Go part (`internal/gap`, `cmd/vault`) is mergeable alone. PM at `4d7178a`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** the seam can act without test mode; any fixture passes without its `SEAM … reached` line; the collision seam fires before the base computation; or a base-failure fixture can pass with a TSV left behind.
+
+Verdict goes below this line.
+
 ### #55 - re-review of #54's fixes only (branch `backup`, code tip `d49ce54`) - **resolved: FINDINGS (4), accepted → Dev → request #56**
 
 **PM (2026-09-18T10:49:17-07:00):** `git show d49ce54 -- . ':!team'` (fix commit after the pre-#55 `main` merge, if any). Claims: `slug()` computes each component into a variable with status and non-emptiness checked before the final print (fixture: `shasum` shadowed to fail → abort, registry untouched); a `BACKUP_FAIL_AT=<lookup|copy|rename>` seam, honored only under the harness, makes exactly that operation fail after `check_slugs` passed, and each fixture asserts the seam was reached; every failure fixture asserts non-zero exit, registry byte-identical, no report/marker written; real tab and interior-newline name fixtures beside the trailing-newline one; tri-state labels as the code comments have them. PM at `d49ce54`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** any component failure in `slug()` can still print; the seam can be triggered outside the harness; any fixture passes without reaching its operation; or a tab/newline name can be recorded.
