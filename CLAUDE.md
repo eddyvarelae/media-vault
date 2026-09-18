@@ -35,6 +35,7 @@ runs them, so `go test ./...` is still the one command.
 | `internal/verify` | Re-hash destination rows → `verified` / `mismatch`; missing rows counted, not touched |
 | `internal/certify` | Refuses unless every row is `verified`; signs with `$VAULT_CONFIG/key.pem` (created on first use, mode 600) |
 | `internal/inventory` | NAS-side rows with no `dest_path` (`inventoried`) |
+| `internal/repair` | `repair-dest`: rows whose `dest_path` is missing under the root → same basename one directory down, kept only on size **and** sha256 match; `Apply` rewrites `dest_path` alone (`UpdateDestPath`), status untouched so `verify` still promotes |
 | `internal/dedup`, `internal/move`, `internal/importer` | Duplicate reports, manifest-aware moves, video-tagger imports |
 | `scripts/*.sh` | How work runs on the NAS: `docker run --rm … ghcr.io/eddyvarelae/media-vault:<tag> <command>`, sequential, as root via `sudo nohup` |
 
@@ -75,6 +76,7 @@ command:
 | `copy` | run finished `INCOMPLETE:` — any file failed, any unresolved destination collision, any intra-run duplicate left unarchived (stderr names which); interrupted between files; `die` on scan or manifest-write error | no-op, `--dry-run` (even with predicted collisions) |
 | `verify` | any mismatch, missing, or read error; `die` on cancel | — |
 | `certify` | any row not `verified` (`Cannot certify: …`); no rows for the disk; key/sign/marshal/write error | — |
+| `repair-dest` | unknown flag (`die`); query, read-dir or hash error (`die`); write error mid-run (`die`, names how many rows were already written — each was hash-backed, so they stand); after a real run, any row still `NOT FOUND` or `AMBIGUOUS` (`INCOMPLETE:` on stderr) | `--dry-run` (even with unrepairable rows); a disk with no rows |
 | `inventory` | `die` on walk error | per-file hash errors — counted in `Errors:`, exit 0 |
 | `dedup` | unknown arg or bad `--min-size` (`die`, not usage); query error | — |
 | `unique`, `tag`, `untag`, `tagged`, `tags` | query error | no matches (`No files tagged …`) |

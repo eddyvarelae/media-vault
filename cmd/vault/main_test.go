@@ -613,3 +613,110 @@ func TestExitCodeOrdering(t *testing.T) {
 		})
 	}
 }
+
+// TestRepairDest is B24 end to end: rows whose dest_path lost its directory
+// (the 195 media-sonya6700 rows) are `missing` to verify; repair-dest finds
+// the file one level down, proves it by size + sha256, rewrites only
+// dest_path; verify then promotes and certify passes. --dry-run prints the
+// same plan and writes nothing.
+func TestRepairDest(t *testing.T) {
+	cfg, src, dst := t.TempDir(), t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(src, "C0001.XML"), "clip metadata", t0)
+	writeFile(t, filepath.Join(src, "DSC0001.JPG"), "a photo", t0)
+	writeFile(t, filepath.Join(src, "DSC0002.JPG"), "photo two", t0)
+	writeFile(t, filepath.Join(src, "OK.MOV"), "fine", t0)
+	if _, _, code := vault(t, cfg, "copy", "sony", src, dst); code != 0 {
+		t.Fatalf("copy: exit %d", code)
+	}
+	// Reproduce the shape: the files live one directory down, the rows do
+	// not know. DSC0002's bytes on disk differ from its row - not repairable.
+	mv := func(name, sub string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Join(dst, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(filepath.Join(dst, name), filepath.Join(dst, sub, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mv("C0001.XML", "CLIP")
+	mv("DSC0001.JPG", "DCIM")
+	mv("DSC0002.JPG", "DCIM")
+	writeFile(t, filepath.Join(dst, "DCIM", "DSC0002.JPG"), "photo TWO", t0)
+
+	out, _, code := vault(t, cfg, "verify", "sony", dst)
+	if code != 1 || !strings.Contains(out, "Missing: 3") {
+		t.Fatalf("verify before repair: exit %d\n%s", code, out)
+	}
+	before := rowsOf(t, cfg, "sony")
+
+	out, _, code = vault(t, cfg, "repair-dest", "sony", dst, "--dry-run")
+	if code != 0 || !strings.Contains(out, "(dry-run; nothing written)") {
+		t.Fatalf("dry-run: exit %d\n%s", code, out)
+	}
+	for _, want := range []string{
+		"4 rows with a dest_path, 1 intact, 3 missing",
+		"REPAIR    C0001.XML : C0001.XML → CLIP/C0001.XML",
+		"REPAIR    DSC0001.JPG : DSC0001.JPG → DCIM/DSC0001.JPG",
+		"NOT FOUND DSC0002.JPG : DSC0002.JPG",
+		"Repairable: 2   Not found: 1   Ambiguous: 0",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dry-run output missing %q:\n%s", want, out)
+		}
+	}
+	if got := rowsOf(t, cfg, "sony"); !reflect.DeepEqual(got, before) {
+		t.Errorf("dry-run wrote rows:\n before %+v\n after  %+v", before, got)
+	}
+
+	out, errOut, code := vault(t, cfg, "repair-dest", "sony", dst)
+	if code != 1 || !strings.Contains(errOut, "INCOMPLETE: 1 row(s) still without a destination this tool can back with a hash (1 not found, 0 ambiguous)") {
+		t.Fatalf("repair: exit %d, stderr %q", code, errOut)
+	}
+	if !strings.Contains(out, "repaired  C0001.XML : C0001.XML → CLIP/C0001.XML") || !strings.Contains(out, "Repaired 2 row(s). Status untouched") {
+		t.Errorf("repair output:\n%s", out)
+	}
+	after := rowsOf(t, cfg, "sony")
+	for src, b := range before {
+		a := after[src]
+		switch src {
+		case "C0001.XML":
+			b.DestPath = "CLIP/C0001.XML"
+		case "DSC0001.JPG":
+			b.DestPath = "DCIM/DSC0001.JPG"
+		}
+		if !reflect.DeepEqual(a, b) {
+			t.Errorf("%s: row changed beyond dest_path:\n want %+v\n got  %+v", src, b, a)
+		}
+	}
+
+	// A second run has nothing left to repair but the same unrepairable row.
+	_, errOut, code = vault(t, cfg, "repair-dest", "sony", dst)
+	if code != 1 || !strings.Contains(errOut, "1 not found") {
+		t.Errorf("second repair: exit %d, stderr %q", code, errOut)
+	}
+	// verify now promotes the repaired rows; DSC0002 stays missing.
+	out, _, code = vault(t, cfg, "verify", "sony", dst)
+	if code != 1 || !strings.Contains(out, "Verified: 3   Mismatch: 0   Missing: 1") {
+		t.Fatalf("verify after repair: exit %d\n%s", code, out)
+	}
+	// Restore DSC0002 by hand (it was our own copy) and the disk certifies.
+	writeFile(t, filepath.Join(dst, "DSC0002.JPG"), "photo two", t0)
+	if _, _, code = vault(t, cfg, "verify", "sony", dst); code != 0 {
+		t.Fatalf("verify after restore: exit %d", code)
+	}
+	if _, _, code = vault(t, cfg, "certify", "sony"); code != 0 {
+		t.Fatalf("certify: exit %d", code)
+	}
+
+	// Arity and flags.
+	if _, _, code := vault(t, cfg, "repair-dest", "sony"); code != 2 {
+		t.Errorf("wrong arity: exit %d, want 2", code)
+	}
+	if _, _, code := vault(t, cfg, "repair-dest", "sony", dst, "--bogus"); code != 1 {
+		t.Errorf("unknown flag: exit %d, want 1", code)
+	}
+	if out, _, code := vault(t, cfg, "repair-dest", "nobody", dst); code != 0 || !strings.Contains(out, "0 rows with a dest_path") {
+		t.Errorf("unknown disk: exit %d\n%s", code, out)
+	}
+}
