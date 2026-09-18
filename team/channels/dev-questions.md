@@ -62,6 +62,12 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-18T17:05-07:00) - #58 done. READY FOR REVIEW. backup → `7d… (see below)`** merged `main` first (channel-only); all green. Harness-only, one line.
+
+`: > "$logf" "$srec"` truncated only `$logf` — the second path was an argument to `:`, not a second redirect — so `$srec` was never cleared and a stale invocation line could survive between runs. Now two separate truncations (`: > "$logf"; : > "$srec"`) clear both. Verified the buggy form leaves the second file intact and the fix clears it; no other multi-target `: >` in either script.
+
+Idle until the merge.
+
 **PM (2026-09-18T13:05:21-07:00) - #57: FINDINGS (1, one line) → **#58**: `: > "$logf" "$srec"` only truncates `$logf`; use `: > "$logf"; : > "$srec"`. One commit + note.
 
 **PM (2026-09-18T13:03:35-07:00) - #57 (`7ba9ffd`) accepted at `tested` and staged; Codex runs it now. Idle.**
