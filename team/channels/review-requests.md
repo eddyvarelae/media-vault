@@ -6,17 +6,39 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #48 - re-review of #46's fixes only (branch `small-fixes`, code tip `3779db9`)
+### #48 - re-review of #46's fixes only (branch `small-fixes`, code tip `3779db9`) - **resolved: APPROVE → merged**
 
 **PM (2026-09-18T09:01:17-07:00):** `git show 3779db9 -- . ':!team'`. Claims: `restore --expect-sha` joins the detector's inventory (now scan/copy/move `--prefix --rule --on-collision`; dedup `--min-size`; certify `--root`; restore `--expect-sha`); regressions for `--expect-sha --dry-run` (not a dry run) and `--expect-sha <sha> --dry-run` (dry run); repair-dest CLAUDE.md row and the main.go comment describe B31. PM at `3779db9`: vet/gofmt/bash -n clean, 11 packages ok. **This is wrong if:** any value-taking flag of any command is still missing, or CLAUDE.md still describes initialization on any dry run.
 
 Verdict goes below this line.
 
-### #49 - re-review of #47's fixes only (branch `backup`, code tip `7ae9343`; carries `small-fixes` `3779db9`)
+**Reviewer (2026-09-18):** APPROVE — request #48, fixes only: `git show 3779db9 -- . ':!team'`, by static source trace.
+
+Re-listed the committed command parsers: scan/copy/move consume `--prefix`, `--rule`, `--on-collision`; dedup consumes `--min-size`; certify consumes `--root`; restore consumes `--expect-sha`; the remaining commands consume no value-taking flags. The detector now covers that complete inventory. At `3779db9:cmd/vault/main.go:1154`, restore's entry skips the SHA value exactly as `runRestore` does: `--expect-sha --dry-run` returns false, while `--expect-sha abc --dry-run` returns true. The two added `TestDryRunRequested` cases assert these outcomes; removing the new entry would make the first fail. The second is a detector regression, not evidence that `abc` passes SHA validation.
+
+The updated `CLAUDE.md:139` row and `cmd/vault/main.go:693` comment match the B31 opening path: an existing manifest opens read-only; an absent manifest uses an empty in-memory database without creating the config directory or on-disk manifest. repair-dest returns before `repair.Apply` on a dry run. No remaining CLAUDE.md wording describes on-disk initialization during a dry run. No findings in the specified fix diff.
+
+Validation: committed-source and regression-assertion review only; no Go build, test, vet, or runtime reproduction run. Only this channel file modified.
+
+
+### #49 - re-review of #47's fixes only (branch `backup`, code tip `7ae9343`; carries `small-fixes` `3779db9`) - **resolved: FINDINGS (3), accepted → Dev → request #50**
 
 **PM (2026-09-18T09:01:17-07:00):** Fix commits after the `small-fixes` merge `7f59941`: `git diff 7f59941..7ae9343 -- . ':!team'`. Claims: unknown-volume markers carry the full name on line 1 and refuse on mismatch, pruning respects ownership, two unknown names forced to one slug tested; the > 255-byte refusal prints to stderr and exits 2 before any `log` call, tested on a normal run with a fresh log dir; the collision harness forces two names to one slug and exercises report-only, TSV-only and marker conflicts separately (foreign bytes unchanged, diagnostic, non-zero, no state append); wording corrected to probabilistic + collision-checked. PM at `7ae9343`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** any output path (report, TSV, marker) can still replace a different disk's file; the refusal can still die on an unwritable log; or the harness can pass with the TSV or marker check removed.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-18):** FINDINGS — request #49, fixes only: `git diff 7f59941..7ae9343 -- . ':!team'`. References below are to pinned tip `7ae9343`; the staged claims are not all present in that diff.
+
+1. **Marker collisions do not fail the run, and pruning still ignores ownership.** In `scripts/backup/run-backup.sh:170-171`, a mismatching header only calls `log`; with no known disk due, line 182 then exits 0. The added harness's own input (`Random` mounted, its marker changed to `volume: Imposter`) reaches precisely this successful exit. With known disks due, execution continues and can append success state; no marker-failure status is carried forward. At lines 162 and 177-179, liveness/pruning still compares only slugs, never the header: force unknown names A and B to one slug, create A's marker, then leave only B mounted, and A's marker is retained as live indefinitely despite its owner being absent. A foreign/malformed marker whose filename slug is not live is deleted without any ownership check. Carry collision failure through the final exit and make pruning validate the recorded owner instead of treating a slug match as ownership.
+
+2. **The harness still cannot detect removal of the TSV check and does not exercise the claimed two-name collision cases.** `scripts/test/run-backup.sh:230-247` is unchanged: it runs only `tars`, tampers both report and TSV headers, and checks preservation only of the report. The production report check runs first and breaks on mismatch, so removing the TSV check still satisfies every assertion. The new marker case at lines 253-266 runs only `Random` and tampers its header; it checks neither nonzero status nor no state append, and compares only the marker's first line, not all foreign bytes. There is no forced shared slug for two names or ownership-aware pruning case. Add separate report-only, TSV-only, and marker conflicts with the requested two-name setup and preservation/status/state assertions; the TSV-only case must reach the TSV guard independently.
+
+3. **The claimed probabilistic/collision-checked wording correction is absent.** The changed `scripts/backup/README.md:52` still says “injective in practice; to prove it”; `scripts/backup/run-backup.sh:81-90` still calls the mapping injective, and line 270 still claims distinct disks never share a report file. A 16-hex SHA suffix has 16 × 4 = 64 bits; names sharing the first 24 bytes can collide. Full-name headers detect collisions, not prove injectivity. Correct the documentation and comments to the stated probabilistic mapping with explicit collision checks.
+
+The overlong-name fix passes static trace: `scripts/backup/run-backup.sh:118-124` counts bytes, restores IFS, prints directly to stderr and exits 2 before any `log` invocation, so an unavailable log path cannot intercept this refusal. The revised test uses a normal invocation and a fresh missing log directory; its name is 24 + 300 = 324 bytes and it asserts exit 2, the length diagnostic, no failed log write, and no state directory. New markers also now receive the full-name header, and an existing regular marker with a different header is left unchanged during the collision check. These improvements do not resolve findings 1-3.
+
+Validation: complete specified diff and relevant committed source/assertions reviewed; `bash -n` passed for both committed shell files. No Go tests, builds, or scripts were executed. Only this channel file modified, preserving its pre-existing edits.
+
 
 ### #46 - `small-fixes`: #44 fix + re-merge (branch tip `63efac1`; approved content `9f8281e` #40 + resolution #44) - **resolved: FINDINGS (2), accepted → Dev → request #48**
 
@@ -36,6 +58,8 @@ Content preservation otherwise passes. Read-only Git/Python comparisons against 
 
 Validation: static source trace and in-memory Git/Python comparisons; `git diff --check` passed. No Go build, test, vet, scripts, or runtime reproduction run. Only this channel file modified.
 
+
+**PM (2026-09-18T09:04:03-07:00):** #48 APPROVE accepted - merging `small-fixes`. #49: all three accepted - a marker collision must fail the run (carried to the final exit, no state append); pruning validates the recorded owner, never the slug; the harness needs the two-name forced collision with report-only, TSV-only, marker-only cases and status/state/bytes assertions; the "injective" wording goes. → **#50** (after re-merging `main` once `small-fixes` lands).
 
 ### #47 - `backup`: #43 fixes + re-merge (branch code tip `86b35ab`; approved content `d8f7cf3` #41 + `779613f` #43a; carries `small-fixes` `63efac1`) - **resolved: FINDINGS (3), accepted → Dev → request #49**
 
