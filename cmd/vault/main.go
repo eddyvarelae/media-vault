@@ -699,8 +699,10 @@ func runRepairDest(ctx context.Context, m *manifest.Manifest, args []string) int
 
 	if dryRun {
 		// repair-dest never writes archive files; the only thing it can
-		// write is dest_path, and dry-run does not. (Opening the manifest
-		// initializes it when absent - every command does; B31.)
+		// write is dest_path, and dry-run does not. main opened the manifest
+		// read-only for this run (B31: --dry-run creates no config dir and no
+		// manifest, and an absent one is planned against an empty in-memory
+		// copy), so nothing here could write even if it tried.
 		fmt.Println("(dry-run; no manifest row written, and repair-dest never writes archive files)")
 		return 0
 	}
@@ -1214,10 +1216,11 @@ func human(n int64) string {
 // --prefix --dry-run) is a prefix, not a mode switch (review #27). The
 // per-command sets below are exactly the value-taking flags each parser
 // consumes (scan/copy/move: --prefix/--rule/--on-collision; dedup:
-// --min-size; certify: --root; the rest none); keep them in step with the
-// parsers, or a value that happens to read --dry-run (e.g. certify --root
-// --dry-run) is misread as the mode switch and the manifest opens
-// read-only (review #46).
+// --min-size; certify: --root; restore: --expect-sha; the rest none); keep
+// them in step with the parsers, or a value that happens to read --dry-run
+// (e.g. certify --root --dry-run, restore … --expect-sha --dry-run) is
+// misread as the mode switch and the manifest open disagrees with what the
+// command's own parser does (review #46/#48).
 func dryRunRequested(cmd string, args []string) bool {
 	var valueFlags map[string]bool
 	switch cmd {
@@ -1227,6 +1230,8 @@ func dryRunRequested(cmd string, args []string) bool {
 		valueFlags = map[string]bool{"--min-size": true}
 	case "certify":
 		valueFlags = map[string]bool{"--root": true}
+	case "restore":
+		valueFlags = map[string]bool{"--expect-sha": true}
 	}
 	for i := 0; i < len(args); i++ {
 		if valueFlags[args[i]] {
