@@ -82,8 +82,10 @@ unless every file is in `verified` status.
 
 ## How it works
 
-1. **Scan** walks the source directory and looks each file up in the manifest
-   (keyed on `source_disk` + relative path). Files not in the manifest are
+1. **Scan** walks the source directory (skipping `.DS_Store`-style junk and
+   any directory named `reports/` — the video tagger's output, not footage)
+   and looks each file up in the manifest (keyed on `source_disk` + relative
+   path). Files not in the manifest are
    queued to copy. Files whose size or mtime changed are queued to recopy.
    Everything else is skipped.
 

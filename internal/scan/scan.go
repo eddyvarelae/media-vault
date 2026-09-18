@@ -324,6 +324,13 @@ func isJunkFile(name string) bool {
 // Code/dev directories never belong in a media archive.
 func isJunkDir(name string) bool {
 	switch name {
+	// The video tagger writes its per-clip JSON under a `reports/` directory
+	// beside the footage (GoPro/Videos/reports/, iPhone/Videos/reports/).
+	// Those files are derived, have no manifest row, and are not footage to
+	// archive: a scan that sees them plans copies of tagger output. Decided
+	// 2026-09-17 (B20): skipped at any depth, by name.
+	case "reports":
+		return true
 	case "node_modules", ".git", ".svn", ".hg", "__pycache__",
 		".pytest_cache", ".tox", ".venv", "venv", ".gradle", ".m2",
 		"target", ".next", ".nuxt", ".turbo", ".pnpm-store",

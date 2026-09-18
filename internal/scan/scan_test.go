@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -167,6 +168,38 @@ func TestBuildAppliesPrefixRulesAndSkipsJunk(t *testing.T) {
 	for rel, dstRel := range want {
 		if got[filepath.FromSlash(rel)] != filepath.FromSlash(dstRel) {
 			t.Errorf("%s → %q, want %q", rel, got[filepath.FromSlash(rel)], dstRel)
+		}
+	}
+}
+
+// B20: the tagger's reports/ directories are skipped at any depth, by
+// exact name; files and directories that merely contain the word are not.
+func TestBuildSkipsReportsDirectories(t *testing.T) {
+	m := openManifest(t)
+	src, dst := t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(src, "reports", "a.json"), "tagger", t0)
+	writeFile(t, filepath.Join(src, "Videos", "reports", "b.json"), "tagger", t0)
+	writeFile(t, filepath.Join(src, "Videos", "reports", "deep", "c.json"), "tagger", t0)
+	writeFile(t, filepath.Join(src, "Videos", "GX010008.MP4"), "clip", t0)
+	writeFile(t, filepath.Join(src, "Videos", "reports.txt"), "a file, not a dir", t0)
+	writeFile(t, filepath.Join(src, "Videos", "reportsX", "d.mov"), "not that name", t0)
+	// Exact name only - and under its own parent, because on a case-folding
+	// filesystem Videos/Reports would be Videos/reports.
+	writeFile(t, filepath.Join(src, "Other", "Reports", "e.mov"), "case differs", t0)
+	p := build(t, m, src, dst, CollisionSkip)
+	got := rels(p.ToCopy)
+	want := []string{"Videos/GX010008.MP4", "Videos/reports.txt", "Videos/reportsX/d.mov", "Other/Reports/e.mov"}
+	if len(got) != len(want) {
+		t.Fatalf("ToCopy = %v, want exactly %v", got, want)
+	}
+	for _, rel := range want {
+		if got[filepath.FromSlash(rel)] == "" {
+			t.Errorf("%s missing from ToCopy: %v", rel, got)
+		}
+	}
+	for rel := range got {
+		if strings.Contains(rel, "reports/") {
+			t.Errorf("reports/ content planned: %s", rel)
 		}
 	}
 }
