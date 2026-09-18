@@ -6,17 +6,37 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #44 - `small-fixes` merge resolution only (branch tip `fd5fe06`; approved content `9f8281e` #40)
+### #44 - `small-fixes` merge resolution only (branch tip `fd5fe06`; approved content `9f8281e` #40) - **resolved: FINDINGS (1, merge interaction), accepted → Dev → request #46**
 
 **PM (2026-09-18T08:11:05-07:00):** Base pinned: `main` `bd1a384` (code tip `4a028c8`, the tagger merge). Review `git diff main..fd5fe06 -- . ':!team'` - it must equal the approved `small-fixes` content (B31 read-only dry-run open, B32 `move` owner guard, B35, B42, the #33/#37/#40 fixes) re-expressed on `main`, plus nothing. Dev's resolution decisions (Dev 2026-09-18T08:20): CLAUDE.md scan row from `main` (B34), copy row from `small-fixes` (B31), both script rows kept; `main_test.go` shared-tail seam reconstructed whole. PM at `fd5fe06`: vet/gofmt clean, 10 packages ok. **This is wrong if:** any `main` hunk (tagger, certs-out, f4-tests) is lost or altered; any approved `small-fixes` test body differs; or CLAUDE.md contradicts the merged code.
 
 Verdict goes below this line.
 
-### #45 - `restore` merge resolution only (branch code tip `cad0066`; approved content `a6955b7` #42)
+**Reviewer (2026-09-18):** FINDINGS — request #44, merge resolution only, `git diff main..fd5fe06 -- . ':!team'` against approved `9f8281e` and its ancestors `92e1a51`, `d84c7cf`, `467c588`.
+
+1. **The merged `certify --root` value flag is missing from the dry-run detector, contradicting the merged command contract.** At `fd5fe06:cmd/vault/main.go:1035-1049`, `dryRunRequested("certify", []string{"cam", "--root", "--dry-run"})` returns true, but the parser brought in from main consumes `--dry-run` as the root value at lines 553-558; certify has no dry-run mode. With a fresh VAULT_CONFIG, `vault certify cam --root --dry-run` now takes the empty-memory branch and prints the dry-run notice (lines 80-89), whereas main initializes the on-disk manifest before reporting the empty disk. With an existing manifest it instead opens read-only while certification still executes normally. Thus CLAUDE.md:115-119's promise that a flag value is not a mode switch, and that manifest opening and command execution agree, is false for the newly combined code. This is a merge interaction: the approved small-fixes base had no `certify --root` parser. Include that value-taking flag in the detector (or restrict detection to commands supporting dry-run), with a direct regression for this input.
+
+Content-preservation checks otherwise pass. An in-memory comparison against common ancestor `70d1fc2` reconstructed the exact merged contents of all six files changed on both sides, including CLAUDE.md and the shared-tail seam in `cmd/vault/main_test.go`; files changed on only one side retain that side's exact blob and mode, and the complete non-team file set matches. No main tagger/certs-out/f4-tests content or approved small-fixes test body was lost or altered beyond the approved edits. The scan row is main's B34 version, the copy row is the approved B31 version, and both script rows survive. Current main differs from pinned `bd1a384` only in team content.
+
+Validation: static source trace and read-only Git/Python content comparisons only. No Go build, test, vet, scripts, or runtime reproductions run. Only this channel file modified.
+
+
+### #45 - `restore` merge resolution only (branch code tip `cad0066`; approved content `a6955b7` #42) - **resolved: APPROVE → merged**
 
 **PM (2026-09-18T08:11:05-07:00):** Base pinned: `main` `bd1a384`. Review `git diff main..cad0066 -- . ':!team'` - it must equal the approved `restore` content (B40 `vault restore`, `copy.Escapes`/`Under` containment, identity-only claimants, `AllRows` fold, tests) re-expressed on `main`, plus nothing. Dev's decisions: CLAUDE.md scan row from `main` (B20), copy row from `restore` (containment), ownership-test comment from `restore`; `main_test.go` seam reconstructed whole. Note: `restore` does **not** carry B31, so its copy row still says dry-run "does still create" - correct for this branch; the wording converges when `small-fixes` lands first. PM at `cad0066`: vet/gofmt clean, 10 packages ok. **This is wrong if:** any `main` hunk is lost; any approved `restore` body differs; or the containment helpers regress an approved `copy` behavior.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-18):** APPROVE — request #45, merge resolution only, `git diff main..cad0066 -- . ':!team'` against approved `a6955b7` and its ancestors `b70f35e`, `d831dcc`, `5f48636`, `8979bcf`.
+
+Content preservation passes. Read-only Git/Python comparisons against common ancestor `ef7c615` reconstruct the exact merged `CLAUDE.md` and `cmd/vault/main.go` from both sides' edits. The complete `cmd/vault/main_test.go` also matches exactly after selecting restore's ownership comment and retaining restore's appended tests followed by main's appended tests; no test body is lost or altered. Every other non-team path retains the expected side's exact blob and mode, with no extra or missing files. The approved restore implementation, identity-only claimant checks, containment helpers, AllRows/repair fold, and their tests are unchanged. Main's tagger, certs-out, rule-validation and F4 content survives. Current main and pinned `bd1a384` have identical non-team content.
+
+The containment interaction passes by source trace: main's rule parsers reject absolute subdirectories and `..` components before copy planning; ordinary relative destinations, routed names (including `v..ideos/2024`), collision-renamed destinations and recopies remain within the writer's lexical and physical checks. `Under` resolves absolute root and parent paths, preserving dot/slash and symlinked-root handling, while the existing component walk still refuses symlinked directories below the root. The existing staging-file, replacement, hash and rename logic is unchanged. CLAUDE.md retains main's scan behavior and restore's containment description; its copy dry-run initialization wording matches this branch's unchanged manifest opening (B31 is absent).
+
+Validation: static source trace and in-memory content comparisons only; `git diff --check` passed. No Go build, test, vet, scripts or runtime reproductions run. Only this channel file modified; pre-existing edits preserved.
+
+
+**PM (2026-09-18T08:14:47-07:00):** #45 APPROVE accepted - merging `restore` first (order change: it is clean). #44: accepted - a merge interaction: `certify --root` (from `certs-out`) is a value-taking flag the detector does not know. Dev adds it (and a regression for `certify cam --root --dry-run`), one commit on `small-fixes` → **#46**; `backup` then merges `small-fixes` so it carries the same detector.
 
 ### #43 - `backup`: #41 fix + merge resolution (branch tip `032456c`; fix commit `779613f`; approved content `d8f7cf3` #41 minus the slug)
 
