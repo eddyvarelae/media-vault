@@ -78,6 +78,20 @@ today() { date +%Y-%m-%d; }
 # point. A re-attach mounts a new device, so the identity changes; a report
 # is owed once per identity and once per day while it stays attached.
 attach_id() { stat -f '%d:%i:%B' "$1"; }
+# pct_encode maps a volume name to an injective, filesystem-safe slug:
+# anything outside [A-Za-z0-9._-] becomes %HH, so "A B" and "A_B" differ
+# ("A%20B" vs "A_B") and never share a report file (review #38).
+pct_encode() {
+  local s=$1 out="" i c
+  for (( i=0; i<${#s}; i++ )); do
+    c=${s:i:1}
+    case "$c" in
+      [A-Za-z0-9._-]) out+="$c" ;;
+      *) out+=$(printf '%%%02X' "'$c") ;;
+    esac
+  done
+  printf '%s' "$out"
+}
 boot_dev=$(df -P / | awk 'NR==2 {print $1}')
 scratch_dev=""; [[ -n "$SCRATCH_DIR" && -d "$SCRATCH_DIR" ]] && scratch_dev=$(df -P "$SCRATCH_DIR" | awk 'NR==2 {print $1}')
 in_list() {  # in_list <name> <|-separated list>: whole-name match
@@ -119,10 +133,14 @@ fi
 # so a detach/reattach (new id) logs again, and stale markers are pruned.
 if (( ! dry_run )); then
   mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"
+  # Keyed by name only. A mount generation is not observable from /Volumes
+  # (device/inode/birth can all survive a remount), so a re-attach is logged
+  # again ONLY when a tick in between observed the volume gone and pruned its
+  # marker (review #38; stated in README). A detach/remount entirely between
+  # two ticks is not detected - the honest limit of polling /Volumes.
   live_unknown=""
   for u in "${unknown[@]+"${unknown[@]}"}"; do
-    id=$(attach_id "$VOLUMES_DIR/$u")
-    slug=$(printf '%s@%s' "$u" "$id" | tr -c 'A-Za-z0-9._@-' '_')
+    slug=$(pct_encode "$u")
     live_unknown="$live_unknown $slug"
     marker="$STATE_DIR/backup.unknown-$slug"
     [[ -f "$marker" ]] || { touch "$marker"; log "mounted volume '$u' is not in BACKUP_DISKS — ignored (add it to report it)"; }
@@ -155,10 +173,15 @@ ensure_vault() {
   if [[ -x "$VAULT_BIN" && -f "$stamp" && "$(cat "$stamp")" == "$head" ]]; then return 0; fi
   if [[ -x "$VAULT_BIN" && "$head" == unknown ]]; then return 0; fi   # not a checkout: use what is there
   command -v go >/dev/null || { log "vault binary missing or stale at $VAULT_BIN and go is not installed"; return 1; }
-  mkdir -p "$(dirname "$VAULT_BIN")" "$STATE_DIR/go/cache" "$STATE_DIR/go/mod" "$STATE_DIR/go/tmp"
+  mkdir -p "$(dirname "$VAULT_BIN")" "$STATE_DIR/go/cache" "$STATE_DIR/go/mod" "$STATE_DIR/go/tmp" "$STATE_DIR/go/home"
   # The managed build writes only under $STATE_DIR (review #28-5): its
   # object cache, module cache and temp workspace are all confined there.
-  if ! (cd "$REPO_DIR" && GOCACHE="$STATE_DIR/go/cache" GOMODCACHE="$STATE_DIR/go/mod" GOTMPDIR="$STATE_DIR/go/tmp" go build -o "$VAULT_BIN.tmp" ./cmd/vault) >> "$LOG_FILE" 2>&1; then
+  # Everything the build writes stays under $STATE_DIR (review #38-4): the
+  # caches and GOPATH by their env vars, and - because Go's telemetry and
+  # config land under $HOME/Library/Application Support regardless of
+  # GOTELEMETRY/GOTELEMETRYDIR - HOME itself is redirected under state for
+  # the build. GOENV=off ignores the user's go env file.
+  if ! (cd "$REPO_DIR" && HOME="$STATE_DIR/go/home" GOPATH="$STATE_DIR/go/path" GOCACHE="$STATE_DIR/go/cache" GOMODCACHE="$STATE_DIR/go/mod" GOTMPDIR="$STATE_DIR/go/tmp" GOENV=off GOTELEMETRY=off go build -o "$VAULT_BIN.tmp" ./cmd/vault) >> "$LOG_FILE" 2>&1; then
     log "go build failed (see above); keeping the previous binary if any"; rm -f "$VAULT_BIN.tmp"; [[ -x "$VAULT_BIN" ]]; return
   fi
   mv "$VAULT_BIN.tmp" "$VAULT_BIN"; echo "$head" > "$stamp"
@@ -172,24 +195,28 @@ ensure_vault() {
 # competitor can win.
 rc=0 have_lock="" finishing=""
 finish() { finishing=1; [[ -n "$have_lock" ]] && rm -rf "$LOCK_DIR"; exit "$rc"; }
+# Never taken over automatically (review #38, as tagger #36): mkdir is the
+# only acquisition; any pre-existing lock - live, dead or info-less - makes
+# this tick refuse and leave it for a human. A directory lock's takeover
+# cannot be made race-free, and a stuck report that refuses quietly (the
+# next tick tries again once a human clears it) is safer than two reports
+# racing the snapshot.
 acquire_lock() {
   if mkdir "$LOCK_DIR" 2>/dev/null; then return 0; fi
-  local info age_s pid
-  info=$(cat "$LOCK_DIR/info" 2>/dev/null || true)
-  age_s=$(( $(date +%s) - $(stat -f %m "$LOCK_DIR" 2>/dev/null || date +%s) ))
-  if [[ -z "$info" ]]; then
-    (( age_s < 60 )) && return 1   # being acquired right now; the next tick looks again
-    info="no info"
-  fi
+  local info pid
+  info=$(cat "$LOCK_DIR/info" 2>/dev/null || echo "no info yet")
   pid=${info%% *}
   if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then return 1; fi   # a report is running
-  mv "$LOCK_DIR" "$LOCK_DIR.dead.$$" 2>/dev/null || return 1                      # exclusive takeover: one winner
-  rm -rf "$LOCK_DIR.dead.$$"
-  mkdir "$LOCK_DIR" 2>/dev/null || return 1
-  log "lock from a run that is no longer alive ($info) — taken over"
+  # Dead or info-less: report it once (throttled) and leave it.
+  if [[ ! -f "$STATE_DIR/backup.stale-lock" ]] || (( $(date +%s) - $(stat -f %m "$STATE_DIR/backup.stale-lock") >= 3600 )); then
+    touch "$STATE_DIR/backup.stale-lock"
+    log "STALE LOCK: $LOCK_DIR ($info), its process is gone or unknown — not cleared automatically; inspect, then rmdir it by hand"
+  fi
+  return 1
 }
 acquire_lock || exit 1
 have_lock=1
+rm -f "$STATE_DIR/backup.stale-lock"
 trap 'log "interrupted — the report in flight is not recorded"; rc=143; finish' TERM INT
 trap '[[ -n "$finishing" ]] || { log "UNEXPECTED EXIT (rc=$?) — releasing the lock"; rc=1; finish; }' EXIT
 { echo "$$ started $(ts)" > "$LOCK_DIR/info.tmp" && mv "$LOCK_DIR/info.tmp" "$LOCK_DIR/info"; }
@@ -211,7 +238,7 @@ log "manifest snapshot: $rows rows, newest copied_at $newest, NAS file modified 
 
 for name in "${due[@]}"; do
   mp="$VOLUMES_DIR/$name"; id=$(attach_id "$mp"); d=$(today)
-  slug=$(printf '%s' "$name" | tr -c 'A-Za-z0-9._-' '_')
+  slug=$(pct_encode "$name")   # injective: distinct disks never share a report file (review #38)
   report="$STATE_DIR/gap-$slug-$d.txt"; tsv="$STATE_DIR/gap-$slug-$d.tsv"
   rm -f "$report" "$tsv"   # the job owns its dated output; a --force re-report replaces it (vault gap's --tsv is O_EXCL against aliases, not against our own file)
   log "GAP $name: report starting ($mp, attach $id)"

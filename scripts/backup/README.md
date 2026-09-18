@@ -15,7 +15,10 @@ nothing, stages nothing, and never writes to the SSD or the NAS.
    logged once and ignored.
 2. A known disk is **due** when it has not been reported for its current
    attach identity (device + inode + birth of the mount point: a re-attach
-   is a new one) and today. Nothing due → exit 0, silent: 288 ticks a day
+   is a new one) and today. (Unknown volumes are keyed by name only: a
+   re-attach is logged again only when a tick in between observed the
+   detachment - a mount generation is not reliable from `/Volumes` alone,
+   so a detach+remount entirely between two ticks is not detected.) Nothing due → exit 0, silent: 288 ticks a day
    must not write 288 lines.
 3. Preconditions (only when something is due, logged at most once an hour):
    the NAS manifest is reachable at `MANIFEST_DB`.
