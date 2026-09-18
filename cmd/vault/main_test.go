@@ -613,3 +613,64 @@ func TestExitCodeOrdering(t *testing.T) {
 		})
 	}
 }
+
+// TestVerifiedDestinationNeverOverwritten is B23(b), the defect behind the
+// 2,668 SonyA6700 photos lost on 2026-09-01: the camera's counter wrapped, a
+// second card carried different photos under the same DCIM names, and a copy
+// run under the same <disk> name treated them as changed files - recopy
+// replaced the verified destinations in place, no collision policy was
+// consulted, and the old hashes left the manifest with the bytes.
+//
+// Decided 2026-09-17 (DECISIONS.md): a verified destination is never
+// overwritten. Same (source_disk, source_path), different content is a
+// collision: the archived copy and its row stay exactly as they were, the
+// file is skipped and counted in INCOMPLETE:, exit 1.
+func TestVerifiedDestinationNeverOverwritten(t *testing.T) {
+	for _, policy := range []string{"skip", "rename-mtime-year"} {
+		t.Run(policy, func(t *testing.T) {
+			cfg, src, dst := t.TempDir(), t.TempDir(), t.TempDir()
+			const april = "DSC06245 as shot in April - the certified bytes"
+			const sept = "DSC06245 as shot in September"
+			writeFile(t, filepath.Join(src, "DCIM", "DSC06245.ARW"), april, t0)
+			writeFile(t, filepath.Join(src, "DCIM", "DSC06246.ARW"), "untouched sibling", t0)
+
+			if _, _, code := vault(t, cfg, "copy", "sony", src, dst); code != 0 {
+				t.Fatalf("first copy: exit %d", code)
+			}
+			if _, _, code := vault(t, cfg, "verify", "sony", dst); code != 0 {
+				t.Fatalf("verify: exit %d", code)
+			}
+			if _, _, code := vault(t, cfg, "certify", "sony"); code != 0 {
+				t.Fatalf("certify: exit %d", code)
+			}
+			before := rowsOf(t, cfg, "sony")
+			wantRow(t, before, "DCIM/DSC06245.ARW", "DCIM/DSC06245.ARW", april, "verified")
+
+			// The second card: same name, different (smaller) bytes, later mtime.
+			writeFile(t, filepath.Join(src, "DCIM", "DSC06245.ARW"), sept, t0.AddDate(0, 5, 0))
+
+			_, errOut, code := vault(t, cfg, "copy", "sony", src, dst, "--on-collision", policy)
+			if got := readFile(t, filepath.Join(dst, "DCIM", "DSC06245.ARW")); got != april {
+				t.Errorf("verified destination was overwritten: now %q, want the April bytes", got)
+			}
+			after := rowsOf(t, cfg, "sony")
+			if !reflect.DeepEqual(after["DCIM/DSC06245.ARW"], before["DCIM/DSC06245.ARW"]) {
+				t.Errorf("verified row changed:\n before %+v\n after  %+v", before["DCIM/DSC06245.ARW"], after["DCIM/DSC06245.ARW"])
+			}
+			if !reflect.DeepEqual(after["DCIM/DSC06246.ARW"], before["DCIM/DSC06246.ARW"]) {
+				t.Errorf("unrelated row changed: %+v", after["DCIM/DSC06246.ARW"])
+			}
+			if code != 1 || !strings.Contains(errOut, "INCOMPLETE:") || !strings.Contains(errOut, "verified") {
+				t.Errorf("exit %d, stderr %q; want 1 with INCOMPLETE: naming the verified-row skip", code, errOut)
+			}
+			noPartials(t, dst)
+			// The certificate's claim still holds: verify and certify pass.
+			if _, _, code := vault(t, cfg, "verify", "sony", dst); code != 0 {
+				t.Errorf("verify after the refused copy: exit %d, want 0", code)
+			}
+			if _, _, code := vault(t, cfg, "certify", "sony"); code != 0 {
+				t.Errorf("certify after the refused copy: exit %d, want 0", code)
+			}
+		})
+	}
+}
