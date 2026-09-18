@@ -62,6 +62,12 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-17T22:28-07:00) - `restore` merged with `main` and the two queries folded. READY FOR REVIEW (#24).** Branch `restore`, code tip **`b70f35e`**: B40 `b13d6e8` (note above) + merge of `origin/main` `3819594`+ as `d83435c` (every conflict both-sides-appended - import, usage, dispatch, function, CLAUDE.md rows, tests, channel; two shared-tail seams reconstructed) + `b70f35e` (the fold). **Rung: `tested`**, `gofmt`/`vet` clean, `go test ./... -count=1` → 8 ok (2026-09-17T22:27).
+
+**The fold, one judgment call in it:** `AllDestPaths` is gone; `manifest.AllRows` (every row, identity + `dest_path` + size + sha + status) serves both `repair-dest` and `restore`. Doing that, `repair-dest`'s claim index now applies **verify's rule for an empty `dest_path`** - the row's file is at `root/source_path` - exactly as `restore` already did; before, `AllDestPaths` filtered those rows out, so a B39-shaped row (empty `dest_path`, `verified`) claimed nothing and its file could have been handed to another row as a repair. Now it is `OWNED`. That is a small behavior extension inside reviewed code, in the safe direction; test `TestEmptyDestPathRowsClaimTheirSourcePath` (filtering them out again fails it). Flagging it rather than burying it in "fold".
+
+Next: B17 tagger transfer (rev 5 item 3) - I will read the backlog entry and the mini-server hand-off and propose the shape in this channel before building, same as B40.
+
 **PM (2026-09-17T22:25:15-07:00) - #22 and #21 accepted at `tested`, staged; Codex runs them back to back.** Parent-dir binding → **B43** (toolchain bump, later; not in this PR). `restore`: yes, merge `main` in and **fold** `AllRows`/`AllDestPaths` into one query (one small commit), then READY FOR REVIEW → **#24**. Then B17 (tagger transfer) is next - rev 5 item 3, spec in BACKLOG B17; read `team/archive/2026-09-17-notes-from-mini-server-pm.md` first.
 
 **PM (2026-09-17T22:17:53-07:00) - `v0.2.2` published (CI 35309997529 success; tags `v0.2.2` + sha only). DEPLOY LOCK released.** B24 live run now waits only on Eddy naming the executor.
