@@ -6,7 +6,64 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #19 - re-review of #18's fixes only (branch `kipp-script`, code tip `70854af`)
+### #17 - `f4-tests` merge resolution only (branch `f4-tests`, tip `f54eb59`; approved content = `dc36e5f`, #13) - **resolved: resolution verified (finding = PM's stale diff base) → merge**
+
+**PM (2026-09-17T22:03:19-07:00):** #13 approved `dc36e5f`; merging it into `main` conflicted with the `overwrite-guard` merge in `CLAUDE.md`, `README.md`, `cmd/vault/main_test.go`. Dev resolved in merge commit `d9c900a`, then re-merged `main` (team-only) as `f54eb59`. Review **only the resolution**: `git diff main..f54eb59 -- . ':!team'` must equal what `dc36e5f` added to its base, re-expressed on top of `main` - i.e. the F4 tests, the B27 logging helper, the `reports/` skip, and their docs, with nothing from `overwrite-guard` lost or duplicated. `git show d9c900a` (combined diff) shows the conflict hunks Dev decided. PM at `f54eb59`: vet/gofmt clean, 7 packages ok.
+
+**This is wrong if:** any hunk from `314416d` (the guard merge) is missing or altered on `f54eb59`; any test from `dc36e5f` is missing; `CLAUDE.md`/`README.md` contain a duplicated or contradictory paragraph from the two sides; or `git diff main..f54eb59 -- . ':!team'` touches a file neither side touched.
+
+Verdict goes below this line.
+
+**Reviewer (2026-09-17):** FINDINGS — request #17, merge resolution only.
+
+1. **The staged range no longer isolates the resolution.** At review time `main` is `6fbf20a`. The literal `git diff main..f54eb59 -- . ':!team'` includes deletion of `scripts/nas-kipp-copy-all.sh` and `scripts/test/nas-kipp-copy-all.sh`, removal of the Kipp documentation in `CLAUDE.md`, and replacement of `TestKippCopyAllShape` in `scripts/test/scripts_test.go`. The two Kipp files belong to neither `73c52ae..dc36e5f` nor the overwrite-guard changes, so the request's explicit file-scope falsifier is met. These are ancestry differences from the subsequent Kipp merge, not deletions introduced by the conflict resolution; this two-tip diff does not establish that a normal merge would delete them. Pin the review base to `c66a612` (the main parent of `f54eb59`) or stage a new tip incorporating current main. Also correct the conflict reference: `git show d9c900a` has only a team-file conflict; the code resolution is `cb6f94c`.
+
+The actual code resolution at `cb6f94c`, unchanged through `f54eb59`, passes source comparison. All overwrite-guard production changes and tests are retained: `cmd/vault/main.go`, `internal/copy/copy.go`, `internal/copy/copy_test.go`, and `internal/manifest/manifest.go` are byte-identical to `314416d`; scan adds only the approved `reports` case, and both existing test files lose no lines. The F4 CLI test and reports-directory test each occur once with bodies identical to `dc36e5f`; the verify package tests, B27 script/helper, shell test, and its Go harness are byte-identical to that approved tip. CLAUDE retains the guard's plan fields and no-truncate copy contract while adding B20; README combines the reports exclusion and verified-destination protection in one paragraph, without duplication or contradiction. Relative to `314416d`, only the nine approved feature files change.
+
+No build, Go tests, vet, shell tests, or mutations were run. Only this review-channel file was modified; the pre-existing tester-feedback edit was preserved.
+
+
+### #15 - re-review of #10's fixes only (branch `repair-dest`, code tip `0555c53`) - **resolved: APPROVE → merge**
+
+**PM (2026-09-17T22:03:19-07:00):** Check the three #10 findings are closed. The fix is one commit, `5c38ec0` (merges of `main` around it are the guard + team files): review `git show 5c38ec0 -- . ':!team'`. Branch tip `ca8e6b7`. PM at `ca8e6b7`: vet/gofmt clean, 7 packages ok.
+
+**Claims:** (1) the intact check runs the directory walk + containment first; a rejected path is unresolved, never intact. (2) planned repairs reserve their candidate; a second row matching the same file is unresolved (own outcome), two-row regression; `Apply` cannot write two rows to one candidate. (3) containment works on absolute paths; roots `.` and `/` covered.
+
+**This is wrong if:** `Lstat(root/dest_path)` can still be consulted before the walk on any path; two `REPAIR` entries can name the same `NewDest` in one plan; or `under()` still compares relative strings anywhere.
+
+Verdict goes below this line.
+
+**Reviewer (2026-09-17):** APPROVE — request #15, fixes only, exactly `git show 5c38ec0 -- . ':!team'`. All three #10 findings are closed by source trace.
+
+- `Build` calls `containedDir` before consulting the destination leaf with `Lstat`; lexical escapes and symlinked/non-directory ancestors remain unresolved. A regular leaf must also pass `under` before incrementing `Intact`. The new regression includes existing files behind a symlink and outside the root via `..`, plus an intact control.
+- Planning reserves each candidate's physical key. A second matching row changes both outcomes to `CONFLICT` and clears both `NewDest` fields; later contenders remain conflicts too. `Apply` skips these outcomes and checks the original claims plus its own successful writes before each update. The two-row regression verifies neither conflicting row changes while an independent repair succeeds; forged-plan cases cover duplicate writes and existing claims. CLI counts and incomplete reporting include both new unresolved outcomes.
+- `under` makes both inputs absolute before resolving symlinks, then uses `filepath.Rel` to reject the root itself and paths outside it. This accepts descendants for both `.` and `/`; regressions cover both forms and a complete plan with root `.`.
+
+Validation: source review only; no build or tests run, and mutation claims were not independently executed. Only this channel file was modified by this review; pre-existing channel edits were preserved.
+
+
+### #16 - re-review of #12's fixes only (branch `certs-out`, code tip `7066711`, + B37) - **resolved: FINDINGS (1), accepted → Dev fixes → request #21**
+
+**PM (2026-09-17T22:03:19-07:00):** Check the three #12 findings are closed, plus B37. Fix commits: `7066711` (review #12 fixes) and `3e350c8` (B37: scripts/docs default tag `v0.2.1`): review `git show 7066711 -- . ':!team'` and `git show 3e350c8 -- . ':!team'`. Branch tip `82d1539`. PM at `82d1539`: vet/gofmt clean, 7 packages ok.
+
+**Claims:** (1) the certificate writer `Lstat`s the output leaf: symlink → refused; regular file → replaced; the guard checks the written path. (2) `certify --root <dest-root>` gives physical containment of the output under the root; without `--root` the size heuristic remains as documented best-effort; README/CLAUDE narrowed. (3) the shell test's negative assertion can now fail (mutation stated). (B37) all five `scripts/*.sh` and docs default to `v0.2.1`.
+
+**This is wrong if:** `os.WriteFile`/`Create` on the output path can follow a symlink created after the check (state the window); `--root` containment resolves the root but not the output, or vice versa; the scripts pass `--root` inconsistently with the roots they give `verify`; the negation fix still runs inside a pipeline subshell; or any script still defaults to `v0.2.0`.
+
+Verdict goes below this line.
+
+**Reviewer (2026-09-17):** FINDINGS — request #16, fixes only, exactly `git show 7066711 -- . ':!team'` and `git show 3e350c8 -- . ':!team'`.
+
+1. **The output check still permits a symlink race that can overwrite verified media.** In `7066711`, `internal/certify/certify.go:65` checks the leaf with `Lstat`, and `cmd/vault/main.go:561` calls that placement check, but the write at `cmd/vault/main.go:594` remains `os.WriteFile(out, data, 0o644)`. Failing sequence: start with an absent or regular certificate path outside the archive; after `CheckOutput` returns, replace that leaf with a symlink to a verified photo before `os.WriteFile` opens it. The intervening certificate build/sign and JSON marshal leave the window open. `WriteFile` follows the new symlink and truncates the photo; a link to an absent archive path instead creates a certificate inside the tree, even with `--root`. Thus the checked path is not bound to the written object, meeting the request's explicit falsifier. Use a write strategy that cannot follow a substituted leaf (and binds the checked parent directory), with a regression for substitution between checking and writing; another pre-write `Lstat` alone does not close the window.
+
+The other requested fixes pass source trace for stable filesystem paths: existing leaf symlinks are rejected; `--root` resolves an existing root and the output's longest existing ancestor, so damaged-row sizes no longer bypass that containment check; README/CLAUDE describe the fallback limitation. Both certify scripts pass the same container-visible root used by verify. The negative shell assertion calls `check` in the parent shell, so a camera-root output increments the retained failure count and produces exit 1. B37 changes all five targeted script defaults and both tag-naming docs to `v0.2.1`.
+
+Validation: `bash -n` passed for the five production scripts and the changed shell test at `7066711`. No Go build/test, shell-test execution, or mutation execution was performed. Only this review-channel file was modified by this review; pre-existing channel edits were preserved.
+
+
+**PM (2026-09-17T22:07:29-07:00):** #17: the finding is mine - I staged `main..f54eb59` after `main` had moved (kipp merge); the Reviewer pinned the base itself and verified the resolution (`cb6f94c`) byte-for-byte against both sides. Accepted as verified; merging `f4-tests`. #15: APPROVE accepted; merging `repair-dest` (tip `ca8e6b7`, code `0555c53`). #16: FINDING accepted - `os.WriteFile` on a checked path is a TOCTOU: the certificate must be written with `O_CREATE|O_EXCL` (or `O_NOFOLLOW`) to a temp name inside the checked directory and renamed over the leaf, with a regression that substitutes a symlink between check and write. Back to Dev on `certs-out`; re-review as **#21, fixes only**.
+
+### #19 - re-review of #18's fixes only (branch `kipp-script`, code tip `70854af`) - **resolved: APPROVE → merged**
 
 **PM (2026-09-17T21:59:26-07:00):** Check #18's two findings are closed. Diff `git diff a3671f4..70854af -- . ':!team'` (1 commit after Dev's merge of `main`; 2 files, +79/-36). Dev's note: Dev 2026-09-17T21:59 (commit `293bcd1` on that branch). PM independently at `70854af`: `bash -n` clean, `go vet` clean, `go test ./scripts/test -count=1` ok.
 
@@ -16,11 +73,48 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 Verdict goes below this line.
 
-### #20 - numbers: `Eddy's Media Vault` gap report + four-disk roll-up (Tester #22)
+**Reviewer (2026-09-17):** APPROVE — request #19, fixes only, exactly `git diff a3671f4..70854af -- . ':!team'`. Both requested fixes are closed by source trace.
+
+- The production script changes only its header comment: the dry-run launch now uses `sudo -E`, explicitly acknowledges log appends and opening the live manifest, and explains that the invoking shell opens the outer `>>` and needs log-write permission.
+- The stub preserves the tested argument boundaries with `printf '%s\n' "$@"` (after heredoc expansion), followed by a call-end marker. Expected vectors come from an independent, literal ordered list of all seven disk/folder pairs, not from production output. Each vector includes both mounts, config, image, source/destination, mandatory flags, and GoPro-only routing. Real, dry-run, failure, and image-override passes compare the complete ordered recording. With `/usb/kipp disk`, removing source quoting produces two recorded arguments instead of one; swapping folders changes the ordered recording; dropping `:ro` on any call changes that vector. Each would fail the comparison and increment the test's failure count. Dry-run expectations append `--dry-run` to every vector; the failure pass reuses the real-run expectations and the override pass substitutes the expected image throughout.
+
+Validation: `bash -n` passed for both scripts read from `70854af`. No Go tests, docker, shell test execution, or mutation runs performed. This is source-review approval of the fixes, not live-NAS execution evidence. Only this channel file was modified.
+
+### #20 - numbers: `Eddy's Media Vault` gap report + four-disk roll-up (Tester #22) - **resolved: APPROVE → delivered to Eddy**
 
 **PM (2026-09-17T21:59:26-07:00):** Not code. Tester item 22 (2026-09-17T21:58): **`Eddy's Media Vault`: 34,717 files / 1,814,470,847,285 B; archived by content 34,716 / 1,814,463,562,238 B; gap 1 file / 7,285,047 B** (`Backups/SonyA6700/DCIM/DSC04868.JPG`, the subject of item 24). Of the 34,716: 195 match only the `copied` rows of B24, the rest `verified` rows. **Roll-up over four SSDs: 58,010 files / 7,026,649,150,091 B; archived 43,097 / 3,916,776,790,636 B; needs archiving 14,913 / 3,109,872,359,455 B.** Recompute from `/Volumes/Scratch1/tester/gap-emv.{tsv,summary.txt,log}` + the snapshot (read-only, `?mode=ro&immutable=1`; do not rerun hashing); the `kipp`/`tars`/`case` inputs are the already-approved #8 and #14 figures. Falsified if: the EMV TSV counts/bytes differ; the single GAP sha is present in the snapshot; any HASH_ARCHIVED sha is absent; the 195-vs-`copied` split does not reproduce; a fresh `find` (dot-dirs pruned, dotfiles/`._*` excluded) on `/Volumes/Eddy's Media Vault` differs from 34,717 / 1,814,470,847,285; or any roll-up sum is off.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-17):** APPROVE — request #20. Independently recomputed EMV from `gap-emv.tsv`, checked the summary/log, and queried `manifest-2026-09-17.db` with `?mode=ro&immutable=1`. The roll-up uses the accepted, corrected kipp figures from #8 and tars/case figures from #14.
+
+| Quantity | Claimed files / bytes | Recomputed files / bytes |
+| --- | --- | --- |
+| EMV total | 34,717 / 1,814,470,847,285 | 34,717 / 1,814,470,847,285 |
+| EMV HASH_ARCHIVED | 34,716 / 1,814,463,562,238 | 34,716 / 1,814,463,562,238 |
+| EMV GAP | 1 / 7,285,047 | 1 / 7,285,047 |
+| EMV matches only copied rows | 195 / not stated | 195 / 1,154,361,035 |
+| EMV has a verified match | 34,521 (34,716 − 195) / not stated | 34,521 / 1,813,309,201,203 |
+| Four-disk total | 58,010 / 7,026,649,150,091 | 58,010 / 7,026,649,150,091 |
+| Four-disk archived | 43,097 / 3,916,776,790,636 | 43,097 / 3,916,776,790,636 |
+| Four-disk needs archiving | 14,913 / 3,109,872,359,455 | 14,913 / 3,109,872,359,455 |
+
+EMV arithmetic: 34,716 + 1 = **34,717**; 1,814,463,562,238 + 7,285,047 = **1,814,470,847,285 B**. Status split: 34,521 + 195 = **34,716**; 1,813,309,201,203 + 1,154,361,035 = **1,814,463,562,238 B**. All 195 non-verified matches have only `copied` status and match `media-sonya6700` rows, reproducing the B24 set's count and byte total; all remaining archived files have a `verified` match.
+
+Hash checks against all 67,735 snapshot rows / 64,317 distinct hashes: **0 archived hashes absent (claimed 0)**, and every archived TSV row has a same-size manifest match. The sole GAP is exactly `Backups/SonyA6700/DCIM/DSC04868.JPG`, **7,285,047 B**, recorded SHA-256 `b7ecf8081e28b3a1c38a02620bec11f45894838063bf1b64b5834ff24f5f3a69`; **0 matching snapshot rows (claimed 0)**. All 34,717 TSV paths are unique and all recorded hashes are valid 64-character lowercase hex. The summary and completed log agree with the TSV; the log reports 34,717/34,717 hashed and contains no reported errors.
+
+Completeness: fresh read-only `find "/Volumes/Eddy's Media Vault" -name '.*' -prune -o -type f -print0` exited 0 without traversal errors. Dot-directories, dotfiles and `._*` are excluded. Fresh stat sizes reproduce **34,717 files / 1,814,470,847,285 B (claimed the same)**, with an exact path-and-size match for every TSV row.
+
+Four-disk arithmetic, in kipp + tars + case + EMV order:
+
+- Total files: 10,393 + 7,759 + 5,141 + 34,717 = **58,010**. Bytes: 1,953,592,885,376 + 1,960,691,323,577 + 1,297,894,093,853 + 1,814,470,847,285 = **7,026,649,150,091**.
+- Archived files: 521 + 2,719 + 5,141 + 34,716 = **43,097**. Bytes: 31,897,100,927 + 772,522,033,618 + 1,297,894,093,853 + 1,814,463,562,238 = **3,916,776,790,636**.
+- Gap files: 9,872 + 5,040 + 0 + 1 = **14,913**. Bytes: 1,921,695,784,449 + 1,188,169,289,959 + 0 + 7,285,047 = **3,109,872,359,455**.
+
+Cross-check: 43,097 + 14,913 = **58,010**; 3,916,776,790,636 + 3,109,872,359,455 = **7,026,649,150,091 B**. These are file instances summed across SSDs, not distinct-content totals. “Archived” here means the recorded content hash exists in this snapshot, including the explicitly identified copied-only rows; it does not establish current NAS integrity. No hashing was rerun, no artifact script was executed, and no external files were written. Only this channel file was modified by this review; its pre-existing edits and the pre-existing tester-feedback changes were preserved.
+
+
+**PM (2026-09-17T22:03:19-07:00):** #19 APPROVE accepted - merging `kipp-script` (`293bcd1`, code `70854af`) into `main` `--no-ff`. #20 APPROVE accepted - roll-up delivered to Eddy: 14,913 files / 3.11 TB to archive across `kipp` + `tars` + 1 file on EMV.
 
 ### #18 - `scripts/nas-kipp-copy-all.sh` (branch `kipp-script`, code tip `7938f58`) - **resolved: FINDINGS (2), accepted → Dev fixes → request #19**
 
