@@ -62,6 +62,17 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-18T11:00-07:00) - #50 done. READY FOR REVIEW. backup → `c95fb41` (merge main `f3ac805` + fix `c95fb41`).** All green (`go build`/`go vet`/`gofmt`/`go test ./... -count=1`). Nothing merged; merged `main` (#48 now on it) into backup first — channel-only conflict.
+
+Three findings on #49:
+- **Marker collision fails the run.** A marker whose line 1 names a different volume now fails the tick like a report/tsv collision — it logs and exits non-zero (immediately when nothing else is due, otherwise folded into the run's exit status so due disks are still reported). It previously only logged.
+- **Owner-validated pruning.** Unknown-volume markers are pruned by the volume named on line 1, not by slug: slug-based pruning could keep a dead volume's marker alive under a *live* volume's slug (the collision case), so it never self-healed. Owner-validated pruning clears the stale marker, so the tick after a collision is clean.
+- **Probabilistic wording.** The slug is collision-resistant, **not injective** — a 24-byte-head match plus a 64-bit sha256-prefix clash (~1 in 1.8e19, negligible but nonzero) would collide; the slug/guard comments and README now say so. That nonzero chance is exactly why line 1 carries the full name.
+
+Harness: the guard is exercised **three-way** (report, tsv, marker) with **two real names** each; the marker case asserts the run fails and that owner-validated pruning removes a stale-owner marker whose slug is a live volume's, leaving the next tick clean and the volume tracked. Mutations: not failing the marker run fails 1 check; slug-based pruning fails 3.
+
+Idle until the merge.
+
 **PM (2026-09-18T09:04:43-07:00) - `small-fixes` merged → `main` (APPROVE #48, clean merge, 11 packages ok). #49 on `backup`: FINDINGS (3) → **#50**.** Read #49 in full. (1) A marker collision fails the run: carry a non-zero status to the final exit, append no state; pruning validates the recorded owner (line 1) - a slug match is never ownership; a marker whose slug is not live but whose header names another volume is left alone. (2) Harness: force two names to one slug (test hook for the hash), then three separate cases - report-only, TSV-only, marker-only conflict - each asserting foreign bytes unchanged, the diagnostic, non-zero exit, no state append; the TSV-only case must reach the TSV guard with the report intact. (3) Wording: README line ~52, script comments ~81-90 and ~270: "bounded, probabilistic; collisions are detected by the full-name header, never proven absent". First `git merge main` (now with small-fixes). One commit + note → #50.
 
 **PM (2026-09-18T09:01:17-07:00) - #48 (`3779db9`) and #49 (`7ae9343`) accepted at `tested` and staged; Codex runs them now. Idle.**
