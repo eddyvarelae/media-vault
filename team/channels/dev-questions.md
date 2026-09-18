@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T09:25:54-07:00) - #50 (`c95fb41`) accepted at `tested` and staged; Codex runs it now. Idle.**
+
 **PM (2026-09-18T09:04:43-07:00) - `small-fixes` merged → `main` (APPROVE #48, clean merge, 11 packages ok). #49 on `backup`: FINDINGS (3) → **#50**.** Read #49 in full. (1) A marker collision fails the run: carry a non-zero status to the final exit, append no state; pruning validates the recorded owner (line 1) - a slug match is never ownership; a marker whose slug is not live but whose header names another volume is left alone. (2) Harness: force two names to one slug (test hook for the hash), then three separate cases - report-only, TSV-only, marker-only conflict - each asserting foreign bytes unchanged, the diagnostic, non-zero exit, no state append; the TSV-only case must reach the TSV guard with the report intact. (3) Wording: README line ~52, script comments ~81-90 and ~270: "bounded, probabilistic; collisions are detected by the full-name header, never proven absent". First `git merge main` (now with small-fixes). One commit + note → #50.
 
 **PM (2026-09-18T09:01:17-07:00) - #48 (`3779db9`) and #49 (`7ae9343`) accepted at `tested` and staged; Codex runs them now. Idle.**

@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #50 - re-review of #49's fixes only (branch `backup`, code tip `c95fb41`)
+
+**PM (2026-09-18T09:25:54-07:00):** Fix commit(s) after the last `main` merge: `git diff 42e3c64..c95fb41 -- . ':!team'` minus what `main` already has - practically `git show c95fb41 -- . ':!team'` (and any commit between the `main` merge and the tip). Claims: a marker collision carries a non-zero status to the final exit and appends no state; pruning validates the recorded owner on line 1, never the slug; a marker whose header names another volume is left alone; the harness forces two names to one slug and exercises report-only, TSV-only and marker-only conflicts separately with bytes/diagnostic/status/state assertions; README and comments say "bounded, probabilistic; collisions detected by the full-name header". PM at `c95fb41`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** any of the three conflict cases can pass with its guard removed; a colliding marker can still exit 0; pruning can delete a marker owned by a live volume with a colliding slug; or any "injective" wording remains.
+
+Verdict goes below this line.
+
 ### #48 - re-review of #46's fixes only (branch `small-fixes`, code tip `3779db9`) - **resolved: APPROVE → merged**
 
 **PM (2026-09-18T09:01:17-07:00):** `git show 3779db9 -- . ':!team'`. Claims: `restore --expect-sha` joins the detector's inventory (now scan/copy/move `--prefix --rule --on-collision`; dedup `--min-size`; certify `--root`; restore `--expect-sha`); regressions for `--expect-sha --dry-run` (not a dry run) and `--expect-sha <sha> --dry-run` (dry run); repair-dest CLAUDE.md row and the main.go comment describe B31. PM at `3779db9`: vet/gofmt/bash -n clean, 11 packages ok. **This is wrong if:** any value-taking flag of any command is still missing, or CLAUDE.md still describes initialization on any dry run.
