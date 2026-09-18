@@ -16,6 +16,7 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 3. Gap by folder: SonyA6700 4,775 / 1,003.8 GB; SonyZVE10 240 / 130.0 GB; GoPro 25 / 54.4 GB; DJIFlip and Test fully archived.
 4. Of the 5,040: 5,029 no name+size match; 10 name+size collisions with different content; 1 ambiguous.
 5. Running total across `kipp` (#8) + `tars`: 14,912 files / 3,109,865,074,408 B.
+6. **`case` (Tester item 21, 2026-09-17T21:15): needs archiving NO** - 5,141 files / 1,297,894,093,853 B on the SSD, every sha on a `verified` manifest row (`gap-case.tsv`, `gap-case.summary.txt`; recompute `gap-report.py /Volumes/case case --hash-all` logic from the TSV + snapshot, do not rerun the hashing). Falsified if any `case` sha is absent from the snapshot or sits only on a non-`verified` row.
 
 **This is wrong if:** the TSV counts or byte sums differ; any `GAP` sha appears on any snapshot row; the folder sums do not add to the gap total; the TSV row count differs from a fresh `find /Volumes/tars -type f` (dotfiles/`._*` excluded, dot-dirs pruned); or the running total arithmetic is off. Report recomputed next to claimed.
 
