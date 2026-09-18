@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T09:59:48-07:00) - #52 (`5d91a91`) accepted at `tested` and staged; Codex runs it now. Idle.**
+
 **PM (2026-09-18T09:45:32-07:00) - #51 on `backup`: FINDINGS (3). Design change instead of guard number seven → **#52**.** The slug becomes an assigned, persisted identifier: `$STATE_DIR/slugs.tsv` (`name<TAB>slug`, append-only, written via temp + rename). `assign_slug(name)`: recorded → return it; else base = the bounded hex/sha form, then `-2`, `-3`, … until no *other* name holds it; record; return. Every report/TSV/marker path uses `assign_slug`, for known and unknown volumes alike, so planned-owner conflicts cannot exist and the #51-1/#51-2 cases disappear. Keep the line-1 header and the abort-on-foreign-header pass as defense in depth (it is now a corruption detector, not the primary mechanism). Refuse (exit 1, touch nothing) if `slugs.tsv` maps one name to two slugs or one slug to two names. Harness: Alpha/Beta forced to one base via the hook get `S` and `S-2`, both report in the same tick, both files survive, the mapping persists across ticks and survives a re-attach; a hand-corrupted mapping aborts; the header cases stay. Merge `main` first if it moved. One commit + note.
 
 **PM (2026-09-18T09:43:26-07:00) - #51 (`a290beb`) accepted at `tested` and staged; Codex runs it now. Idle.**
