@@ -12,10 +12,10 @@ Status: **not approved to run** until review #23 APPROVEs and Eddy names the exe
 1. **Lock note** by the PM in `dev-questions.md` (deploy = any vault command against the live manifest).
 2. **Backup the manifest** (root-owned file): `sudo cp -p /volume1/docker/vault-nas-config/manifest.db /volume1/docker/vault-nas-config/manifest.db.bak-b24-$(date +%Y%m%d-%H%M%S)` and `sha256sum` both.
 3. **Dry-run on the live manifest** (confirms the image and the mounts; writes no row):
-   `sudo docker run --rm -v /volume1:/volume1 -e VAULT_CONFIG=/volume1/docker/vault-nas-config ghcr.io/eddyvarelae/media-vault:v0.2.4 repair-dest media-sonya6700 /volume1/media/SonyA6700 --dry-run`
+   `sudo docker run --rm -v /volume1:/volume1 -e VAULT_CONFIG=/volume1/docker/vault-nas-config ghcr.io/eddyvarelae/media-vault:v0.2.5 repair-dest media-sonya6700 /volume1/media/SonyA6700 --dry-run`
    Must print exactly `Repairable: 195   Not found: 0   Ambiguous: 0   Owned: 0   Not a file: 0   Unsafe: 0   Conflict: 0`. Anything else → stop, post, no step 4.
 4. **Live run**: same command without `--dry-run`. Expected: 195 `repaired` lines, `Repaired 195 row(s)`, exit 0.
-5. **Verify**: `… ghcr.io/eddyvarelae/media-vault:v0.2.4 verify media-sonya6700 /volume1/media/SonyA6700 --only-unverified` → `Verified: 195 … Missing: 0`, exit 0 (this is the first B6 step; ~1.15 GB hashed, minutes).
+5. **Verify**: `… ghcr.io/eddyvarelae/media-vault:v0.2.5 verify media-sonya6700 /volume1/media/SonyA6700 --only-unverified` → `Verified: 195 … Missing: 0`, exit 0 (this is the first B6 step; ~1.15 GB hashed, minutes).
 6. **Witness**: Tester snapshots the manifest again, confirms 195 rows now `verified` with `CLIP/`/`DCIM/` prefixes and 0 `copied` rows on `media-sonya6700`; PM releases the lock.
 
 ## Rollback
