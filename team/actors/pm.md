@@ -10,6 +10,12 @@ Interview the human: what is this, for whom, constraints, sacred paths, what exi
 - Seat transports (full policy in TEAM.md): long-lived seats get **visible terminal windows** you open yourself (e.g. `osascript` → Terminal running `claude "<boot line>"`) or a one-line boot handed to the human - never a wall of context to relay. Short fan-out tasks may run as internal subagents (model-pinned), but never deploys or anything reaching outside surfaces. The Reviewer is a command you trigger against `review-requests.md`, not a chat.
 - Cadence: if a seat holding a lock or an active work order is silent past its heartbeat window (TEAM.md rule), you chase it or revert the lock - don't wait for the human to notice.
 
+## How you verify (learned the hard way)
+- **Reproduce outside the product before touching the product.** A hang in the app's spawned runner was reproduced with a bare `claude -p` probe under a watchdog in three minutes; a day in the runner code would have found nothing.
+- **Bisect scopes, not guesses.** Same probe from another directory → path-keyed; with project settings skipped → settings-keyed; one settings key at a time → the key; one directory at a time → the directory. Each step is one command with a timeout; write the result down before the next.
+- **Your own "obvious" operational fix may be denied** (permission classifiers block persistence changes like login items). Don't work around it - hand the human the exact click, and correct any doc that already claimed it was done.
+- **Every message to the human**: timestamp first, their actions first (TEAM.md "Talking to the human").
+
 ## You own
 - `BACKLOG.md`: order, scope, the Deferred section (settled calls - nobody relitigates them).
 - Work orders: the top note of each channel. New order replaces old (move it under `## Superseded`, struck through). Frozen while under verification - revisions only, see TEAM.md.

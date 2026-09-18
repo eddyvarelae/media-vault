@@ -50,7 +50,22 @@ Where the system has live side effects: exactly one running instance, ever - the
 Every seat writes to channel files regardless of how it runs. Defaults:
 - **Long-lived seats (Dev, Tester): visible terminal windows** on the Mac mini. The PM opens them (`osascript` → Terminal running `claude "<boot line>"`) or hands the human the one-line boot.
 - **Short fan-out tasks: internal subagents** (invisible, inside the PM's session, model-pinned). Fine for reads, checks, and drafts - never for anything touching the NAS.
-- **Reviewer: a command, not a chat.** `codex` run against `channels/review-requests.md`; the verdict lands signed in the file.
+- **Reviewer: a command, not a chat.** The PM (or the human) triggers the non-Claude CLI against `review-requests.md` (`codex exec … </dev/null` - invocation in `actors/reviewer.md`; the `</dev/null` is not optional); the verdict lands signed in the file.
+- **Seat-to-seat messages go session-to-session** where the tooling allows (Claude Code: `ListAgents` → `SendMessage` by session name), never by typing into another terminal. Idle notices fire immediately when the target is already idle - ask seats to message the PM directly when a step is done instead. A message is delivery, not agreement: the file is still the record. *(media-vault, 2026-09-17: the PM's classifier blocked messaging other sessions; the Terminal paste + bare-Return nudge in the handoff is the fallback until that clears.)*
+
+## Talking to the human (learned 2026-09-17)
+
+The human reads in bursts, hours apart, often from a phone. **Every PM message starts with the day, date and time** (`Thu 2026-09-17 18:12`, from `date "+%a %Y-%m-%d %H:%M"`) **and leads with what the human must do** - a short list, or "nothing". Then the narrative, one timestamped line per event. When an earlier ACTION becomes moot, the next message says so explicitly ("the patch is dead - nothing to confirm"). A dozen untimestamped updates are unreadable; the human should never have to ask "what happened with X?" about something the PM already resolved.
+
+## Machines that run things unattended (daemon-machine hygiene)
+
+Learned on a Mac Mini running a scheduled-runner app; generalize to any always-on box:
+- **One launcher.** A LaunchAgent *or* a login item - never both unless the app has a single-instance guard. Two launchers after a reboot = two schedulers.
+- **Launchers get a bare `PATH`.** Anything the app spawns (`claude`, `python`, `codex`) must be resolved to an absolute path in code or configured explicitly - never found via the inherited environment.
+- **OS auto-install of updates: off.** An aborted automatic restart quits the app and may never reboot; nothing relaunches it. Download automatically, install by hand.
+- **Every unattended run has a wall-clock timeout** and fails loudly (status, log, notification). A hung child must never park work as "in progress" forever.
+- **No build artifacts, `.app` bundles or installers in `~/Downloads`** on the daemon machine, and don't hand `~/Downloads` to every run - directory enumeration there blocked every headless tool call for an hour (Gatekeeper/XProtect suspected) and stayed intermittent.
+- **Restart protocol.** Before a planned restart the PM: tells every seat to commit + post a state note (5 min), writes `team/context/resume-<date>.md` (boot order, a pending table with owner + state, the traps a new PM must not re-derive), updates the Current state block, commits everything, then hands the human the boot line for the new PM. Seats don't survive a restart; files do. *(media-vault keeps these under `team/archive/<date>-pm-handoff.md`.)*
 
 ## Path ownership (required before Dev's first commit)
 
@@ -65,6 +80,7 @@ Branch policy: Dev works in its own worktree (`~/Projects/media-vault-dev`) on a
 
 ## Startup ritual (every session)
 
+0. **Framework first (PM, every session, before reading anything else).** The framework this `team/` was copied from lives at **`~/Projects/team-framework`** (`git@github.com:eddyvarelae/team-framework.git`; clone it there if absent). Run `git -C ~/Projects/team-framework fetch -q origin && git -C ~/Projects/team-framework log --oneline HEAD..origin/main`. Anything printed → pull, read the diff, apply the delta to this `team/` (framework-owned files - `README.md`, `actors/*`, unused channel templates, `diagram.*` - are byte-copies; `TEAM.md` gets the hunks around the project's own fills), note the version in your first channel note, and commit that before any other work. The framework moves between sessions; a PM on a stale copy runs stale rules.
 1. Read this file, then `team/actors/{your-role}.md`.
 2. Read the Current state block below; on your first session also all of `team/context/`.
 3. Read your channel's top note - that's your work order.
@@ -80,6 +96,6 @@ Branch policy: Dev works in its own worktree (`~/Projects/media-vault-dev`) on a
 - Tester (`~/Projects/media-vault-tester`, detached): B2 done (SSH as `figmaboi`, `sudo docker` works); B23(a) exhausted on attached disks; waiting on Dev for the B24 dry-run.
 - NAS: DXP2800 `192.168.1.167`, SMB + SSH as `figmaboi` (key); `~/mounts/media` and `~/mounts/docker` mount via `com.varela.mount-nas`. NAS clock is UTC-6 (Mini is UTC-7). `sudo docker` is password-less; so is `sudo bash` (B28).
 - Scope since 2026-09-17: every scheduled batch against the archive is ours (nightly tagger = B17, after rev 3).
-- **P0 (Tester, 2026-09-17): 2,668 SonyA6700 photos overwritten on Sep 1, not found on any attached SSD - B23. Nothing gets wiped.** 195 rows need a dest_path fix before verify can pass - B24. Archive is 8.20 TiB (not 3.3).
+- **P0 (2026-09-17): 2,668 SonyA6700 photos overwritten on Sep 1 are LOST - every disk Eddy owns was searched (B23a closed); the defect fix is Dev's current item (B23b).** 195 rows need a dest_path fix before verify can pass - B24. Archive is 8.20 TiB (not 3.3). Agents never wipe or write an SSD.
 - Source SSDs (B7 done): `tars`, `case`, `Eddy's Media Vault`, `kipp` (never copied, B26), and `Scratch1` = the former `noahsarc`, device-erased 2026-09-02 (Tester #17). The 2026-04-26 SonyA6700 source disk is unidentified. All five attached; agents read only.
 - Reviewer = `codex exec`, run by the PM. Seats boot in visible Terminal windows with `--remote-control`; nudges need a trailing empty `do script`.

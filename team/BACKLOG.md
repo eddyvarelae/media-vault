@@ -4,12 +4,13 @@ Maintained by the PM - ordering and scope are theirs alone. Fixed sections below
 
 ## P0 - blockers
 
-- [ ] **B23** **Data loss: 2,668 SonyA6700 photos (51.1 GB) overwritten 2026-09-01** (Tester #5, #14, #17). **(a) recovery** - searched and absent from all five attached SSDs (`tars`, `kipp`, `case`, `Eddy's Media Vault`, `Scratch1`); `case` is the confirmed overwrite source; `noahsarc` = `Scratch1`, device-erased 2026-09-02 17:58 (mini-server `SETUP.md:129`), 36 h after the overwrite; the 2026-04-26 source disk (21,986 rows, 16:06-17:47 MDT, no log) is **unidentified** - the only remaining candidates are that disk and unformatted A6700 cards. Waiting on Eddy. Nothing is wiped until this closes. **(b) defect** - decided 2026-09-17: a `verified` destination is never overwritten; same `(source_disk, source_path)` + different content = collision (rename under the flag, else skip + exit 1). Dev rev 4 item 1. Owner: Eddy (a), Dev (b).
+- [ ] **B23** **Data loss: 2,668 SonyA6700 photos (51.1 GB) overwritten 2026-09-01** (Tester #5, #14, #17). **(a) recovery - closed 2026-09-17, LOST:** absent from all five attached SSDs (`tars`, `kipp`, `case`, `Eddy's Media Vault`, `Scratch1`); `noahsarc` = `Scratch1`, device-erased 2026-09-02; the 2026-04-26 source disk is unknown to Eddy and no unformatted cards exist. Record: `team/archive/2026-09-01-sonya6700-lost-2668.tsv`. The stale April cert (B25) must not keep attesting them. **(b) defect - open:** decided 2026-09-17: a `verified` destination is never overwritten; same `(source_disk, source_path)` + different content = collision (rename under the flag, else skip + exit 1). Dev rev 4 item 1, in progress on `overwrite-guard`. Owner: Dev.
 - [ ] **B24** 195 `media-sonya6700` rows have `dest_path` missing `CLIP/`/`DCIM/` (Tester #7; bytes verified 195/195). One-off manifest fix, snapshot first, PM-approved, before B6 can pass. Dev rev 4 item 2.
 
 ## P1
 
 - [ ] **B6** *(blocked by B24, B23)* Incremental verify on the NAS for all six `media-*` disks with `--only-unverified`, then full `certify`. `v0.2.0` is tagged (2026-09-17); runbook facts: `sudo docker run` as `figmaboi`, NAS clock UTC-6. Owner: human runs, Tester witnesses. Evidence: logs under `/volume1/docker/`.
+- [ ] **B29** **Gap report per attached SSD** (decided 2026-09-17: the Mini is read-only; copies run on the NAS with the SSD plugged in there). For each of `tars`, `kipp`, `case`, `Eddy's Media Vault`: files on the SSD whose content is not in the manifest (name+size index, sha256 on candidates), with counts and bytes → "needs archiving: yes/no, N files, X GB". First pass by the Tester by hand from the 2026-09-17 snapshot (Tester rev 2 item 6); the durable tool is B22. Output tells Eddy which SSD to hook to the NAS next.
 - [ ] **B26** `kipp` (Auditorium/Backup/GoPro/LeanTank/Multicam/SonyA6700/SonyZVE10) appears in no copy log - never archived. Plan its copy after B23/B24 (it may also hold the lost 2,668).
 - [ ] **B8** `scan --dedupe-content` pass once B6 passes. Tester #12: 3,193 sha groups with >1 row, 3,418 surplus rows already inside the manifest; renames = 1,154 (djiflip 401, gopro 558, sonya6700 195).
 - [ ] **B9** F4 tests (the F4 "done when" list) - lands after B1 merges, on a fresh branch. Owner: Dev (rev 2).
@@ -17,10 +18,12 @@ Maintained by the PM - ordering and scope are theirs alone. Fixed sections below
 - [ ] **B17** Nightly video tagger → this repo. Take `scripts/run-tagging.sh` + `scripts/tagging-helper.py` from mini-server `d9d677d` (tested) into `scripts/tagging/`; evaluate the WIP `5e7bac7` (newest-first, two tiers, NAS manifest snapshot, `Public` walk) against the batch rules in DECISIONS; fix the stale-manifest read (must snapshot the NAS manifest from `~/mounts/docker/vault-nas-config/`, never open WAL sqlite over SMB). Dev rev 4, after rev 3. Needs B2(a) to test for real.
 - [ ] **B18** Install the tagger LaunchAgent (`launchd/com.varela.video-tagger.plist.example`, 02:00 daily) once B17 is `observed` by the Tester on a real 3-file run from this repo. One act, evidence in channel. Owner: PM (human-approved) or mini-server on request.
 - [ ] **B19** `Public` has 32 video files on disk and zero manifest rows - inventory it (`vault inventory media-public ...`) so manifest-driven selection can reach it. Human runs (writes the NAS manifest), Tester witnesses.
-- [ ] **B20** Tagger residue: GoPro (5 clips, `reports/` 16 files) **and iPhone** (`reports/` 15 dirs, 60 files; 15 `metadata` rows) - none in the manifest, so `scan` will find them. Decision needed: inventory `reports/` or exclude it. Tester documents as fixture.
+- [ ] **B20** Tagger residue: GoPro (5 clips, `reports/` 16 files) **and iPhone** (`reports/` 15 dirs, 60 files; 15 `metadata` rows). **Decided 2026-09-17: `scan` skips `reports/` directories at any depth.** Dev rev 4 item 6 (test on temp dirs). Tester documents as fixture.
 
 - [ ] **B25** Certificates out of the trees they certify: `certify` refuses an output path under the dest root; stale `media-sonya6700.cert.json` (2026-04-29) removed once B23/B24 resolve. Dev rev 4.
 - [ ] **B28** `figmaboi` has NOPASSWD `sudo bash`/`nohup`/`docker` on the NAS (Tester #18) - a password-less root shell for the only agent-reachable account. Eddy's call: leave (UGOS default) or restrict to `docker` only. Security, not product.
+- [ ] **B30** *(folded into B23(b) by review #5 finding 1)* a `deduped` row recopy or a colliding `.vault-partial` name can still write over a `verified` destination - the guard must be destination-level. Dev item 1 fixes.
+- [ ] **B31** `--dry-run` still creates the config dir and initializes `manifest.db` before parsing flags (review #5 finding 2, pre-existing). Read-only open for dry-run. P2.
 - [ ] **B27** `nas-verify-certify-all.sh` writes every log line twice (`tee -a` under a redirecting nohup). Dev, any PR.
 
 ## P2
@@ -34,6 +37,8 @@ Maintained by the PM - ordering and scope are theirs alone. Fixed sections below
 
 ## Deferred (decided, don't build now)
 
+- Equal size + equal mtime + different bytes is not detected by `scan` - by design, scan is metadata-keyed and `verify` is the integrity pass (Reviewer #5 note, 2026-09-17).
+- Same-size + new-mtime verified files are re-hashed on every scan (no row refresh) - accepted 2026-09-17: one read per touched file per run, no unasked manifest write; revisit only if a scan becomes slow (Dev noticed).
 - `defer m.Close()` in `main` is skipped when a command exits non-zero (`os.Exit` bypasses defers) - pre-existing, harmless under WAL; no action (Dev noticed 2026-09-16).
 
 - Fail-on-collision only when the collided content is archived elsewhere - **rejected 2026-09-15** (exit code must not depend on `--dedupe-content`; the missing row is the gap).
@@ -43,7 +48,7 @@ Maintained by the PM - ordering and scope are theirs alone. Fixed sections below
 ## Done (PM-verified)
 
 - [x] **B2** NAS access: SMB shares `media`+`docker` mounted on the Mini; SSH as `figmaboi` with key (Tester #18, 2026-09-17); `sudo -n docker` NOPASSWD. `observed` by the Tester.
-- [x] **B3/B4/B5/B14/B15/B16** tests-and-pinning merged `e4a4aed` (Reviewer APPROVE #4 after FINDINGS #2, #3), `v0.2.0` tagged 2026-09-17: test harness + NAS guard (`internal/testguard`), scripts pinned to `v0.2.0`, `CLAUDE.md`, CI on `v*` tags only with `latest=false`, gofmt, README present tense. Rung: `tested` (Dev) + PM re-run at `52d30b0` + Reviewer source trace.
+- [x] **B3/B4/B5/B14/B15/B16** tests-and-pinning merged `e4a4aed` (Reviewer APPROVE #4 after FINDINGS #2, #3), `v0.2.0` tagged 2026-09-17: test harness + NAS guard (`internal/testguard`), scripts pinned to `v0.2.0`, `CLAUDE.md`, CI on `v*` tags only with `latest=false`, gofmt, README present tense. Rung: `tested` (Dev) + PM re-run at `52d30b0` + Reviewer source trace; CI tag-only + no-`latest` **observed** on the real `v0.2.0` push (run 35298191638: tags `v0.2.0`, `sha-e4a4aed`, digest `fe3c2724…`).
 - [x] **B7** Source SSDs mapped from the logs (Tester #6, 2026-09-17): `tars` (Apr 27), `noahsarc` (Apr 28), `case` (Sep 1), `Eddy's Media Vault` (Sep 2, the 195 rows); `kipp` never copied → B26. `source_disk` is per camera, not per SSD.
 
 - [x] **B1** F4 `verify --only-unverified` - Reviewer APPROVE #1 (Codex, 2026-09-17), merged `--no-ff` as `7cca025` on 2026-09-17; `go build && go vet` clean on the merge (PM). Rung: `tested` (author) + independent source review; `observed` pending the first NAS run (B6).
