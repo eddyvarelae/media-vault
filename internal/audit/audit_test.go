@@ -254,3 +254,120 @@ func TestRunTwinNeedsAValidMediaFile(t *testing.T) {
 		t.Errorf("missing video file: errors=%d, want 1", r.Errors)
 	}
 }
+
+// TestRunRefusesLeafSubstitution is the open-substitution regression THROUGH
+// Run: a hook swaps the leaf for a different inode after resolve's Lstat and
+// before the O_NOFOLLOW open, so SameFile refuses it and the row is an ERROR —
+// never read through the substituted file.
+func TestRunRefusesLeafSubstitution(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "DCIM", "x.JPG")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append([]byte("photo"), 0xFF, 0xD9), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hookBeforeOpen = func(p string) { // swap the leaf for a fresh inode
+		if err := os.Remove(p); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, append([]byte("other"), 0xFF, 0xD9), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer func() { hookBeforeOpen = nil }()
+
+	m, err := manifest.Open(filepath.Join(t.TempDir(), "manifest.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if err := m.Upsert(manifest.Entry{SourceDisk: "cam", SourcePath: "DCIM/x.JPG", DestPath: "DCIM/x.JPG",
+		Size: 1, MtimeNs: 1, SHA256: "x", CopiedAt: 1, Status: "verified"}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Run(context.Background(), m, "cam", root, func(Finding) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Errors != 1 || r.Plausible != 0 {
+		t.Errorf("leaf substituted after stat: errors=%d plausible=%d, want 1 error, 0 plausible", r.Errors, r.Plausible)
+	}
+}
+
+// TestRunTruncatedAfterStat is the truncation regression THROUGH Run: a hook
+// truncates the file after its size is taken from the fd and before the tail
+// ReadAt, so the read comes up short and the row is an ERROR — audit never
+// judges a file on a partial tail.
+func TestRunTruncatedAfterStat(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "big.JPG")
+	if err := os.WriteFile(path, append(bytes.Repeat([]byte("d"), 4096), 0xFF, 0xD9), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hookAfterStat = func(p string) { // shrink the file to nothing before ReadAt
+		if err := os.Truncate(p, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer func() { hookAfterStat = nil }()
+
+	m, err := manifest.Open(filepath.Join(t.TempDir(), "manifest.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if err := m.Upsert(manifest.Entry{SourceDisk: "cam", SourcePath: "big.JPG", DestPath: "big.JPG",
+		Size: 1, MtimeNs: 1, SHA256: "x", CopiedAt: 1, Status: "verified"}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Run(context.Background(), m, "cam", root, func(Finding) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Errors != 1 || r.Plausible != 0 {
+		t.Errorf("truncated after stat: errors=%d plausible=%d, want 1 error, 0 plausible", r.Errors, r.Plausible)
+	}
+}
+
+// TestRunTwinSymlinkedIsNotATwin: an empty .SRT's media twin present only as a
+// symlink is not a valid twin (resolve refuses a non-regular leaf), so the SRT
+// is REVIEW, not PLAUSIBLE.
+func TestRunTwinSymlinkedIsNotATwin(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "x.SRT"), nil, 0o644); err != nil { // empty SRT
+		t.Fatal(err)
+	}
+	real := filepath.Join(t.TempDir(), "real.MP4")
+	if err := os.WriteFile(real, []byte("moov"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, filepath.Join(root, "x.MP4")); err != nil { // twin is a symlink
+		t.Fatal(err)
+	}
+	m, err := manifest.Open(filepath.Join(t.TempDir(), "manifest.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	for _, rel := range []string{"x.SRT", "x.MP4"} {
+		if err := m.Upsert(manifest.Entry{SourceDisk: "cam", SourcePath: rel, DestPath: rel,
+			Size: 1, MtimeNs: 1, SHA256: "x", CopiedAt: 1, Status: "verified"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r, err := Run(context.Background(), m, "cam", root, func(Finding) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Review != 1 { // x.SRT: empty, twin is a symlink → not valid → REVIEW
+		t.Errorf("empty SRT with a symlinked twin: review=%d, want 1", r.Review)
+	}
+	if r.Plausible != 0 {
+		t.Errorf("nothing should be plausible: plausible=%d", r.Plausible)
+	}
+	if r.Errors != 1 { // x.MP4 leaf is a symlink → not a regular file → ERROR
+		t.Errorf("symlinked twin file: errors=%d, want 1", r.Errors)
+	}
+}

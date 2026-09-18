@@ -250,6 +250,9 @@ func stem(rel string) string {
 // Lstat saw (no swap between stat and open), and sizes the read from the fd.
 // Read-only.
 func readTail(path string, lstatInfo os.FileInfo) ([]byte, int64, error) {
+	if hookBeforeOpen != nil {
+		hookBeforeOpen(path)
+	}
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, 0, err
@@ -263,9 +266,24 @@ func readTail(path string, lstatInfo os.FileInfo) ([]byte, int64, error) {
 		return nil, 0, fmt.Errorf("file changed between stat and open")
 	}
 	size := fi.Size()
+	if hookAfterStat != nil {
+		hookAfterStat(path)
+	}
 	tail, err := tailFrom(f, size)
 	return tail, size, err
 }
+
+// hookBeforeOpen and hookAfterStat are test-only seams (nil in production) that
+// reproduce, THROUGH Run, the two races readTail defends against: hookBeforeOpen
+// fires after resolve's Lstat and before the O_NOFOLLOW open, so a test can
+// substitute the leaf (a symlink → O_NOFOLLOW refuses it; a swapped inode →
+// SameFile refuses it); hookAfterStat fires after the size is taken from the fd
+// and before the tail ReadAt, so a test can truncate the file and prove a short
+// read is an ERROR (review #64). Both leave production untouched.
+var (
+	hookBeforeOpen func(path string)
+	hookAfterStat  func(path string)
+)
 
 // tailFrom reads the last min(TailBytes, size) bytes at the fixed offset and
 // treats a short read as an error — a file that shrank mid-read is not audited

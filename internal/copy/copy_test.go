@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -351,4 +352,26 @@ func TestHashCovers(t *testing.T) {
 	if hashCovers("", 100, 100) == nil {
 		t.Errorf("empty sha should be refused")
 	}
+}
+
+// TestFileRefusesTeeBypass proves the row-minting invariant on the real File:
+// with the tee bypassed (a test seam), the hasher and byte-counter see none of
+// the landed bytes, so File must return an error and leave no row, no partial
+// and no destination file — a row whose bytes were never counted is never
+// recorded (B38, review #64).
+func TestFileRefusesTeeBypass(t *testing.T) {
+	src, dst := t.TempDir(), t.TempDir()
+	mtime := time.Date(2024, 3, 9, 10, 0, 0, 0, time.UTC)
+	writeFile(t, filepath.Join(src, "f.bin"), "a non-empty clip", mtime)
+	teeBypass = func(in io.Reader) io.Reader { return in } // feed io.Copy raw source, skipping the counter
+	defer func() { teeBypass = nil }()
+
+	task := scan.FileTask{RelPath: "f.bin", Size: int64(len("a non-empty clip")), MtimeNs: mtime.UnixNano()}
+	if _, err := File(context.Background(), src, dst, task, "diskA"); err == nil {
+		t.Fatal("File returned a row with the tee bypassed; the hashCovers assertion must refuse it")
+	}
+	if _, err := os.Stat(filepath.Join(dst, "f.bin")); !os.IsNotExist(err) {
+		t.Errorf("a refused copy left a destination file: %v", err)
+	}
+	noPartials(t, dst)
 }

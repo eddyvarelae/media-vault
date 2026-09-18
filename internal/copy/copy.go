@@ -100,7 +100,16 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 	hashed := &byteCounter{}
 	tee := io.TeeReader(&ctxReader{ctx: ctx, r: in}, io.MultiWriter(hasher, hashed))
 
-	written, err := io.Copy(out, tee)
+	// The destination is fed from the tee, so the hasher and byteCounter see
+	// exactly the bytes that land. teeBypass is a test-only seam (nil in
+	// production) that lets a test feed io.Copy the raw source instead, proving
+	// the hashCovers assertion below refuses a row whose landed bytes were never
+	// counted through the tee (B38, review #64).
+	var src io.Reader = tee
+	if teeBypass != nil {
+		src = teeBypass(&ctxReader{ctx: ctx, r: in})
+	}
+	written, err := io.Copy(out, src)
 	if err != nil {
 		out.Close()
 		cleanup()
@@ -163,6 +172,12 @@ func hashCovers(sum string, hashed, written int64) error {
 	}
 	return nil
 }
+
+// teeBypass is a test-only seam (nil in production): when set, io.Copy reads the
+// reader it returns instead of the tee, so the hasher and byteCounter see none
+// of the landed bytes. It exists only so a test can prove the real File refuses
+// to return a row when the assertion is violated (review #64).
+var teeBypass func(in io.Reader) io.Reader
 
 // byteCounter counts the bytes written through it — the tee writes every byte
 // it reads here as well as to the hasher, so it counts exactly what was hashed.
