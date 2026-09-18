@@ -1651,6 +1651,8 @@ func TestDryRunRequested(t *testing.T) {
 		{"repair-dest", []string{"cam", "d", "--dry-run"}, true},
 		{"certify", []string{"sony", "--root", "--dry-run"}, false}, // value of --root, not a mode switch (review #46)
 		{"certify", []string{"sony", "out.json", "--root", "/x"}, false},
+		{"restore", []string{"cam", "p", "repl", "dst", "--expect-sha", "--dry-run"}, false},       // --dry-run is --expect-sha's value (review #48)
+		{"restore", []string{"cam", "p", "repl", "dst", "--expect-sha", "abc", "--dry-run"}, true}, // a real dry-run after the sha value
 	}
 	for _, c := range cases {
 		if got := dryRunRequested(c.cmd, c.args); got != c.want {
