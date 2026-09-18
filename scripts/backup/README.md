@@ -10,8 +10,7 @@ nothing, stages nothing, and never writes to the SSD or the NAS.
 1. Lists `/Volumes` (overridable with `VOLUMES_DIR`), drops the boot volume
    and the scratch volume by device, drops `BACKUP_EXCLUDE` (`Scratch1`),
    and keeps the volumes whose name is in `BACKUP_DISKS` - the decided
-   allow-list `tars|kipp|case|Eddy's Media Vault` (`|`-separated because a
-   name can contain spaces; matched whole). An unknown mounted volume is
+   allow-list `tars|kipp|case|Eddy's Media Vault` (`|`-separated, matched whole). An unknown mounted volume is
    logged once and ignored.
 2. A known disk is **due** when it has not been reported for its current
    attach identity (device + inode + birth of the mount point: a re-attach
@@ -32,8 +31,8 @@ nothing, stages nothing, and never writes to the SSD or the NAS.
    `quick_check`s it; a torn copy is refused (exit 2). The log says
    `manifest snapshot: N rows, newest copied_at …` - "as of", not "live".
 6. For each due disk: `VAULT_CONFIG=$STATE_DIR/gap-manifest vault gap
-   <mount> --tsv <state>/gap-<disk>-<date>.tsv`, output to
-   `<state>/gap-<disk>-<date>.txt`, and one line in the log:
+   <mount> --tsv <state>/gap-<hexname>-<date>.tsv`, output to
+   `<state>/gap-<hexname>-<date>.txt`, and one line in the log:
 
        GAP tars needs archiving: yes, 9872 files, 1921695784449 bytes (of 10393 files / … on the disk; 521 files / … archived by content; 521 files / … hashed to prove it; check 521+9872=10393)
 

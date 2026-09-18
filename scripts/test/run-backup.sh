@@ -97,8 +97,8 @@ check "tick: tars needs archiving, with the arithmetic" \
 check "tick: case needs nothing (hashed to prove it)" \
   grep -q "GAP case needs archiving: no, 0 files, 0 bytes (of 1 files / 12 bytes on the disk; 1 files / 12 bytes archived by content; 1 files / 12 bytes hashed to prove it; check 1+0=1)" "$logf"
 check "tick: the disk with a space in its name is reported" grep -q "GAP Eddy's Media Vault needs archiving: yes, 1 files, 19 bytes" "$logf"
-check "tick: report and tsv files written per disk" ls "$state"/gap-tars-*.txt "$state"/gap-tars-*.tsv "$state"/gap-Eddy%27s%20Media%20Vault-*.tsv
-check "tick: the tsv lists the absent file" grep -q "SonyA6700/DCIM/new.ARW	15	" "$state"/gap-tars-*.tsv
+check "tick: report and tsv files written per disk" ls "$state"/gap-74617273-*.txt "$state"/gap-74617273-*.tsv "$state"/gap-456464792773204d65646961205661756c74-*.tsv
+check "tick: the tsv lists the absent file" grep -q "SonyA6700/DCIM/new.ARW	15	" "$state"/gap-74617273-*.tsv
 check "tick: three state lines" test "$(wc -l < "$state/backup-state.tsv" | tr -d ' ')" -eq 3
 check "tick: the unknown volume logged once" test "$(count "volume 'Random' is not in BACKUP_DISKS" "$logf")" -eq 1
 check "tick: lock released" test ! -e "$state/backup.lock"
@@ -178,19 +178,23 @@ run --force > "$out" 2>&1
 check "info-less lock: exit 1, treated as held, not taken over" test $? -eq 1 -a -d "$state/backup.lock" -a ! -e "$state/backup.lock/info"
 rm -rf "$state/backup.lock"
 
-# review #38-2: an injective slug - two disks that sanitized to the same
-# name must not share a report file, so reporting one never deletes the
-# other's output.
-mkdir -p "$vols/A B" "$vols/A_B"; mk "$vols/A B/x.mov" "aaa"; mk "$vols/A_B/y.mov" "bbb"
+# review #41: the slug is single-case (hex), so case-only names never share
+# a report file on a case-insensitive $STATE_DIR. "Disk" (4469736b) and
+# "disk" (6469736b) hex-differ; a per-name %HH/underscore slug would not.
+# They need not coexist under /Volumes: report one, detach, attach the other.
 cat > "$work/mini3.env" <<ENV
 SCRATCH_DIR="$scratch"
-BACKUP_DISKS="A B|A_B"
+BACKUP_DISKS="Disk|disk"
 ENV
-MINI_ENV="$work/mini3.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1
-n_ab_space=$(ls "$state"/gap-A%20B-*.tsv 2>/dev/null | wc -l | tr -d ' ')
-n_ab_under=$(ls "$state"/gap-A_B-*.tsv 2>/dev/null | wc -l | tr -d ' ')
-check "injective slug: 'A B' and 'A_B' get distinct report files" test "$n_ab_space" -eq 1 -a "$n_ab_under" -eq 1
-check "injective slug: both disks recorded as reported" test "$(grep -c 'A B\|A_B' "$state/backup-state.tsv")" -ge 2
+runslug() { MINI_ENV="$work/mini3.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; }
+rm -rf "$vols/disk"; mkdir -p "$vols/Disk"; mk "$vols/Disk/x.mov" "aaa"
+runslug
+rm -rf "$vols/Disk"; mkdir -p "$vols/disk"; mk "$vols/disk/y.mov" "bbb"   # the distinct disk, attached after
+runslug
+check "hex slug: 'Disk' report survives 'disk' being reported later" test -f "$state"/gap-4469736b-*.tsv
+check "hex slug: 'disk' gets its own distinct report file" test -f "$state"/gap-6469736b-*.tsv
+check "hex slug: the two reports are different files" test "$(ls "$state"/gap-4469736b-*.tsv "$state"/gap-6469736b-*.tsv 2>/dev/null | sort -u | wc -l | tr -d ' ')" -eq 2
+rm -rf "$vols/disk"
 
 echo
 if [ "$failures" -ne 0 ]; then echo "$failures check(s) failed"; exit 1; fi

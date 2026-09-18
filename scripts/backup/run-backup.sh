@@ -78,20 +78,13 @@ today() { date +%Y-%m-%d; }
 # point. A re-attach mounts a new device, so the identity changes; a report
 # is owed once per identity and once per day while it stays attached.
 attach_id() { stat -f '%d:%i:%B' "$1"; }
-# pct_encode maps a volume name to an injective, filesystem-safe slug:
-# anything outside [A-Za-z0-9._-] becomes %HH, so "A B" and "A_B" differ
-# ("A%20B" vs "A_B") and never share a report file (review #38).
-pct_encode() {
-  local s=$1 out="" i c
-  for (( i=0; i<${#s}; i++ )); do
-    c=${s:i:1}
-    case "$c" in
-      [A-Za-z0-9._-]) out+="$c" ;;
-      *) out+=$(printf '%%%02X' "'$c") ;;
-    esac
-  done
-  printf '%s' "$out"
-}
+# slug maps a volume name to an injective, filesystem-safe report slug by
+# hex-encoding every byte. A single-case alphabet [0-9a-f] is used on
+# purpose: a percent/underscore scheme keeps letter case, so "Disk" and
+# "disk" would collide on a case-insensitive $STATE_DIR and one report
+# would delete the other (review #41). od handles any bytes, incl.
+# non-ASCII and spaces.
+slug() { printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n'; }
 boot_dev=$(df -P / | awk 'NR==2 {print $1}')
 scratch_dev=""; [[ -n "$SCRATCH_DIR" && -d "$SCRATCH_DIR" ]] && scratch_dev=$(df -P "$SCRATCH_DIR" | awk 'NR==2 {print $1}')
 in_list() {  # in_list <name> <|-separated list>: whole-name match
@@ -140,7 +133,7 @@ if (( ! dry_run )); then
   # two ticks is not detected - the honest limit of polling /Volumes.
   live_unknown=""
   for u in "${unknown[@]+"${unknown[@]}"}"; do
-    slug=$(pct_encode "$u")
+    slug=$(slug "$u")
     live_unknown="$live_unknown $slug"
     marker="$STATE_DIR/backup.unknown-$slug"
     [[ -f "$marker" ]] || { touch "$marker"; log "mounted volume '$u' is not in BACKUP_DISKS — ignored (add it to report it)"; }
@@ -238,7 +231,7 @@ log "manifest snapshot: $rows rows, newest copied_at $newest, NAS file modified 
 
 for name in "${due[@]}"; do
   mp="$VOLUMES_DIR/$name"; id=$(attach_id "$mp"); d=$(today)
-  slug=$(pct_encode "$name")   # injective: distinct disks never share a report file (review #38)
+  slug=$(slug "$name")   # hex: distinct disks never share a report file, case included (review #38/#41)
   report="$STATE_DIR/gap-$slug-$d.txt"; tsv="$STATE_DIR/gap-$slug-$d.tsv"
   rm -f "$report" "$tsv"   # the job owns its dated output; a --force re-report replaces it (vault gap's --tsv is O_EXCL against aliases, not against our own file)
   log "GAP $name: report starting ($mp, attach $id)"
