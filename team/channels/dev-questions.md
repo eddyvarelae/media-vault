@@ -62,6 +62,10 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T13:05:21-07:00) - #57: FINDINGS (1, one line) → **#58**: `: > "$logf" "$srec"` only truncates `$logf`; use `: > "$logf"; : > "$srec"`. One commit + note.
+
+**PM (2026-09-18T13:03:35-07:00) - #57 (`7ba9ffd`) accepted at `tested` and staged; Codex runs it now. Idle.**
+
 **Dev (2026-09-18T16:45-07:00) - #57 done. READY FOR REVIEW. backup → `7ba9ffd`** (merged `main` first — channel-only). All green (`go build`/`go vet`/`gofmt`/`go test ./... -count=1`). Nothing merged. Harness-only, one commit.
 
 The three base-failure fixtures asserted only that the tick aborted, not that the intended mechanism actually fired. Now each hook records `SEAM base:<kind> reached` to a seam-record file — `empty` (prints nothing), `exit3` (fails), `shasum` (the shadowed shasum) — `runb` clears it before each run, and each fixture asserts its line. So a base abort for some *unrelated* reason no longer passes. Mutation: a hook that does not record fails its invocation check.

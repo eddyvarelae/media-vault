@@ -6,6 +6,20 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #57 - re-review of #56's fix only (branch `backup`, code tip `7ba9ffd`) - **resolved: FINDINGS (1, one line), accepted → Dev → request #58**
+
+**PM (2026-09-18T13:03:35-07:00):** `git show 7ba9ffd -- . ':!team'`. Claim: the empty hook, the `exit 3` hook and the shadowed `shasum` each record their invocation (`SEAM base:<kind> reached`), and each base-failure fixture clears and then asserts that observation, so an earlier abort cannot satisfy the fixture. PM at `7ba9ffd`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** any base-failure fixture can still pass without its hook having run.
+
+Verdict goes below this line.
+
+**Reviewer (2026-09-18):** FINDINGS — request #57, harness fix only: `git show 7ba9ffd -- . ':!team'`.
+
+1. **The seam record is not cleared before each fixture as claimed.** At `scripts/test/run-backup.sh:453` in `7ba9ffd`, `: > "$logf" "$srec"` redirects only to `$logf`; `$srec` is an ignored argument to `:`, not a second redirection. Consequently the empty-hook observation remains during the exit-3 fixture, and both observations remain during the shasum fixture. Use separate truncations (`: > "$logf"; : > "$srec"`) to implement the claimed reset. The current fresh temporary directory and distinct, once-per-run marker assertions do prevent an earlier abort from passing the three fixtures as presently ordered; this finding concerns the explicitly claimed per-fixture clearing, not a demonstrated false pass in that sequence. Repeating a fixture within the same work directory would otherwise allow its stale marker to satisfy the invocation assertion.
+
+Static trace: all three generated executables append their own distinct marker to the expanded seam-record path (lines 456, 460, 466), and all three fixtures assert the corresponding marker (lines 471, 475, 479). The empty hook keeps stdout empty; the failing hook and shadowed shasum retain exits 3 and 1. Validation: `bash -n` passed on the committed harness. No scripts or Go tests executed. Only `team/channels/review-requests.md` modified.
+
+**PM (2026-09-18T13:05:21-07:00):** Accepted: `: > "$logf" "$srec"` truncates only the first file; make it two truncations. → **#58**.
+
 ### #56 - re-review of #55's fixes only (branch `backup`, code tip `4d7178a`) - **resolved: FINDINGS (1, harness), accepted → Dev → request #57**
 
 **PM (2026-09-18T12:56:52-07:00):** `git show 4d7178a -- . ':!team'` (fix commit after the pre-#56 `main` merge, if any). Claims: the failure seam is honored only when `BACKUP_TEST_MODE=1` is exported by the harness, with a fixture proving a normal tick ignores `BACKUP_FAIL_AT`; every injected operation and the shadowed `shasum` log `SEAM <op> reached` and each fixture asserts it; a `collision` seam fails `slug_held_by_other` after name lookup and base succeed and the fixture asserts the tri-state error abort; base-failure fixtures start from a seeded registry, `cmp` it after, and assert no `gap-*.txt`, no `gap-*.tsv`, no marker; the Go part (`internal/gap`, `cmd/vault`) is mergeable alone. PM at `4d7178a`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** the seam can act without test mode; any fixture passes without its `SEAM … reached` line; the collision seam fires before the base computation; or a base-failure fixture can pass with a TSV left behind.
