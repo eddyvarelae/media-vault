@@ -24,3 +24,7 @@ Format: `- YYYY-MM-DD · **decision** · context/why · received-by: {role}`
 - 2026-09-17 · **Tagger batch rules (travel with the job): newest first over the whole archive (`copied_at` DESC, no watermark); 200 GB/night cap until a Sony night is timed; no folder skipped, six camera folders first then Backup/LeanTank/Public; `#recycle` never a source; the five GoPro test clips stay tagged** · same source · received-by: pm (relayed)
 - 2026-09-15 · **`run-backup.sh` is report-only: on attach of a known external SSD run the content gap check, write a report, copy nothing; attach detection by `StartInterval` polling** · same source · received-by: pm (relayed)
 - 2026-09-17 · **`case` SSD is certified and cleared to wipe; only Eddy wipes** · same source · received-by: pm (relayed)
+- 2026-09-17 · **Retire mini-server's WO-1 part A over media-vault; Eddy tells that window** · received-by: pm
+- 2026-09-17 · **`NAS_SHARES="media docker"` set in mini-server's `config/mini.env`** (was `"media"`) · the `docker` share mounts on the Mini within 5 min · received-by: pm
+- 2026-09-17 · **SSH on the UGREEN NAS is enabled** · user/sudo/docker details still to be confirmed by the Tester · received-by: pm
+- 2026-09-17 · **The PM merges F4 to `main` and pushes; a permission rule lets the PM merge/push on this repo from now on** · every merge still requires a Reviewer APPROVE in the file · received-by: pm
