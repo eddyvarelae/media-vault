@@ -8,7 +8,13 @@ import (
 	"time"
 
 	"github.com/eddyvarelae/media-vault/internal/manifest"
+	"github.com/eddyvarelae/media-vault/internal/testguard"
 )
+
+func TestMain(m *testing.M) {
+	testguard.Require() // never write fixtures under /volume1 or /mnt
+	os.Exit(m.Run())
+}
 
 func openManifest(t *testing.T) *manifest.Manifest {
 	t.Helper()

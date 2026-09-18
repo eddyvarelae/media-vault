@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -16,49 +15,33 @@ import (
 
 	"github.com/eddyvarelae/media-vault/internal/certify"
 	"github.com/eddyvarelae/media-vault/internal/manifest"
+	"github.com/eddyvarelae/media-vault/internal/testguard"
 )
 
 // The tests below run the real pipeline against t.TempDir() only. Nothing
 // here may reach the NAS paths, even on a host where they exist: production
-// footage lives there and the manifest is single-writer.
-var forbiddenRoots = []string{"/volume1", "/mnt"}
-
+// footage lives there and the manifest is single-writer. testguard.Require
+// enforces that on the resolved temp root before anything is written.
 func TestMain(m *testing.M) {
+	testguard.Require()
 	// Re-exec hook: the test binary becomes `vault` when asked to, so the
-	// round-trip tests exercise main() and get real exit codes.
+	// round-trip tests exercise main() and get real exit codes. Only the
+	// vault() helper sets this, and only in the child's environment.
 	if os.Getenv("VAULT_TEST_MAIN") == "1" {
 		main()
 		os.Exit(0)
 	}
-	for _, root := range forbiddenRoots {
-		if strings.HasPrefix(os.TempDir(), root) {
-			fmt.Fprintf(os.Stderr, "refusing to run: TMPDIR %q is under %s\n", os.TempDir(), root)
-			os.Exit(1)
-		}
-	}
 	os.Exit(m.Run())
-}
-
-// safeDir is t.TempDir() plus the NAS guard, for every path a test hands to
-// the CLI.
-func safeDir(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	for _, root := range forbiddenRoots {
-		if strings.HasPrefix(dir, root) {
-			t.Fatalf("temp dir %q is under forbidden root %s", dir, root)
-		}
-	}
-	return dir
 }
 
 // vault runs the CLI as a subprocess (this test binary re-exec'd through
 // main) with VAULT_CONFIG pinned to cfg and cwd pinned to a temp dir, so a
 // missing env var cannot fall back to the repo's ./vault-config either.
+// Every path a test hands it comes from t.TempDir(), which TestMain guarded.
 func vault(t *testing.T, cfg string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], args...)
-	cmd.Dir = safeDir(t)
+	cmd.Dir = t.TempDir()
 	cmd.Env = append(os.Environ(), "VAULT_TEST_MAIN=1", "VAULT_CONFIG="+cfg)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
@@ -114,7 +97,7 @@ func copyInProcess(t *testing.T, m *manifest.Manifest, args ...string) (stdout, 
 
 func openManifest(t *testing.T) *manifest.Manifest {
 	t.Helper()
-	m, err := manifest.Open(filepath.Join(safeDir(t), "manifest.db"))
+	m, err := manifest.Open(filepath.Join(t.TempDir(), "manifest.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +156,7 @@ func statuses(t *testing.T, m *manifest.Manifest, disk string) map[string]string
 // temp source, temp destination and temp manifest, then the recopy and
 // corruption paths that follow from it.
 func TestRoundTrip(t *testing.T) {
-	cfg, src, dst := safeDir(t), safeDir(t), safeDir(t)
+	cfg, src, dst := t.TempDir(), t.TempDir(), t.TempDir()
 	writeFile(t, filepath.Join(src, "DCIM", "C0001.MP4"), "clip one", t0)
 	writeFile(t, filepath.Join(src, "DCIM", "C0002.MP4"), "clip two", t0)
 	writeFile(t, filepath.Join(src, "DCIM", "C0001.JPG"), "still", t0)
@@ -212,7 +195,7 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatalf("verify: exit %d", code)
 	}
 
-	certPath := filepath.Join(safeDir(t), "cam.cert.json")
+	certPath := filepath.Join(t.TempDir(), "cam.cert.json")
 	_, _, code = vault(t, cfg, "certify", "cam", certPath)
 	if code != 0 {
 		t.Fatalf("certify: exit %d", code)
@@ -388,7 +371,7 @@ func TestCopyExitStatus(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			m := openManifest(t)
-			src, dst := safeDir(t), safeDir(t)
+			src, dst := t.TempDir(), t.TempDir()
 			c.setup(t, src, dst)
 			args := append([]string{"diskA", src, dst}, c.flags...)
 			out, errOut, code := copyInProcess(t, m, args...)
@@ -426,7 +409,7 @@ func TestCopyExitStatus(t *testing.T) {
 // renamed destination, so verify and certify find it.
 func TestRenameLandsUnderRenamedPath(t *testing.T) {
 	m := openManifest(t)
-	src, dst := safeDir(t), safeDir(t)
+	src, dst := t.TempDir(), t.TempDir()
 	writeFile(t, filepath.Join(src, "only.mov"), "new bytes", t0)
 	writeFile(t, filepath.Join(dst, "only.mov"), "foreign", t0)
 
@@ -451,7 +434,7 @@ func TestRenameLandsUnderRenamedPath(t *testing.T) {
 // TestCollisionRowsAndExitThroughMain checks the wiring: runCopy's status is
 // the process exit code, and a collision-skipped file gets no manifest row.
 func TestCollisionRowsAndExitThroughMain(t *testing.T) {
-	cfg, src, dst := safeDir(t), safeDir(t), safeDir(t)
+	cfg, src, dst := t.TempDir(), t.TempDir(), t.TempDir()
 	writeFile(t, filepath.Join(src, "only.mov"), "new bytes", t0)
 	writeFile(t, filepath.Join(src, "ok.mov"), "fine", t0)
 	writeFile(t, filepath.Join(dst, "only.mov"), "foreign", t0)

@@ -15,8 +15,11 @@ go test ./... -count=1    # temp dirs + temp manifest only; no NAS, no network
 
 Tests run the real pipeline against `t.TempDir()`. `cmd/vault` tests re-exec
 the test binary through `main()` (`VAULT_TEST_MAIN=1`) to get real exit codes,
-with `VAULT_CONFIG` and cwd pinned to temp dirs. `TestMain` refuses to run if
-`TMPDIR` is under `/volume1` or `/mnt`. Never point a test at either.
+with `VAULT_CONFIG` and cwd pinned to temp dirs. Every package that writes
+fixtures calls `testguard.Require()` from its `TestMain`
+(`internal/testguard`): it resolves the temp root (`Abs` + symlinks) and exits
+1 if it is under `/volume1` or `/mnt`. A new test package that writes files
+gets the same three-line `TestMain`. Never point a test at either root.
 
 ## Package map
 

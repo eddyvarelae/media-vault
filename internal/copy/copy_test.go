@@ -11,7 +11,13 @@ import (
 	"time"
 
 	"github.com/eddyvarelae/media-vault/internal/scan"
+	"github.com/eddyvarelae/media-vault/internal/testguard"
 )
+
+func TestMain(m *testing.M) {
+	testguard.Require() // never write fixtures under /volume1 or /mnt
+	os.Exit(m.Run())
+}
 
 // noPartials fails the test if any *.vault-partial is left anywhere under
 // dst. A surviving partial is a half-written file the next scan would
