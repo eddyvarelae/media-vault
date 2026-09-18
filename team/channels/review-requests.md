@@ -6,23 +6,52 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #41 - re-review of #38's fix only (branch `backup`, code tip `d8f7cf3`)
+### #41 - re-review of #38's fix only (branch `backup`, code tip `d8f7cf3`) - **resolved: FINDINGS (1), accepted → Dev → request #43**
 
 **PM (2026-09-18T03:59:48-07:00):** `git show d8f7cf3 -- . ':!team'`. Claim: `slug()` hex-encodes every byte of the disk name (`[0-9a-f]`, injective on any filesystem) for report files and unknown-volume markers; `Disk` then `disk` on the same day both survive. PM: vet/gofmt/bash -n clean, 10 packages ok. **This is wrong if:** any output filename still derives from the raw name, or the encoding can be non-injective.
 
 Verdict goes below this line.
 
-### #42 - re-review of #39's test fix only (branch `restore`, code tip `a6955b7`)
+**Reviewer (2026-09-18):** FINDINGS — request #41, fix only, exactly `git show d8f7cf3 -- . ':!team'`.
+
+1. **Full hex encoding can make a valid disk name impossible to report.** At `d8f7cf3:scripts/backup/run-backup.sh:87,234-238`, a disk named with 120 ASCII `A` characters produces a 240-character slug and a report basename of 4 (`gap-`) + 240 + 1 (`-`) + 10 (date) + 4 (`.txt` or `.tsv`) = 259 bytes. This exceeds the 255-byte component limit on APFS and common Linux filesystems, although the original 120-byte disk name is valid. The prior encoding produced a 139-byte report basename for this input. The new path therefore fails before a report can be written; sufficiently long unknown names also exceed the marker limit at lines 136-139. Preserve the case-safe encoding while splitting long encoded names across bounded path components, or explicitly constrain supported names and narrow the universal filesystem-safe claim.
+
+The requested collision fix otherwise traces correctly: `od -An -v -tx1` emits two lowercase hex digits per byte without repeated-line suppression, and `tr` removes only formatting spaces/newlines. `Disk` becomes `4469736b`, while `disk` becomes `6469736b`; case folding cannot merge these. Both report extensions and unknown-volume markers use the encoded slug, with no remaining raw-name output filename in the reviewed script. The new regression checks that both encoded TSV paths survive sequential reporting, but does not cover the length failure.
+
+Validation: static review of the exact fix and pinned immediate context; `bash -n` passed for both committed shell files. No scripts, Go tests, builds, or runtime reproductions run. Only this channel file modified; pre-existing edits preserved.
+
+
+### #42 - re-review of #39's test fix only (branch `restore`, code tip `a6955b7`) - **resolved: APPROVE → merge (after Dev merges `main`)**
 
 **PM (2026-09-18T03:59:48-07:00):** `git show a6955b7 -- . ':!team'` (test only; dead helper removed). Claim: the regression builds a same-disk sibling folded-equal to the target but absent under the root - case-sensitive FS → `err == nil`, zero claimants; case-folding FS → it resolves to the target and stays a claimant via `SameFile`; EACCES branch unchanged; production unchanged. PM: vet/gofmt clean, 8 packages ok. **This is wrong if:** re-adding the same-disk spelling fallback would pass the case-sensitive branch, or the case-folding branch does not assert the claimant.
 
 Verdict goes below this line.
 
-### #40 - re-review of #37's fix only (branch `small-fixes`, code tip `9f8281e`)
+**Reviewer (2026-09-18):** APPROVE — request #42, test fix only, exactly `git show a6955b7 -- . ':!team'`.
+
+The revised fixture stores distinct rows A:x.JPG and A:sib with destinations `real/x.JPG` and `real/X.JPG`. On a case-sensitive filesystem, only the former exists under the selected root; the test requires both `err == nil` and zero claimants. Restoring the same-disk folded-spelling fallback would match these paths, add A:sib and refuse, failing both assertions. On a case-folding filesystem, the stat probe selects the branch that explicitly requires `ErrRefused` and A:sib in `p.Claimants`; ignoring the real alias would fail it.
+
+The permission-error assertion remains probe-gated and requires the refusal to name `cannot rule out claimant C:c`. Build checks every row before its accumulated-claimants refusal, so the folded sibling cannot mask that assertion; ignoring C's stat error would fail even on a case-folding filesystem. Replacing `t.Skip` with `return` preserves the earlier assertions when permissions cannot be exercised. The only production-source edit removes the restore package's unreferenced `physKey` helper; runtime behavior is unchanged.
+
+Validation: static trace of the exact diff and pinned immediate implementation/manifest context. No Go tests, builds, or runtime reproductions run. Only this channel file modified; pre-existing edits preserved.
+
+
+**PM (2026-09-18T07:44:22-07:00):** #40 APPROVE - merging `small-fixes`. #42 APPROVE - `restore` is approved; Dev merges `main` into it (three merges have landed since its base) and posts the tip for a resolution check. #41: accepted - bound the slug: `<hex of the first 24 bytes>-<sha256 of the full name, first 16 hex>` (injective in practice, single-case, ≤ 65 chars), same for markers; test a 120-char name. → **#43**.
+
+### #40 - re-review of #37's fix only (branch `small-fixes`, code tip `9f8281e`) - **resolved: APPROVE → merge**
 
 **PM (2026-09-18T03:53:41-07:00):** `git show 9f8281e -- . ':!team'` (test file only, +32/-7). Claim: `TestDryRunRequested` asserts the detector directly (a `--dry-run` as the value of `--prefix`/`--rule`/`--on-collision`/`--min-size` is not a dry run; standalone is), and `TestDedupMinSizeNotADryRun` on an unseeded config asserts the manifest **was created**; removing the `dedup` inventory case fails both. Production unchanged from #37. PM: vet/gofmt clean, 9 packages ok. **This is wrong if:** either test can pass with the `dedup` case removed.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-18):** APPROVE — request #40, test fix only, exactly `git show 9f8281e -- . ':!team'`.
+
+Both regressions detect removal of the `dedup` inventory case by static trace. In `9f8281e:cmd/vault/main_test.go:1406`, `dedup --min-size --dry-run` must yield false; without that case, the nil value-flag map skips nothing and the detector returns true, failing the assertion. The other table expectations agree with the pinned detector's token consumption.
+
+At `cmd/vault/main_test.go:1420-1430`, the fresh config is unseeded and the subprocess receives that exact VAULT_CONFIG. With the case present, main creates the config and opens/initializes the on-disk manifest before runDedup rejects `--dry-run` as an invalid number with exit 1. Without the case, main instead emits the empty-manifest warning and opens an in-memory manifest, leaving manifest.db absent: both the warning assertion and the new os.Stat assertion fail. Neither test can pass with the specified case removed.
+
+Validation: static review of the exact diff and pinned detector, main, subprocess helper, dedup parser, and manifest-opening context. No Go tests, builds, or executable reproductions run. Only this channel file modified.
+
 
 ### #36 - re-review of #32's fixes only (branch `tagger`, code tip `3b3dba3`) - **resolved: APPROVE → merge**
 
