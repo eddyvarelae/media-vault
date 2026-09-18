@@ -53,7 +53,7 @@ type Change struct {
 type Plan struct {
 	Checked     int // rows with a dest_path
 	Intact      int // dest_path is a regular file under the root; not examined further
-	NoDest      int // rows without a dest_path (inventoried); not this tool's job
+	NoDest      int // rows without a dest_path - located by source_path (verify's rule), whatever their status; not this tool's job
 	Changes     []Change
 	BytesHashed int64
 

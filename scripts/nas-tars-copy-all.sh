@@ -8,24 +8,35 @@ set -u
 IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.1}"
 LOG="${VAULT_LOG:-/volume1/docker/tars-copy.log}"
 
-echo "[$(date)] starting tars → media copy" | tee -a "$LOG"
+# One line to $LOG, and to the terminal only when there is one (B35, the
+# same fix as B27): launched as `sudo nohup ./nas-tars-copy-all.sh >> $LOG
+# 2>&1 &`, a `tee -a $LOG` wrote every line twice.
+log() {
+  if [ -t 1 ]; then
+    echo "$@" | tee -a "$LOG"
+  else
+    echo "$@" >> "$LOG"
+  fi
+}
+
+log "[$(date)] starting tars → media copy"
 
 run_copy() {
   local disk="$1"
   local folder="$2"
   shift 2
-  echo | tee -a "$LOG"
-  echo "[$(date)] === $folder → $disk ===" | tee -a "$LOG"
+  log ""
+  log "[$(date)] === $folder → $disk ==="
   if ! docker run --rm \
     -v /volume1:/volume1 \
     -v /mnt/@usb:/usb:ro \
     -e VAULT_CONFIG=/volume1/docker/vault-nas-config \
     "$IMG" copy "$disk" "/usb/sdc1/$folder" "/volume1/media/$folder" \
     "$@" --on-collision rename-mtime-year >> "$LOG" 2>&1; then
-    echo "[$(date)] $folder FAILED" | tee -a "$LOG"
+    log "[$(date)] $folder FAILED"
     return 1
   fi
-  echo "[$(date)] $folder done" | tee -a "$LOG"
+  log "[$(date)] $folder done"
 }
 
 run_copy media-djiflip   DJIFlip   --prefix DCIM --rule MP4=Videos --rule SRT=FlightLogs --rule JPG=Photos
@@ -33,5 +44,5 @@ run_copy media-gopro     GoPro     --prefix DCIM --rule MP4=Videos --rule LRV=Vi
 run_copy media-sonya6700 SonyA6700
 run_copy media-sonyzve10 SonyZVE10
 
-echo | tee -a "$LOG"
-echo "[$(date)] all tars copies done" | tee -a "$LOG"
+log ""
+log "[$(date)] all tars copies done"

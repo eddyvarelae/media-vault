@@ -80,11 +80,28 @@ func main() {
 	if configDir == "" {
 		configDir = "./vault-config"
 	}
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		die("create config dir: %v", err)
+	dbPath := filepath.Join(configDir, "manifest.db")
+	var m *manifest.Manifest
+	var err error
+	if dryRunRequested(cmd, args) {
+		// A dry run writes nothing - not an archive file, not a row, and
+		// (B31) not the config dir or the manifest file either: the
+		// manifest is opened read-only, or planned against an empty
+		// in-memory one when none exists yet.
+		if _, statErr := os.Stat(dbPath); statErr == nil {
+			m, err = manifest.OpenReadOnly(dbPath)
+		} else if os.IsNotExist(statErr) {
+			fmt.Fprintf(os.Stderr, "(dry-run: no manifest at %s yet; planning against an empty one, creating nothing)\n", dbPath)
+			m, err = manifest.OpenEmpty()
+		} else {
+			err = statErr
+		}
+	} else {
+		if err := os.MkdirAll(configDir, 0o755); err != nil {
+			die("create config dir: %v", err)
+		}
+		m, err = manifest.Open(dbPath)
 	}
-
-	m, err := manifest.Open(filepath.Join(configDir, "manifest.db"))
 	if err != nil {
 		die("open manifest: %v", err)
 	}
@@ -650,7 +667,7 @@ func runRepairDest(ctx context.Context, m *manifest.Manifest, args []string) int
 	}
 	repairable, unresolved, by := plan.Counts()
 
-	fmt.Printf("Disk %s at %s: %d rows with a dest_path, %d intact, %d unresolved (%d inventoried rows have no dest_path and were not examined)\n",
+	fmt.Printf("Disk %s at %s: %d rows with a dest_path, %d intact, %d unresolved (%d rows have no dest_path — located by source_path, any status — and were not examined)\n",
 		disk, root, plan.Checked, plan.Intact, len(plan.Changes), plan.NoDest)
 	for _, c := range plan.Changes {
 		switch c.Outcome {
@@ -673,8 +690,10 @@ func runRepairDest(ctx context.Context, m *manifest.Manifest, args []string) int
 
 	if dryRun {
 		// repair-dest never writes archive files; the only thing it can
-		// write is dest_path, and dry-run does not. (Opening the manifest
-		// initializes it when absent - every command does; B31.)
+		// write is dest_path, and dry-run does not. main opened the manifest
+		// read-only for this run (B31: --dry-run creates no config dir and no
+		// manifest, and an absent one is planned against an empty in-memory
+		// copy), so nothing here could write even if it tried.
 		fmt.Println("(dry-run; no manifest row written, and repair-dest never writes archive files)")
 		return 0
 	}
@@ -1110,6 +1129,41 @@ func human(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// dryRunRequested reports whether the command will run as a dry run - the
+// single interpretation main opens the manifest by and the command executes
+// by, so a literal --dry-run sitting where a flag VALUE is expected (e.g.
+// --prefix --dry-run) is a prefix, not a mode switch (review #27). The
+// per-command sets below are exactly the value-taking flags each parser
+// consumes (scan/copy/move: --prefix/--rule/--on-collision; dedup:
+// --min-size; certify: --root; restore: --expect-sha; the rest none); keep
+// them in step with the parsers, or a value that happens to read --dry-run
+// (e.g. certify --root --dry-run, restore … --expect-sha --dry-run) is
+// misread as the mode switch and the manifest open disagrees with what the
+// command's own parser does (review #46/#48).
+func dryRunRequested(cmd string, args []string) bool {
+	var valueFlags map[string]bool
+	switch cmd {
+	case "scan", "copy", "move":
+		valueFlags = map[string]bool{"--prefix": true, "--rule": true, "--on-collision": true}
+	case "dedup":
+		valueFlags = map[string]bool{"--min-size": true}
+	case "certify":
+		valueFlags = map[string]bool{"--root": true}
+	case "restore":
+		valueFlags = map[string]bool{"--expect-sha": true}
+	}
+	for i := 0; i < len(args); i++ {
+		if valueFlags[args[i]] {
+			i++
+			continue
+		}
+		if args[i] == "--dry-run" {
+			return true
+		}
+	}
+	return false
 }
 
 func die(format string, args ...any) {

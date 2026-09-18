@@ -1071,7 +1071,7 @@ func TestRepairDest(t *testing.T) {
 		t.Fatalf("dry-run: exit %d\n%s", code, out)
 	}
 	for _, want := range []string{
-		"5 rows with a dest_path, 1 intact, 4 unresolved",
+		"5 rows with a dest_path, 1 intact, 4 unresolved (0 rows have no dest_path — located by source_path, any status — and were not examined)",
 		"REPAIR     C0001.XML : C0001.XML → CLIP/C0001.XML",
 		"REPAIR     DSC0001.JPG : DSC0001.JPG → DCIM/DSC0001.JPG",
 		"NOT FOUND  DSC0002.JPG : DSC0002.JPG",
@@ -1484,6 +1484,292 @@ func TestVerifyOnlyUnverified(t *testing.T) {
 	if _, _, code := vault(t, cfg, "certify", "cam"); code != 0 {
 		t.Errorf("certify after repairing the mismatch incrementally: exit %d", code)
 	}
+}
+
+// TestDryRunTouchesNoConfig is B31: a --dry-run creates no config dir, no
+// manifest file, and leaves an existing manifest byte-identical, for every
+// command that takes the flag; it still plans against an empty manifest
+// when none exists.
+func TestDryRunTouchesNoConfig(t *testing.T) {
+	src, dst := t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(src, "a.mov"), "clip", t0)
+
+	t.Run("no config yet: nothing is created", func(t *testing.T) {
+		cfg := filepath.Join(t.TempDir(), "never-made")
+		for _, args := range [][]string{
+			{"copy", "cam", src, dst, "--dry-run"},
+			{"repair-dest", "cam", dst, "--dry-run"},
+			{"move", "cam", "cam2", src, dst, "--dry-run"},
+		} {
+			out, errOut, code := vault(t, cfg, args...)
+			if code != 0 {
+				t.Errorf("%v: exit %d\n%s%s", args, code, out, errOut)
+			}
+			if !strings.Contains(errOut, "planning against an empty one, creating nothing") {
+				t.Errorf("%v: no notice that the manifest does not exist yet: %q", args, errOut)
+			}
+			if _, err := os.Stat(cfg); err == nil {
+				t.Errorf("%v: config dir created", args)
+			}
+		}
+		if out, _, code := vault(t, cfg, "copy", "cam", src, dst, "--dry-run"); code != 0 || !strings.Contains(out, "1 files would be copied") {
+			t.Errorf("dry run against no manifest should plan the file as new: exit %d\n%s", code, out)
+		}
+		if _, err := os.Stat(filepath.Join(dst, "a.mov")); err == nil {
+			t.Errorf("dry run copied the file")
+		}
+	})
+
+	t.Run("existing manifest: read-only, byte-identical", func(t *testing.T) {
+		cfg := t.TempDir()
+		if _, _, code := vault(t, cfg, "copy", "cam", src, dst); code != 0 {
+			t.Fatalf("copy: exit %d", code)
+		}
+		if _, _, code := vault(t, cfg, "verify", "cam", dst); code != 0 {
+			t.Fatalf("verify: exit %d", code)
+		}
+		db := filepath.Join(cfg, "manifest.db")
+		before := sha(readFile(t, db))
+		beforeRows := rowsOf(t, cfg, "cam")
+		writeFile(t, filepath.Join(src, "b.mov"), "new clip", t0)
+		for _, args := range [][]string{
+			{"copy", "cam", src, dst, "--dry-run"},
+			{"copy", "cam", src, dst, "--dry-run", "--dedupe-content"},
+			{"repair-dest", "cam", dst, "--dry-run"},
+			{"move", "cam", "cam2", src, dst, "--dry-run"},
+		} {
+			if out, errOut, code := vault(t, cfg, args...); code != 0 {
+				t.Errorf("%v: exit %d\n%s%s", args, code, out, errOut)
+			}
+		}
+		if got := sha(readFile(t, db)); got != before {
+			t.Errorf("manifest.db bytes changed under --dry-run")
+		}
+		if got := rowsOf(t, cfg, "cam"); !reflect.DeepEqual(got, beforeRows) {
+			t.Errorf("rows changed under --dry-run")
+		}
+		// And a real run still opens it writable afterwards.
+		if _, _, code := vault(t, cfg, "copy", "cam", src, dst); code != 0 {
+			t.Errorf("real copy after dry runs: exit %d", code)
+		}
+	})
+
+	t.Run("a command without the flag still initializes", func(t *testing.T) {
+		cfg := filepath.Join(t.TempDir(), "made")
+		if _, _, code := vault(t, cfg, "scan", "cam", src, dst); code != 0 {
+			t.Fatalf("scan: exit %d", code)
+		}
+		if _, err := os.Stat(filepath.Join(cfg, "manifest.db")); err != nil {
+			t.Errorf("scan did not create the manifest: %v", err)
+		}
+	})
+}
+
+// TestMoveNeverLandsOnAVerifiedDestination is B32: move consults the same
+// owner index as copy. A verified row's missing file is still its path; a
+// symlinked directory is not a destination.
+func TestMoveNeverLandsOnAVerifiedDestination(t *testing.T) {
+	cfg, srcA, srcB, dst := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(srcA, "x.mov"), "the clip", t0)
+	if _, _, code := vault(t, cfg, "copy", "A", srcA, dst); code != 0 {
+		t.Fatalf("copy A: exit %d", code)
+	}
+	if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
+		t.Fatalf("verify A: exit %d", code)
+	}
+	if err := os.Remove(filepath.Join(dst, "x.mov")); err != nil { // the verified file is missing; the row still owns the path
+		t.Fatal(err)
+	}
+	// B's rows: files under srcB, rows seeded as copied there.
+	m, err := manifest.Open(filepath.Join(cfg, "manifest.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{"x.mov": "other bytes", "y.mov": "free bytes", "z.mov": "via link"} {
+		writeFile(t, filepath.Join(srcB, name), content, t0)
+		if err := m.Upsert(manifest.Entry{SourceDisk: "B", SourcePath: name, DestPath: name, Size: int64(len(content)),
+			MtimeNs: t0.UnixNano(), SHA256: sha(content), CopiedAt: 1, Status: "copied"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m.Close()
+	if err := os.Symlink(t.TempDir(), filepath.Join(dst, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	aBefore := rowsOf(t, cfg, "A")
+
+	out, _, _ := vault(t, cfg, "move", "B", "A", srcB, dst)
+	if !strings.Contains(out, "dst-owned by verified row A:x.mov") {
+		t.Errorf("x.mov should be refused as owned:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "x.mov")); err == nil {
+		t.Errorf("x.mov was written under A's verified row")
+	}
+	if got := readFile(t, filepath.Join(srcB, "x.mov")); got != "other bytes" {
+		t.Errorf("source x.mov moved away: %q", got)
+	}
+	if got := readFile(t, filepath.Join(dst, "y.mov")); got != "free bytes" {
+		t.Errorf("y.mov should have moved:\n%s", out)
+	}
+	if got := rowsOf(t, cfg, "A"); !reflect.DeepEqual(got["x.mov"], aBefore["x.mov"]) {
+		t.Errorf("A's verified row changed")
+	}
+
+	// Through a symlinked directory: refused.
+	writeFile(t, filepath.Join(srcB, "z.mov"), "via link", t0)
+	out, _, _ = vault(t, cfg, "move", "B", "A", srcB, dst, "--rule", "MOV=alias")
+	if !strings.Contains(out, "dst through a symlink (alias)") {
+		t.Errorf("z.mov should be refused through the link:\n%s", out)
+	}
+	if got := readFile(t, filepath.Join(srcB, "z.mov")); got != "via link" {
+		t.Errorf("z.mov moved through the link: %q", got)
+	}
+}
+
+// TestDryRunFlagAfterAValueFlag is review #27-1: a literal --dry-run where a
+// flag value is expected is that value, not a mode switch. main must open
+// read-write and the command must run for real, recording the copy.
+// TestDedupMinSizeNotADryRun is review #33/#37: `dedup --min-size --dry-run`
+// reads --dry-run as --min-size's value (dedup has no dry-run and is never
+// opened read-only), so the manifest open and the command agree. It fails
+// on the bad number, not by opening read-only behind the command's back.
+func TestDryRunRequested(t *testing.T) {
+	// The detector directly, so removing any command's value-flag case is
+	// caught here regardless of what the command then does (review #37/#40).
+	cases := []struct {
+		cmd  string
+		args []string
+		want bool
+	}{
+		{"copy", []string{"cam", "s", "d", "--dry-run"}, true},
+		{"copy", []string{"cam", "s", "d", "--prefix", "--dry-run"}, false}, // value of --prefix
+		{"copy", []string{"cam", "s", "d", "--rule", "--dry-run"}, false},   // value of --rule
+		{"scan", []string{"cam", "s", "d", "--on-collision", "--dry-run"}, false},
+		{"move", []string{"a", "b", "s", "d", "--prefix", "--dry-run"}, false},
+		{"dedup", []string{"--min-size", "--dry-run"}, false},      // value of --min-size (the #37 fix)
+		{"dedup", []string{"--min-size", "10", "--dry-run"}, true}, // a real (nonsense) dry-run
+		{"repair-dest", []string{"cam", "d", "--dry-run"}, true},
+		{"certify", []string{"sony", "--root", "--dry-run"}, false}, // value of --root, not a mode switch (review #46)
+		{"certify", []string{"sony", "out.json", "--root", "/x"}, false},
+		{"restore", []string{"cam", "p", "repl", "dst", "--expect-sha", "--dry-run"}, false},       // --dry-run is --expect-sha's value (review #48)
+		{"restore", []string{"cam", "p", "repl", "dst", "--expect-sha", "abc", "--dry-run"}, true}, // a real dry-run after the sha value
+	}
+	for _, c := range cases {
+		if got := dryRunRequested(c.cmd, c.args); got != c.want {
+			t.Errorf("dryRunRequested(%q, %v) = %v, want %v", c.cmd, c.args, got, c.want)
+		}
+	}
+}
+
+// End to end on an UNSEEDED config: with the fix, dedup --min-size --dry-run
+// is not a dry run, so main creates the config and manifest (a dry run would
+// not) and dedup fails on the bad size. Removing the dedup case makes main
+// open dry (no config created) - which this catches.
+func TestDedupMinSizeNotADryRun(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "fresh")
+	_, errOut, code := vault(t, cfg, "dedup", "--min-size", "--dry-run")
+	if code != 1 || !strings.Contains(errOut, "invalid --min-size") {
+		t.Errorf("dedup --min-size --dry-run: exit %d, stderr %q; want 1 invalid --min-size", code, errOut)
+	}
+	if strings.Contains(errOut, "planning against an empty one") {
+		t.Errorf("dedup was wrongly treated as a dry run:\n%s", errOut)
+	}
+	if _, err := os.Stat(filepath.Join(cfg, "manifest.db")); err != nil {
+		t.Errorf("a non-dry-run dedup should have created the manifest: %v", err)
+	}
+}
+
+func TestDryRunFlagAfterAValueFlag(t *testing.T) {
+	cfg, src, dst := t.TempDir(), t.TempDir(), t.TempDir()
+	// --prefix --dry-run means prefix="--dry-run": the file lives under that.
+	writeFile(t, filepath.Join(src, "--dry-run", "a.mov"), "clip", t0)
+	out, errOut, code := vault(t, cfg, "copy", "cam", src, dst, "--prefix", "--dry-run")
+	if code != 0 {
+		t.Fatalf("copy: exit %d\n%s%s", code, out, errOut)
+	}
+	if strings.Contains(errOut, "planning against an empty one") || strings.Contains(out, "(dry-run;") {
+		t.Errorf("the command was treated as a dry run:\n%s%s", out, errOut)
+	}
+	// The real copy happened and was recorded - not left unrecorded (the
+	// read-only-open failure the finding describes) nor lost to an in-memory db.
+	if got := readFile(t, filepath.Join(dst, "a.mov")); got != "clip" {
+		t.Errorf("file not copied for real: %q", got)
+	}
+	rows := rowsOf(t, cfg, "cam")
+	if len(rows) != 1 || rows["--dry-run/a.mov"].Status != "copied" {
+		t.Errorf("copy not recorded: %v", rows)
+	}
+	// And a real --dry-run (standalone) still is one.
+	writeFile(t, filepath.Join(src, "b.mov"), "two", t0)
+	out, _, code = vault(t, cfg, "copy", "cam", src, dst, "--dry-run")
+	if code != 0 || !strings.Contains(out, "(dry-run;") {
+		t.Fatalf("standalone --dry-run: exit %d\n%s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "b.mov")); err == nil {
+		t.Errorf("standalone dry-run copied b.mov")
+	}
+}
+
+// TestMoveGuardsBeforeAnyMutation is review #27-2: the owner/symlink guard
+// runs before MkdirAll and before the duplicate delete. move A A over a
+// verified row whose source and dest are the same path must not delete the
+// verified file, and a rule routing through a symlinked dir must not create
+// the file before refusing.
+func TestMoveGuardsBeforeAnyMutation(t *testing.T) {
+	t.Run("same-path move over a verified row does not delete it", func(t *testing.T) {
+		cfg, src, arch := t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(src, "x.mov"), "the clip", t0)
+		if _, _, code := vault(t, cfg, "copy", "A", src, arch); code != 0 {
+			t.Fatalf("copy: exit %d", code)
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", arch); code != 0 {
+			t.Fatalf("verify: exit %d", code)
+		}
+		before := rowsOf(t, cfg, "A")
+		// move A A arch arch: src rel == dst rel == x.mov, the file exists,
+		// its hash matches the row - the old code's dedup branch would
+		// os.Remove it and DeleteEntry before the owner guard ran.
+		out, _, _ := vault(t, cfg, "move", "A", "A", arch, arch)
+		if !strings.Contains(out, "dst-owned by verified row A:x.mov") {
+			t.Errorf("not guarded as owned:\n%s", out)
+		}
+		if got := readFile(t, filepath.Join(arch, "x.mov")); got != "the clip" {
+			t.Fatalf("the verified file was deleted/replaced: %q", got)
+		}
+		if got := rowsOf(t, cfg, "A"); !reflect.DeepEqual(got, before) {
+			t.Errorf("the verified row changed: %v", got)
+		}
+	})
+
+	t.Run("rule through a symlinked dir creates nothing", func(t *testing.T) {
+		cfg, src, dst, outside := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(src, "y.mov"), "bytes", t0)
+		if _, _, code := vault(t, cfg, "copy", "B", src, filepath.Join(t.TempDir(), "stage")); code != 0 {
+			t.Fatalf("seed copy: exit %d", code)
+		}
+		m, err := manifest.Open(filepath.Join(cfg, "manifest.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Upsert(manifest.Entry{SourceDisk: "B", SourcePath: "y.mov", DestPath: "y.mov", Size: 5,
+			MtimeNs: t0.UnixNano(), SHA256: sha("bytes"), CopiedAt: 1, Status: "copied"}); err != nil {
+			t.Fatal(err)
+		}
+		m.Close()
+		if err := os.Symlink(outside, filepath.Join(dst, "alias")); err != nil {
+			t.Fatal(err)
+		}
+		out, _, _ := vault(t, cfg, "move", "B", "A", src, dst, "--rule", "MOV=alias")
+		if !strings.Contains(out, "dst through a symlink (alias)") {
+			t.Errorf("not guarded as a symlink route:\n%s", out)
+		}
+		if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+			t.Errorf("a file was created through the symlink: %v", entries)
+		}
+		if got := readFile(t, filepath.Join(src, "y.mov")); got != "bytes" {
+			t.Errorf("source moved away: %q", got)
+		}
+	})
 }
 
 // TestCertifyRefusesOutputInsideArchive is B25 through main(): a certificate

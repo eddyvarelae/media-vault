@@ -43,7 +43,7 @@ still the one command.
 | `internal/restore` | `restore`: the deliberate replacement of **one** row's destination (B40 — a torn write hashed after the fact). `Build` gathers and checks every fact (row exists; destination reached through real dirs, a regular file, its current bytes hashed; no other row of any disk resolves to the same physical file — no override; replacement is a regular file hashing to the mandatory `--expect-sha`); `Apply` writes through `copy.File` with `Replace`, re-checks the landed hash, and sets the row to `copied` with the new sha/size/mtime, `verified_at` 0, `dest_path` untouched. Never promotes: `verify` does |
 | `internal/dedup`, `internal/move`, `internal/importer` | Duplicate reports, manifest-aware moves, video-tagger imports |
 | `scripts/tagging/` | The nightly video tagger (B17): `run-tagging.sh` + `tagging-helper.py`, `README.md` is the contract. Machine settings from mini-server's `mini.env`, job policy defaulted in the script (tiers, 200 GB, `verified` rows only, newest first), every policy override logged; the NAS manifest is read only through a per-run snapshot. Tested by `scripts/test/run-tagging.sh` against a manifest built by `vault` itself |
-| `scripts/*.sh` | How work runs on the NAS: `docker run --rm … ghcr.io/eddyvarelae/media-vault:<tag> <command>`, sequential, as root via `sudo nohup`. `nas-kipp-copy-all.sh` (B26): `KIPP_SRC` required (container path of the disk), `DRY_RUN=1` plans only, `--dedupe-content --on-collision rename-mtime-year` on every folder, per-folder flags per `team/context/runbook-kipp.md` step 2 |
+| `scripts/*.sh` | How work runs on the NAS: `docker run --rm … ghcr.io/eddyvarelae/media-vault:<tag> <command>`, sequential, as root via `sudo nohup`. `nas-tars-copy-all.sh` and `nas-verify-certify-all.sh` log through a `log()` helper (once per line under any launch form — B27/B35). `nas-kipp-copy-all.sh` (B26): `KIPP_SRC` required (container path of the disk), `DRY_RUN=1` plans only, `--dedupe-content --on-collision rename-mtime-year` on every folder, per-folder flags per `team/context/runbook-kipp.md` step 2 |
 
 ## Manifest status vocabulary
 
@@ -113,6 +113,11 @@ command:
 
 - **2** — no command, an unknown command, or wrong positional arity
   (`len(args)`/`len(pos)` checks). Prints usage. Nothing else exits 2.
+- Whether a run is a dry run is decided by one parse that honours
+  value-taking flags (`--prefix`/`--rule`/`--on-collision`), so a literal
+  `--dry-run` in a flag's value position is that value, not a mode switch
+  (B31/review #27); the same decision opens the manifest and runs the
+  command.
 - **1** — everything fatal: every `die(...)` (bad flag value or a flag missing
   its value, config dir or manifest open failure, scan/plan error, manifest
   write error, signing/marshal/output-file error, empty manifest), an
@@ -128,16 +133,16 @@ command:
 | Command | Exits 1 when | Exits 0 even though |
 |---|---|---|
 | `scan` | scan error (unreadable source, cancelled); a `--rule` whose subdir is absolute or has a `..` component (`invalid rule`, `die`) — same for `copy` and `move`, B34 | collisions/recopies/verified-changed are predicted — it only reports |
-| `copy` | run finished `INCOMPLETE:` — any file failed, any unresolved destination collision, any file whose verified archive copy holds different content (kept, never overwritten), any file whose destination or staging path a verified row owns, any file whose destination path passes through a symlinked directory, any intra-run duplicate left unarchived (stderr names which); interrupted between files; `die` on scan or manifest-write error | no-op (including only retouched files), `--dry-run` (even with predicted collisions, verified-changed or owned files). `--dry-run` writes **no archive file and no manifest row**; it does still create the config dir and open/initialize `manifest.db` (pre-existing, every command does — B31) |
+| `copy` | run finished `INCOMPLETE:` — any file failed, any unresolved destination collision, any file whose verified archive copy holds different content (kept, never overwritten), any file whose destination or staging path a verified row owns, any file whose destination path passes through a symlinked directory, any intra-run duplicate left unarchived (stderr names which); interrupted between files; `die` on scan or manifest-write error | no-op (including only retouched files), `--dry-run` (even with predicted collisions, verified-changed or owned files). `--dry-run` writes **no archive file and no manifest row**, and (B31) neither creates the config dir nor initializes `manifest.db`: the manifest is opened read-only (`OpenReadOnly`, `mode=ro`, proven by a write that must fail) or, when none exists, planned against an empty in-memory one with a notice on stderr. A read-only open of a WAL database still creates `-shm`/empty `-wal` beside it — SQLite's, not ours |
 | `verify` | any mismatch, missing, or read error; `die` on cancel | — |
 | `certify` | output path not a regular file or absent (a symlink at the output name — dangling or not — a directory: `Cannot certify: certificate output path is not a regular file`); output path inside the tree it certifies (`Cannot certify: certificate output is inside the archive …`) — with `--root <dest-dir>` by physical containment (resolved paths, `filepath.Rel`), without it by recognising the tree from its own files (`certify.InsideArchive`: an ancestor of the output path under which a row's `dest_path` exists as a regular file of the row's size — a fallback that a damaged tree defeats, so the scripts always pass `--root`); all before signing and before the key is created; the certificate is then written to `<out>.vault-partial` opened `O_CREATE|O_EXCL|O_NOFOLLOW`, fsynced and renamed over the leaf — a symlink substituted at `out` after the check is *replaced* by the rename, never followed (the parent directory itself is not bound; that needs `os.Root`, Go 1.25 — backlog); a stale `<out>.vault-partial` refuses (`die`); `--root` without a value or an unknown flag (`die`); any row not `verified` (`Cannot certify: …`); no rows for the disk; key/sign/marshal/write error | — |
-| `repair-dest` | unknown flag (`die`); query, read-dir or hash error (`die`); write error mid-run (`die`, names how many rows were already written — each was hash-backed, so they stand); after a real run, any row still unresolved — `NOT FOUND`, `AMBIGUOUS`, `OWNED`, `NOT A FILE`, `UNSAFE`, `CONFLICT` (`INCOMPLETE:` on stderr, counts per outcome) | `--dry-run` (even with unresolved rows) — it writes no manifest row, and `repair-dest` never writes archive files; the config dir / `manifest.db` initialization on open is pre-existing (B31); a disk with no rows |
+| `repair-dest` | unknown flag (`die`); query, read-dir or hash error (`die`); write error mid-run (`die`, names how many rows were already written — each was hash-backed, so they stand); after a real run, any row still unresolved — `NOT FOUND`, `AMBIGUOUS`, `OWNED`, `NOT A FILE`, `UNSAFE`, `CONFLICT` (`INCOMPLETE:` on stderr, counts per outcome) | `--dry-run` (even with unresolved rows) — it writes no manifest row, and `repair-dest` never writes archive files; and (B31) it neither creates the config dir nor initializes `manifest.db`: the manifest is opened read-only (`OpenReadOnly`, `mode=ro`) or, when none exists, planned against an empty in-memory one; a disk with no rows |
 | `restore` | any refusal (`Cannot restore: …`): unknown row, destination outside the root (a row path that climbs out or is absolute — lexically, then physically under the resolved root — refused before anything is read), destination missing / not a regular file / through a symlinked directory, another row reaching the same file — by file identity (`os.SameFile`: directory-symlink, leaf-symlink, hard-link and case aliases all count; a row whose file cannot be stat'ed is **not** a claimant when the error is ENOENT (its file is not under this root), and **refuses** the restore on any other stat error — there is no spelling fallback, since a different disk's row is relative to a root restore does not record — review #30/#39), replacement missing / not a regular file / hashing to something other than `--expect-sha`, malformed or missing `--expect-sha`, unknown flag; I/O or manifest error (`die`); landed hash ≠ `--expect-sha` after the rename (`die`, names the file as in doubt) | `--dry-run` (prints everything incl. `Claimants: none`); destination already holds the expected bytes (nothing written). Success prints one `RESTORED <disk> <path> old=<sha>:<size> new=<sha>:<size> expect=<sha> prior_status=… prior_verified_at=… from=<file>` line |
 | `inventory` | `die` on walk error | per-file hash errors — counted in `Errors:`, exit 0 |
 | `dedup` | unknown arg or bad `--min-size` (`die`, not usage); query error | — |
 | `unique`, `tag`, `untag`, `tagged`, `tags` | query error | no matches (`No files tagged …`) |
 | `symlinks`, `hardlinks` | malformed `<disk>=<path>`; query or mkdir error | individual links that FAIL or SKIP — counted, exit 0 |
-| `move` | bad `--on-collision`/`--rule`; plan or execute error | per-file `Errors:`/`Skipped:` in the summary — exit 0; `--dry-run` |
+| `move` | bad `--on-collision`/`--rule`; plan or execute error | per-file `Errors:`/`Skipped:` in the summary — exit 0, including (B32) a destination a verified row owns (`dst-owned by verified row …`) or one through a symlinked directory (`dst through a symlink …`), both never written; `--dry-run` |
 | `import-tags` | import error | ambiguous / not-found reports — counted, exit 0 |
 
 A collision counts against `copy` only after the policy ran: under
@@ -171,11 +176,12 @@ number nobody can recompute is a finding, not a fact.
   output name. A `--rule` never routes outside the destination root.
 - Atomic destination writes only (`.vault-partial` created `O_EXCL` → fsync
   → rename). The staging path must be empty; the writer never truncates.
-- A `verified` destination is never overwritten by `copy`. Not by recopy,
-  not by any collision policy, not through another row's route, not as a
-  staging file, not through a symlinked directory. The one deliberate path
-  is `vault restore`: one named row, the replacement's sha stated up front,
-  and the row drops back to `copied`.
+- A `verified` destination is never overwritten by `copy` — nor by `move`
+  (B32). Not by recopy, not by any collision policy, not through another
+  row's route, not as a staging file, not through a symlinked directory,
+  not when the verified file is missing (the row still owns the path). The
+  one deliberate path is `vault restore`: one named row, the replacement's
+  sha stated up front, and the row drops back to `copied`.
   Both checks — by source row and by destination path — live in
   `scan.Build`, so `scan` and `copy` agree and every write `copy.File`
   makes was admitted there.

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/eddyvarelae/media-vault/internal/manifest"
+	"github.com/eddyvarelae/media-vault/internal/scan"
 )
 
 // Rule maps a file extension (no leading dot, case-insensitive) to a
@@ -134,6 +135,15 @@ func renameWithMtimeYear(rel string, mtimeNs int64) string {
 // per-file so a partial failure doesn't lose progress already committed.
 func Execute(ctx context.Context, m *manifest.Manifest, plan *Plan, dstDisk string, onCollision CollisionStrategy, onFile func(mv Move, status string)) (*Result, error) {
 	res := &Result{}
+	// The never-overwrite rule is copy's and move's alike (B32): a rename
+	// never lands on a path a verified row owns - present or missing, in
+	// any spelling - nor passes through a symlinked directory, where two
+	// spellings are one file. The on-disk Stat below sees present files;
+	// this sees the manifest and the directories.
+	owners, err := scan.VerifiedOwners(m, plan.dstRoot)
+	if err != nil {
+		return nil, err
+	}
 	for _, mv := range plan.Moves {
 		if err := ctx.Err(); err != nil {
 			return res, err
@@ -150,6 +160,18 @@ func Execute(ctx context.Context, m *manifest.Manifest, plan *Plan, dstDisk stri
 			res.Errors++
 			if onFile != nil {
 				onFile(mv, "stat-error: "+err.Error())
+			}
+			continue
+		}
+
+		// Guard BEFORE any filesystem change - MkdirAll, the duplicate
+		// os.Remove/DeleteEntry, the rename (review #27): a destination a
+		// verified row owns, one that climbs out, or one through a
+		// symlinked directory is skipped without touching anything.
+		if skip := guardDest(plan.dstRoot, owners, mv); skip != "" {
+			res.Skipped++
+			if onFile != nil {
+				onFile(mv, skip)
 			}
 			continue
 		}
@@ -198,6 +220,14 @@ func Execute(ctx context.Context, m *manifest.Manifest, plan *Plan, dstDisk stri
 				if newRel != mv.DstRel {
 					mv.DstRel = newRel
 					mv.DstAbs = filepath.Join(plan.dstRoot, newRel)
+					// The rewritten path gets the same guard (review #27).
+					if skip := guardDest(plan.dstRoot, owners, mv); skip != "" {
+						res.Skipped++
+						if onFile != nil {
+							onFile(mv, skip)
+						}
+						continue
+					}
 					if onFile != nil {
 						onFile(mv, "renamed-on-collision → "+newRel)
 					}
@@ -240,6 +270,23 @@ func Execute(ctx context.Context, m *manifest.Manifest, plan *Plan, dstDisk stri
 		}
 	}
 	return res, nil
+}
+
+// guardDest reports why mv's destination must not be written - a verified
+// row owns it (present or missing, any spelling) or a directory on its
+// path is a symlink - or "" when it is safe.
+// Consulted before every filesystem change and again after a collision
+// rename (review #27; B32).
+func guardDest(dstRoot string, owners scan.OwnerIndex, mv Move) string {
+	if owner, path, ok := owners.Owner(dstRoot, mv.DstRel); ok {
+		return fmt.Sprintf("dst-owned by verified row %s:%s (%s) — never written", owner.SourceDisk, owner.SourcePath, path)
+	}
+	if link, err := scan.SymlinkComponent(dstRoot, mv.DstRel); err != nil {
+		return "lstat-error: " + err.Error()
+	} else if link != "" {
+		return "dst through a symlink (" + link + ") — never written"
+	}
+	return ""
 }
 
 // route picks the destination relative path for a source relative path.
