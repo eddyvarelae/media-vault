@@ -42,6 +42,7 @@ Maintained by the PM - ordering and scope are theirs alone. Fixed sections below
 
 ## Deferred (decided, don't build now)
 
+- A symlink introduced under the destination root *between* the writer's component walk and its `MkdirAll` can still redirect the write (Reviewer #11 caveat) - concurrent filesystem mutation, outside the static guarantee; not built against.
 - Equal size + equal mtime + different bytes is not detected by `scan` - by design, scan is metadata-keyed and `verify` is the integrity pass (Reviewer #5 note, 2026-09-17).
 - Same-size + new-mtime verified files are re-hashed on every scan (no row refresh) - accepted 2026-09-17: one read per touched file per run, no unasked manifest write; revisit only if a scan becomes slow (Dev noticed).
 - `defer m.Close()` in `main` is skipped when a command exits non-zero (`os.Exit` bypasses defers) - pre-existing, harmless under WAL; no action (Dev noticed 2026-09-16).
