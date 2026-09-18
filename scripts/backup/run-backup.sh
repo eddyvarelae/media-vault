@@ -106,10 +106,14 @@ recorded_slug() {
   [[ -f "$SLUGS_FILE" ]] || return 0
   nm="$1" awk -F'\t' 'BEGIN{n=ENVIRON["nm"]} $1==n{print $2; exit}' "$SLUGS_FILE"
 }
-# slug_held_by_other: true when a name OTHER than $2 already holds slug $1.
+# slug_held_by_other is TRI-STATE (review #54): 0 = a name OTHER than $2 holds
+# slug $1, 1 = not held, 2 = the registry could not be read. A read error must
+# never look like "not held" (which would hand out a slug already in use), so
+# the caller fails closed on 2. awk exits 0/1 for held/not-held and >=2 on an
+# I/O or parse error; that exit is preserved.
 slug_held_by_other() {
   [[ -f "$SLUGS_FILE" ]] || return 1
-  sg="$1" me="$2" awk -F'\t' 'BEGIN{s=ENVIRON["sg"]; me=ENVIRON["me"]} $2==s && $1!=me{f=1} END{exit !f}' "$SLUGS_FILE"
+  sg="$1" me="$2" awk -F'\t' 'BEGIN{s=ENVIRON["sg"]; me=ENVIRON["me"]} $2==s && $1!=me{f=1} END{exit f?0:1}' "$SLUGS_FILE" 2>/dev/null
 }
 # assign_slug prints a name's slug, assigning and recording one on first sight:
 # the base, else base-2, base-3, … until no OTHER name holds it. It is
@@ -125,8 +129,15 @@ assign_slug() {
   existing=$(recorded_slug "$name") || return 1
   [[ -n "$existing" ]] && { printf '%s' "$existing"; return 0; }
   old_n=0; if [[ -f "$SLUGS_FILE" ]]; then old_n=$(wc -l < "$SLUGS_FILE") || return 1; fi   # count BEFORE anything else
-  base=$(slug "$name"); cand="$base"; n=1
-  while slug_held_by_other "$cand" "$name"; do n=$((n + 1)); cand="$base-$n"; done
+  base=$(slug "$name") || return 1                  # a failing base computation is not a slug (review #54)
+  [[ -n "$base" ]] || return 1                      # nor is an empty one
+  cand="$base"; n=1
+  while :; do
+    slug_held_by_other "$cand" "$name"; local held=$?
+    (( held == 0 )) && { n=$((n + 1)); cand="$base-$n"; continue; }   # held by another name: bump
+    (( held == 1 )) || return 1                                       # 2+ = registry unreadable: fail closed
+    break                                                             # not held: take it
+  done
   tmp="$SLUGS_FILE.tmp"   # a fixed name is safe: the lock guarantees one writer (review #53)
   if [[ -f "$SLUGS_FILE" ]]; then cat "$SLUGS_FILE" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
   else : > "$tmp" 2>/dev/null || return 1; fi
@@ -188,7 +199,7 @@ IFS=$_ifs
 due=() unknown=()
 for mp in "$VOLUMES_DIR"/*; do
   [[ -d "$mp" && ! -L "$mp" ]] || continue
-  name=$(basename "$mp")
+  name=${mp##*/}   # not $(basename): command substitution would strip a trailing newline, hiding a bad name (review #54)
   dev=$(df -P "$mp" | awk 'NR==2 {print $1}')
   [[ "$dev" != "$boot_dev" ]] || continue
   [[ -z "$scratch_dev" || "$dev" != "$scratch_dev" ]] || continue

@@ -58,14 +58,19 @@ worry is gone). The mapping persists across ticks and re-attaches.
 
 The **single-instance lock is held before the registry is read** and to the end
 of the tick, on every tick including unknown-only and nothing-due ones, so no
-two ticks ever race `slugs.tsv`. `assign_slug` is **fail-closed**: every read,
-write and rename is checked; the full new content is written to a temp file, its
-line count verified to be exactly one more than the old (so a truncated read can
-never install a registry that dropped a row), and only then renamed. On any I/O
-error it records nothing and the tick aborts with the registry byte-identical.
-Names reach `awk` through the environment, never `awk -v` (which would un-escape
-a backslash sequence), and a volume name containing a tab or newline - which
-`slugs.tsv` cannot represent - is refused at discovery (exit 2).
+two ticks ever race `slugs.tsv`. `assign_slug` is **fail-closed**: every step -
+the base computation (a failed or empty base is not a slug), the "is this base
+held by another name?" check (tri-state: held / not-held / unreadable, and an
+unreadable registry never reads as not-held), the copy-read, the line-count
+check and the rename - is checked; the full new content is written to a temp
+file, its line count verified to be exactly one more than the old (so a
+truncated read can never install a registry that dropped a row), and only then
+renamed. On any I/O error it records nothing and the tick aborts with the
+registry byte-identical. Names reach `awk` through the environment, never
+`awk -v` (which would un-escape a backslash sequence); the volume name is read
+with `${mp##*/}`, not `$(basename)`, so a trailing newline is not stripped away;
+and a name containing a tab or newline - which `slugs.tsv` cannot represent - is
+refused at discovery (exit 2).
 
 Two more guards run before anything is written, pruned or recorded:
 
