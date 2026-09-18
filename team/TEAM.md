@@ -87,15 +87,15 @@ Branch policy: Dev works in its own worktree (`~/Projects/media-vault-dev`) on a
 4. Skim `BACKLOG.md` and the `DECISIONS.md` tail.
 5. Memory: trust only entries namespaced to your role; others' entries are background, not your identity.
 
-## Current state (2026-09-17 19:15 - PM-verified, don't re-derive)
+## Current state (2026-09-17 21:42 - PM-verified, don't re-derive)
 
 **Resumed 2026-09-17 18:47 after the restart:** PM, Dev (Terminal window 406) and Tester (407) rebooted; worktrees and both NAS mounts survived. Boot lines + in-flight table: `team/archive/2026-09-17-pm-handoff.md`. SSDs attached now: `tars`, `kipp`, `case`, `Eddy's Media Vault`, `Scratch1` - `noahsarc` is not.
 
-- `main` tip = see `git log -1`; last code merge = **`e4a4aed`** (tests-and-pinning, Reviewer APPROVE #4). **`v0.2.0` tagged on it 2026-09-17 19:08** - CI publishes the image; nothing on the NAS has pulled it yet. `go test ./...` covers six packages; CI now runs on `v*` tags only.
-- Dev (`~/Projects/media-vault-dev`): next branch `overwrite-guard` off `e4a4aed` - rev 4 item 1 (B23 defect, policy decided), then B24 `repair-dest`.
-- Tester (`~/Projects/media-vault-tester`, detached): B2 done (SSH as `figmaboi`, `sudo docker` works); B23(a) exhausted on attached disks; waiting on Dev for the B24 dry-run.
+- `main` tip = see `git log -1`; last code merge = **`314416d`** (overwrite-guard, Reviewer APPROVE #11) = **`v0.2.1`**, tagged 2026-09-17 21:39 (CI run 35307800251). `copy` never overwrites a verified destination. Nothing on the NAS has pulled any image since v0.2.0's publish; scripts still default to `v0.2.0` (B37).
+- Dev (`~/Projects/media-vault-dev`): rev 4 fully built. Open branches: `repair-dest` (#10 FINDINGS → fixes → #15), `certs-out` (#12 in review), `f4-tests` (#13 queued). Merge order: repair-dest, certs-out, f4-tests.
+- Tester (`~/Projects/media-vault-tester`, detached): B29 gap reports - `kipp` 9,872 files / 1.92 TB (Reviewer #8), `tars` 5,040 / 1.19 TB (#14 pending), `case` 0, `Eddy's Media Vault` in progress. B24 dry-run waits on `repair-dest`.
 - NAS: DXP2800 `192.168.1.167`, SMB + SSH as `figmaboi` (key); `~/mounts/media` and `~/mounts/docker` mount via `com.varela.mount-nas`. NAS clock is UTC-6 (Mini is UTC-7). `sudo docker` is password-less; so is `sudo bash` (B28).
 - Scope since 2026-09-17: every scheduled batch against the archive is ours (nightly tagger = B17, after rev 3).
 - **P0 (2026-09-17): 2,668 SonyA6700 photos overwritten on Sep 1 are LOST - every disk Eddy owns was searched (B23a closed); the defect fix is Dev's current item (B23b).** 195 rows need a dest_path fix before verify can pass - B24. Archive is 8.20 TiB (not 3.3). Agents never wipe or write an SSD.
 - Source SSDs (B7 done): `tars`, `case`, `Eddy's Media Vault`, `kipp` (never copied, B26), and `Scratch1` = the former `noahsarc`, device-erased 2026-09-02 (Tester #17). The 2026-04-26 SonyA6700 source disk is unidentified. All five attached; agents read only.
-- Reviewer = `codex exec … </dev/null`, run by the PM. **Codex usage limit hit 2026-09-17 20:21; reviews resume 21:34** unless Eddy adds credits. Seats boot in visible Terminal windows with `--remote-control`; nudges need a trailing empty `do script`.
+- Reviewer = `codex exec … </dev/null`, run by the PM. Codex has a usage limit (hit once 2026-09-17 20:21-21:34); queue reviews, don't parallelize them. Seats boot in visible Terminal windows with `--remote-control`; nudges need a trailing empty `do script`.

@@ -44,6 +44,10 @@ type FileTask struct {
 	DstRel  string // path relative to dstRoot (where the file should land)
 	Size    int64
 	MtimeNs int64
+	// Replace is set for a recopy: the row is not verified and its own
+	// destination file is expected to exist and be renamed over. For a new
+	// file the writer refuses anything at the final path.
+	Replace bool
 }
 
 // DedupeHit records a source file whose bytes are already archived.
@@ -73,6 +77,45 @@ type Plan struct {
 	DstCollisions    []FileTask // dst file already exists (would overwrite)
 	BytesToCopy      int64
 	BytesToRecopy    int64
+
+	// VerifiedChanged holds files whose row is `verified` but whose source
+	// now carries different content. They are never copied: the archived
+	// bytes are what a certificate attested, and the manifest keys on
+	// (source_disk, source_path), so there is no second row for the new
+	// bytes to live in. Retouched counts the harmless cousin - same content,
+	// new mtime - which is skipped like an unchanged file.
+	VerifiedChanged      []FileTask
+	BytesVerifiedChanged int64
+	Retouched            int
+
+	// DstOwned holds files whose destination - the final path or the
+	// .vault-partial staging path copy.File creates first - is the
+	// dest_path of a verified row, of any disk. That row may not be this
+	// file's own (a deduped row points at another disk's file; a stray name
+	// can match an archived file), so the check is by destination, not by
+	// source row, and by physical location, not spelling. Never written
+	// under any policy.
+	DstOwned []OwnedTask
+
+	// DstThroughLink holds files whose destination path passes through a
+	// symlinked directory component under the root. Two spellings then
+	// name one physical file, which neither the ownership key nor a leaf
+	// Lstat can see; the writer refuses such a path too. Never written.
+	DstThroughLink []LinkedTask
+}
+
+// LinkedTask is a file refused because a directory on its destination path
+// is a symlink.
+type LinkedTask struct {
+	Task FileTask
+	Link string // the symlink component, relative to the root
+}
+
+// OwnedTask is a file refused because a verified row owns its destination.
+type OwnedTask struct {
+	Task  FileTask
+	Path  string         // the path that is owned: DstRel or DstRel + ".vault-partial"
+	Owner manifest.Entry // the verified row that references it
 }
 
 type CollisionStrategy int
@@ -116,6 +159,10 @@ func Build(ctx context.Context, m *manifest.Manifest, disk, srcRoot, dstRoot, pr
 func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, dstRoot, prefix string, rules []Rule, onCollision CollisionStrategy, dedupeContent bool) (*Plan, error) {
 	p := &Plan{}
 	seenThisRun := map[string]string{} // sha256 -> source-relative path queued to copy
+	owners, err := verifiedOwners(m, dstRoot)
+	if err != nil {
+		return nil, err
+	}
 	sizeCount := map[int64]int{}
 	prefix = strings.TrimRight(prefix, "/")
 	if dedupeContent {
@@ -159,7 +206,7 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 			return nil, err
 		}
 	}
-	err := filepath.WalkDir(srcRoot, func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(srcRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -205,6 +252,39 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 		if entry != nil {
 			if entry.Size == task.Size && entry.MtimeNs == task.MtimeNs {
 				p.SkipCount++
+				return nil
+			}
+			if entry.Status == "verified" {
+				// A verified destination is never overwritten (B23(b): a
+				// second card carried different photos under the same DCIM
+				// names, and recopy replaced 2,668 certified files in place).
+				// Same size is not proof of change - a touched file hashes
+				// equal and is simply skipped - but any difference in bytes
+				// is a collision, and one the collision policy cannot rename
+				// its way out of: the row for this (disk, path) is taken.
+				if entry.Size == task.Size {
+					sum, hErr := hashFile(ctx, path)
+					if hErr != nil {
+						return hErr
+					}
+					if sum == entry.SHA256 {
+						p.Retouched++
+						return nil
+					}
+				}
+				p.VerifiedChanged = append(p.VerifiedChanged, task)
+				p.BytesVerifiedChanged += task.Size
+				return nil
+			}
+			task.Replace = true
+			if owned := owners.claims(dstRoot, task); owned != nil {
+				p.DstOwned = append(p.DstOwned, *owned)
+				return nil
+			}
+			if link, err := SymlinkComponent(dstRoot, task.DstRel); err != nil {
+				return err
+			} else if link != "" {
+				p.DstThroughLink = append(p.DstThroughLink, LinkedTask{Task: task, Link: link})
 				return nil
 			}
 			p.ToRecopy = append(p.ToRecopy, task)
@@ -268,6 +348,22 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 			}
 		}
 
+		// The destination is free on disk; make sure the manifest agrees.
+		// A verified row whose file is missing still owns the path (verify
+		// reports it missing; writing other bytes there would make it a
+		// mismatch under a certified hash), and the staging path may be an
+		// archived file that merely ends in .vault-partial.
+		if owned := owners.claims(dstRoot, task); owned != nil {
+			p.DstOwned = append(p.DstOwned, *owned)
+			return nil
+		}
+		if link, err := SymlinkComponent(dstRoot, task.DstRel); err != nil {
+			return err
+		} else if link != "" {
+			p.DstThroughLink = append(p.DstThroughLink, LinkedTask{Task: task, Link: link})
+			return nil
+		}
+
 		if pendingHash != "" {
 			seenThisRun[pendingHash] = task.RelPath
 		}
@@ -279,6 +375,80 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 		return nil, err
 	}
 	return p, nil
+}
+
+// ownerIndex maps the physical location of every verified destination to
+// its row. Physical means what the writer will touch: joined to this run's
+// root and cleaned, so a `..` in a routing rule collapses to where it
+// really lands, and case-folded, so `X.mov` and `x.mov` are one key. The
+// fold is unconditional rather than probed per filesystem: on a
+// case-sensitive root it can only refuse a write that differs from a
+// certified file by case alone, which is the safe mistake. (Unicode
+// normalization aliases are not folded; camera names are ASCII.)
+type ownerIndex map[string]manifest.Entry
+
+func verifiedOwners(m *manifest.Manifest, dstRoot string) (ownerIndex, error) {
+	rows, err := m.VerifiedRows()
+	if err != nil {
+		return nil, err
+	}
+	idx := make(ownerIndex, len(rows))
+	for _, e := range rows {
+		if e.DestPath == "" {
+			continue
+		}
+		if _, dup := idx[physKey(dstRoot, e.DestPath)]; !dup {
+			idx[physKey(dstRoot, e.DestPath)] = e
+		}
+	}
+	return idx, nil
+}
+
+// physKey is the identity two spellings share when they name one file.
+func physKey(root, rel string) string {
+	return strings.ToLower(filepath.Clean(filepath.Join(root, rel)))
+}
+
+// claims reports whether either path copy.File will touch for task - the
+// staging file it creates first, then the final name - is a verified
+// row's destination.
+func (idx ownerIndex) claims(dstRoot string, task FileTask) *OwnedTask {
+	for _, rel := range []string{task.DstRel + ".vault-partial", task.DstRel} {
+		if owner, ok := idx[physKey(dstRoot, rel)]; ok {
+			return &OwnedTask{Task: task, Path: rel, Owner: owner}
+		}
+	}
+	return nil
+}
+
+// SymlinkComponent walks the directories of rel under root, one Lstat per
+// component, and returns the first one that is a symlink (relative to
+// root), or "" when every existing component is a real directory. A
+// component that does not exist yet ends the walk: nothing below it can be
+// a link, and the writer's MkdirAll will create real directories. Called by
+// Build before admitting a task and by copy.File before writing, because a
+// symlinked directory makes two spellings one file and no per-path check
+// can tell.
+func SymlinkComponent(root, rel string) (string, error) {
+	dir := filepath.Dir(filepath.Clean(rel))
+	if dir == "." {
+		return "", nil
+	}
+	cur := root
+	for i, c := range strings.Split(dir, string(filepath.Separator)) {
+		cur = filepath.Join(cur, c)
+		fi, err := os.Lstat(cur)
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return filepath.Join(strings.Split(dir, string(filepath.Separator))[:i+1]...), nil
+		}
+	}
+	return "", nil
 }
 
 func renameWithMtimeYear(rel string, mtimeNs int64) string {

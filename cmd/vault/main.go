@@ -190,9 +190,34 @@ func runScan(ctx context.Context, m *manifest.Manifest, args []string) {
 	fmt.Printf("Files to copy:    %d  (%s)\n", len(plan.ToCopy), human(plan.BytesToCopy))
 	fmt.Printf("Files to skip:    %d  (in manifest, unchanged)\n", plan.SkipCount)
 	reportDedupe(plan, dedupeContent)
-	fmt.Printf("Files to recopy:  %d  (%s, source size or mtime changed)\n",
+	fmt.Printf("Files to recopy:  %d  (%s, source size or mtime changed, row not verified)\n",
 		len(plan.ToRecopy), human(plan.BytesToRecopy))
 	fmt.Printf("Dst collisions:   %d  (dst path already exists, would overwrite)\n", len(plan.DstCollisions))
+	reportVerifiedChanged(plan)
+}
+
+// reportVerifiedChanged prints the B23(b) bucket for both scan and copy. The
+// count line always prints so a zero is visible; the explanation only when
+// it is non-zero, because the way out is not a flag on this command.
+func reportVerifiedChanged(plan *scan.Plan) {
+	fmt.Printf("Verified, changed: %d  (%s, source differs from the verified archive copy; never overwritten)\n",
+		len(plan.VerifiedChanged), human(plan.BytesVerifiedChanged))
+	if plan.Retouched > 0 {
+		fmt.Printf("Retouched:        %d  (verified, mtime changed, content identical; skipped)\n", plan.Retouched)
+	}
+	if len(plan.VerifiedChanged) > 0 {
+		fmt.Println("  note: these are different files under a source path this disk already")
+		fmt.Println("        archived and verified. The archived copy is kept. If they come from")
+		fmt.Println("        another card, copy that card under its own <disk> name with")
+		fmt.Println("        --on-collision rename-mtime-year so they land beside the originals.")
+	}
+	fmt.Printf("Dst owned:        %d  (destination or its .vault-partial path belongs to a verified row; never written)\n", len(plan.DstOwned))
+	fmt.Printf("Dst via symlink:  %d  (a directory on the destination path is a symlink; never written)\n", len(plan.DstThroughLink))
+	if len(plan.DstOwned) > 0 {
+		fmt.Println("  note: a verified row of some disk records that path as its archived copy.")
+		fmt.Println("        Nothing is written there by any policy. Copy under a --rule or --prefix")
+		fmt.Println("        that routes elsewhere, or resolve the owning row first.")
+	}
 }
 
 // reportDedupe prints the dedupe summary for both scan and copy. Always prints
@@ -229,9 +254,12 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 		die("scan: %v", err)
 	}
 	reportDedupe(plan, dedupeContent)
+	// Always, and before the no-op return: a zero is a statement too, and
+	// a run of nothing but retouched files must still say what it saw.
+	reportVerifiedChanged(plan)
 
 	todo := append(plan.ToCopy, plan.ToRecopy...)
-	if len(todo) == 0 && len(plan.DstCollisions) == 0 && len(plan.Deduped) == 0 {
+	if len(todo) == 0 && len(plan.DstCollisions) == 0 && len(plan.Deduped) == 0 && len(plan.VerifiedChanged) == 0 && len(plan.DstOwned) == 0 && len(plan.DstThroughLink) == 0 {
 		fmt.Println("Nothing to copy. Manifest is up to date.")
 		return 0
 	}
@@ -251,6 +279,24 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 				fmt.Printf("  %s → %s (already exists)\n", f.RelPath, f.DstRel)
 			}
 		}
+		if len(plan.VerifiedChanged) > 0 {
+			fmt.Println("\nVerified, changed (never overwritten):")
+			for _, f := range plan.VerifiedChanged {
+				fmt.Printf("  %s → %s (archived copy kept)\n", f.RelPath, f.DstRel)
+			}
+		}
+		if len(plan.DstOwned) > 0 {
+			fmt.Println("\nDestination owned by a verified row (never written):")
+			for _, o := range plan.DstOwned {
+				fmt.Printf("  %s → %s (owned by %s:%s)\n", o.Task.RelPath, o.Path, o.Owner.SourceDisk, o.Owner.SourcePath)
+			}
+		}
+		if len(plan.DstThroughLink) > 0 {
+			fmt.Println("\nDestination through a symlink (never written):")
+			for _, l := range plan.DstThroughLink {
+				fmt.Printf("  %s → %s (%s is a symlink)\n", l.Task.RelPath, l.Task.DstRel, l.Link)
+			}
+		}
 		if len(plan.Deduped) > 0 {
 			fmt.Println("\nAlready archived (would be recorded as deduped, not copied):")
 			for _, d := range plan.Deduped {
@@ -261,8 +307,8 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 				}
 			}
 		}
-		fmt.Printf("\n(dry-run; %d files would be copied, %d recorded as deduped, %d collisions skipped)\n",
-			len(todo), len(plan.Deduped), len(plan.DstCollisions))
+		fmt.Printf("\n(dry-run; %d files would be copied, %d recorded as deduped, %d collisions skipped, %d verified kept, %d owned destinations skipped, %d through symlinks skipped)\n",
+			len(todo), len(plan.Deduped), len(plan.DstCollisions), len(plan.VerifiedChanged), len(plan.DstOwned), len(plan.DstThroughLink))
 		return 0
 	}
 
@@ -369,7 +415,7 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 	}
 
 	fmt.Printf("\nDone. Copied %d/%d files, %s.\n", copied, len(todo), human(copiedBytes))
-	if failed > 0 || orphaned > 0 || len(plan.DstCollisions) > 0 {
+	if failed > 0 || orphaned > 0 || len(plan.DstCollisions) > 0 || len(plan.VerifiedChanged) > 0 || len(plan.DstOwned) > 0 || len(plan.DstThroughLink) > 0 {
 		// Exit non-zero so callers can tell. scripts/nas-tars-copy-all.sh runs
 		// four cards sequentially and unattended, branching on this status —
 		// exiting 0 after a partial copy made it log "done" for a card that
@@ -383,12 +429,25 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 		// renames files and archives them all reports zero collisions and
 		// passes. A collision-skipped path gets no manifest row, and an
 		// unrecorded file is the thing this archive must not hold quietly.
-		reasons := make([]string, 0, 3)
+		//
+		// VerifiedChanged counts for the opposite reason: the file on the
+		// source is NOT archived and never will be under this disk name,
+		// and a silent 0 here is how 2,668 photos were lost (B23(b)).
+		reasons := make([]string, 0, 6)
 		if failed > 0 {
 			reasons = append(reasons, fmt.Sprintf("%d file(s) failed to copy", failed))
 		}
 		if len(plan.DstCollisions) > 0 {
 			reasons = append(reasons, fmt.Sprintf("%d file(s) skipped on unresolved destination collisions", len(plan.DstCollisions)))
+		}
+		if len(plan.VerifiedChanged) > 0 {
+			reasons = append(reasons, fmt.Sprintf("%d file(s) skipped because their verified archive copy holds different content (kept)", len(plan.VerifiedChanged)))
+		}
+		if len(plan.DstOwned) > 0 {
+			reasons = append(reasons, fmt.Sprintf("%d file(s) skipped because a verified row owns their destination path", len(plan.DstOwned)))
+		}
+		if len(plan.DstThroughLink) > 0 {
+			reasons = append(reasons, fmt.Sprintf("%d file(s) skipped because their destination path passes through a symlink", len(plan.DstThroughLink)))
 		}
 		if orphaned > 0 {
 			reasons = append(reasons, fmt.Sprintf("%d duplicate(s) left unarchived", orphaned))

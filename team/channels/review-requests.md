@@ -6,6 +6,81 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #14 - numbers: `tars` gap report (Tester #20) - headed to Eddy as "this SSD needs archiving too"
+
+**PM (2026-09-17T20:49:59-07:00):** Not code. The Tester (2026-09-17T20:49, `team/channels/tester-feedback.md` item 20) reports for the SSD `tars` (`/Volumes/tars`, read-only): **needs archiving: YES - 5,040 files, 1,188,169,289,959 bytes (1.19 TB)**; archived already 2,719 files / 772,522,033,618 B; every file hashed (`--hash-all`). Recompute from `/Volumes/Scratch1/tester/` (read-only, write nothing there): `gap-tars.tsv` (7,759 rows), `gap-tars.summary.txt`, `gap-tars.log`, script `gap-report.py`, snapshot `manifest-2026-09-17.db` (`?mode=ro&immutable=1`).
+
+**Claims:**
+1. Files on the SSD = 7,759; bytes = 1,960,691,323,577. `HASH_ARCHIVED` 2,719 / 772,522,033,618 B; `GAP` 5,040 / 1,188,169,289,959 B; 2,719 + 5,040 = 7,759; bytes add to the total.
+2. Every `GAP` sha is absent from the snapshot; every `HASH_ARCHIVED` sha is present.
+3. Gap by folder: SonyA6700 4,775 / 1,003.8 GB; SonyZVE10 240 / 130.0 GB; GoPro 25 / 54.4 GB; DJIFlip and Test fully archived.
+4. Of the 5,040: 5,029 no name+size match; 10 name+size collisions with different content; 1 ambiguous.
+5. Running total across `kipp` (#8) + `tars`: 14,912 files / 3,109,865,074,408 B.
+6. **`case` (Tester item 21, 2026-09-17T21:15): needs archiving NO** - 5,141 files / 1,297,894,093,853 B on the SSD, every sha on a `verified` manifest row (`gap-case.tsv`, `gap-case.summary.txt`; recompute `gap-report.py /Volumes/case case --hash-all` logic from the TSV + snapshot, do not rerun the hashing). Falsified if any `case` sha is absent from the snapshot or sits only on a non-`verified` row.
+
+**This is wrong if:** the TSV counts or byte sums differ; any `GAP` sha appears on any snapshot row; the folder sums do not add to the gap total; the TSV row count differs from a fresh `find /Volumes/tars -type f` (dotfiles/`._*` excluded, dot-dirs pruned); or the running total arithmetic is off. Report recomputed next to claimed.
+
+Verdict goes below this line.
+
+**PM (2026-09-17T21:41:52-07:00):** FINDINGS accepted, all three. #1 (P1): the certificate writer must `Lstat` the output leaf - a symlink there is refused, an existing regular file may be replaced (re-issue) - and the guard must check the path actually written. #2 (P2): the size heuristic is the wrong tool for a tree that may be damaged; `certify` gains an explicit `--root <dest-root>` (the scripts already know it - they pass it to `verify`), the refusal becomes physical containment of the output under that root, and the heuristic stays only as a documented best-effort fallback when `--root` is absent; README/CLAUDE claims narrowed accordingly. #3 (P2): the shell test's negation is broken - fix so the negative assertion can fail. Back to Dev on `certs-out`, new commits only (plus B37 tag bump there); re-review as **#16, fixes only**. The rule parsers (B34) are closed.
+
+### #13 - B9 F4 tests + B27 single logging + B20 skip `reports/` (branch `f4-tests`, code tip `dc36e5f`)
+
+**PM (2026-09-17T20:38:33-07:00):** Review `git diff 73c52ae..dc36e5f -- . ':!team'` (3 commits off `main` at `73c52ae`, code-identical to `e4a4aed`; 9 files, +453/-14: new `internal/verify/verify_test.go`, `cmd/vault/main_test.go`, `internal/scan/scan.go` + test, `scripts/nas-verify-certify-all.sh`, new `scripts/test/nas-verify-certify-all.sh`, `scripts/test/scripts_test.go`, `CLAUDE.md`, `README.md`). Dev's note: Dev 2026-09-17T20:38 (commit `5828145` on that branch). PM independently at `dc36e5f`: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all seven test packages (`internal/verify` now tested). Note: `certs-out` (#12) also creates `scripts/test/nas-verify-certify-all.sh` and edits the same script - a merge conflict Dev resolves when the second of the two lands; review each as it is.
+
+**Claims:**
+1. (B9) `verify --only-unverified` touches exactly the non-`verified` rows of the disk (a whole-map comparison), promotes those that hash clean, re-stamps a still-bad `mismatch`, leaves a missing-file row untouched, and never reads or lists a `verified` row - proven by `BytesRead` equal to the byte total of exactly the files it should read; a `verified` row with rot on disk stays `verified` under the flag (documented cost) and is caught by a bare pass. `CountVerifiedInDisk` counts only that disk's verified rows and reports the newest single `verified_at`. CLI: the two warning lines and the "no verified rows to skip" line print as documented; flag position independent.
+2. (B27) `nas-verify-certify-all.sh` logs each line once under `nohup … >> $LOG 2>&1 &`, under a plain redirect, and by hand in a terminal (`tee` only when `[ -t 1 ]`); docker-stub test covers the first two; `LOG="${VAULT_LOG:-…}"` added.
+3. (B20) `scan` skips directories named exactly `reports` at any depth; `reports.txt`, `reportsX/` still scanned.
+
+**This is wrong if:** the F4 test's `BytesRead` assertion can pass while the verified-with-rot file was read (is `BytesRead` incremented on every read path, including the dedupe-by-reference path?); the `onFile` whole-map comparison excludes any row it should include; the shell test can pass with `tee` restored or with the `[ -t 1 ]` branch inverted; `isJunkDir` matches on a substring or case-folds where the archive FS would not; or `README`/`CLAUDE.md` describe a behavior the code does not have.
+
+Verdict goes below this line.
+
+### #11 - re-review of #9's fix only (branch `overwrite-guard`, code tip `ba4c185`) - **resolved: APPROVE → merged**
+
+**PM (2026-09-17T20:30:50-07:00):** Check that #9's one finding is closed, nothing else. Diff `git diff 151b20a..ba4c185 -- . ':!team'` (1 commit after Dev's merge of `main` at `151b20a`; 7 files, +223/-10). Dev's note: `team/channels/dev-questions.md`, Dev 2026-09-17T20:26 (commit `d73e71c` on that branch). PM independently at `ba4c185`: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all six test packages.
+
+**Claims:**
+1. `scan.SymlinkComponent(root, rel)` walks `Dir(rel)` under the root with one `Lstat` per component and returns the first symlink component; a missing component ends the walk. `Build` calls it after the ownership check at both admission sites; a hit → `Plan.DstThroughLink`, never written under any policy, reported, `INCOMPLETE:`, exit 1.
+2. `copy.File` runs the same walk first, before `MkdirAll`, and refuses `refusing to write through a symlink`; applies to new files and `Replace`.
+3. Regression: the Reviewer's exact `dst/alias → real` cross-disk recopy under both policies (A's bytes and row intact, exit 1, `verify A` 0); nested link `DCIM/100MSDCF → elsewhere` for a new file; writer test with target untouched and no partial.
+
+**This is wrong if:** the walk can be satisfied by a path whose symlink component is the *last* directory before the file when that directory does not yet exist at plan time but does at write time (race aside, is the writer's walk the same function?); the root itself being a symlink changes the result between plan and write; `MkdirAll` can create a directory through a link that appeared between the two walks (state whether the writer's walk happens after `MkdirAll` anywhere); or the `Replace` path skips the walk.
+
+Verdict goes below this line.
+
+**Reviewer (2026-09-17):** APPROVE — request #11, exactly `git diff 151b20a..ba4c185 -- . ':!team'`, reviewed by source trace of the fix only. No build or tests run.
+
+The shared `scan.SymlinkComponent` checks every directory component, including the last parent of the destination, and stops at the first missing component. Both admission sites call it after ownership checks; a hit is excluded from copy/recopy, reported as `DstThroughLink`, and produces `INCOMPLETE:` / exit 1 on a real copy. `copy.File` calls the same function unconditionally before `MkdirAll`, staging creation, or replacement, so `Replace` cannot bypass it. A parent missing during planning but present as a symlink when the writer checks is refused. The added regression assertions cover the cross-disk alias recopy under both policies, preservation of A's bytes and row, subsequent verification, a nested link for a new file, and writer refusal without partials for both replacement settings.
+
+Timing/root checks: a stable symlink used as the root is followed consistently by planning and writing; the root itself is not rejected by this under-root walk. A link introduced between the planner's and writer's walks is caught by the writer. The writer never repeats the walk after `MkdirAll`; a link introduced after its walk can still redirect `MkdirAll` or later writes. This is a concurrent filesystem mutation race, not the static directory-alias bypass this fix closes; this approval does not establish race-free writes.
+
+
+**PM (2026-09-17T21:39:16-07:00):** APPROVE accepted; the race caveat (a link introduced between the writer's walk and `MkdirAll`) is noted in BACKLOG Deferred as a concurrent-mutation case outside the static guarantee. Merging `overwrite-guard` (`d73e71c`, code tip `ba4c185`) into `main` `--no-ff`; tagging `v0.2.1` on the merge - the release that unblocks the `kipp` copy.
+
+### #12 - B25 certify-outside-the-tree + B34 rules never leave the root (branch `certs-out`, code tip `afc21fe`) - **resolved: FINDINGS (3), all accepted → Dev fixes → request #16**
+
+**PM (2026-09-17T20:30:50-07:00):** Review `git diff 638d223..afc21fe -- . ':!team'` (merge-base with `main`; WIP `3ae065d` + `afc21fe`; 15 files, +370/-14: `internal/certify/{certify.go,certify_test.go}`, `internal/scan/scan.go` + test, `internal/move/move.go` + new `rules_test.go`, `cmd/vault/main_test.go`, `scripts/nas-verify-certify-all.sh`, `scripts/nas-test.sh`, new `scripts/test/nas-verify-certify-all.sh`, `scripts/test/scripts_test.go`, `CLAUDE.md`, `README.md`, `docs/install/ugos.md`). Context: six certificates currently live *inside* the trees they certify on the NAS and one stale one attests 51 GB that is gone (Tester #9); a cert row once blocked 39,219 files. Dev's note: Dev 2026-09-17T20:30 (commit `b25aa92` on that branch). PM independently at `afc21fe`: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all seven test packages (`internal/move` now has tests).
+
+**Claims:**
+1. (B25) `certify.InsideArchive(out, rows)` resolves the output directory physically (longest existing ancestor via `EvalSymlinks`, rest re-appended) and refuses if any ancestor up to `/` holds this disk's rows as regular files of the right size; it runs before `Build`, before signing, before `key.pem` is created. Stdout mode untouched.
+2. (B25 scripts) `nas-verify-certify-all.sh` writes certs to `CERTS="${VAULT_CERTS:-/volume1/docker/vault-certs}"` (`mkdir -p`), gains `LOG="${VAULT_LOG:-…}"`; a docker-stub shell test asserts all six certify calls target `$CERTS`, none `/volume1/media`, verify still runs against the camera roots.
+3. (B34) `scan.ParseRules` and `move.ParseRules` refuse an absolute subdir or any `..` component (`invalid rule`, exit 1); `v..ideos` stays legal.
+
+**This is wrong if:** `InsideArchive` can be bypassed by an output path whose *file* component is a symlink into the tree (the dir is resolved, is the leaf?); a tree whose rows all have a different size on disk (a fully overwritten tree) is not recognized as the tree, and whether that matters (state it); the check runs after any write; the script test can pass with the `$CERTS` change reverted; a rule subdir like `a/../b` (net-inside) is refused or accepted inconsistently between `scan` and `move`; or `nas-test.sh` still writes a cert into `/volume1/media`.
+
+Verdict goes below this line.
+
+**Reviewer (2026-09-17):** FINDINGS — request #12, exactly `git diff 638d223..afc21fe -- . ':!team'`, reviewed by source trace. References are to `afc21fe`. No Go build, test, or vet run.
+
+1. **[P1] A symlink at the output filename bypasses the archive guard and can overwrite verified footage.** `internal/certify/certify.go:63-65` resolves only `Dir(out)`, whereas `cmd/vault/main.go:510` writes through the original filename with `os.WriteFile`. Concrete input: the disk has a verified row `DCIM/a.JPG` present under `/archive`; `/certs/out.json` is a symlink to `/archive/DCIM/a.JPG`; no matching row paths exist under `/certs` or `/`. `InsideArchive` returns clear, `Build` trusts the verified row, and writing the certificate truncates the archived photo. A link to `/archive/new.cert.json` also creates a certificate inside the forbidden tree. No race is required. Reject output-leaf symlinks or resolve their targets (including dangling targets) before checking, and ensure the write uses the checked destination. Add both leaf-link regressions; the existing test covers only a directory symlink.
+2. **[P2] Changing every archived file's size disables the inside-tree refusal.** At `internal/certify/certify.go:80-81`, size equality is required to recognize the root. For a one-row disk with verified `a.MP4` of size 7, replace `/archive/a.MP4` with 8 bytes and request `/archive/cert.json`. With no other matching ancestor, the guard returns clear; `Build` at lines 112-115 checks stored status only, so certification succeeds inside the archive. This matters even though certification's reliance on historical verification predates this change: the new placement guarantee fails precisely for a damaged or overwritten tree, producing another untracked certificate there. The new unit test explicitly expects the wrong-size tree to be ignored. Identify archive location independently of current size (preferably from an explicit or persisted root), and add a CLI regression with stale verified rows. README and CLAUDE's unconditional refusal claims are consequently too strong.
+3. **[P2] The shell test's negative camera-root assertion cannot fail the test.** `scripts/test/nas-verify-certify-all.sh:45-46` passes literal `!` to `check`; line 18 tries to execute it as a command, rather than negating `grep`. Moreover, `check` is on the left of a pipeline, so its `failures` increment is lost in a subshell; the pipeline status is ignored. A minimal, file-free Bash reproduction produced `!: command not found`, `FAIL`, and parent `failures=0`. Wrap the negated pipeline in a function invoked by `check`, or compute its result outside the pipeline and assert it. The separate six-output count at lines 43-44 does catch reverting `$CERTS` to `$root`, but does not make this broken assertion valid.
+
+Remaining requested checks: both rule parsers use the same absolute-path and exact-component checks; both reject `a/../b` before cleaning, and both accept `v..ideos`. Their CLI error paths exit 1 with `invalid rule`. The production script routes all six certificate outputs to `$CERTS`, creates that directory, retains camera-root verification, and honors `VAULT_LOG`; `nas-test.sh` now writes `/config/tars-test.cert.json`, mapped beside the manifest, not into media. Stdout certification skips the new guard as intended. The guard precedes `Build`, signing-key creation, signing, and certificate writing. It does **not** precede literally every write: existing `main` initialization creates the config directory and opens/initializes the manifest before dispatch (`cmd/vault/main.go:71-79`). Thus the narrower before-signing/key/output claim holds; a zero-write refusal claim would not. The new tests were inspected, not executed; PM's reported test results remain PM evidence.
+
+
 ### #9 - re-review of #6's fix only (branch `overwrite-guard`, code tip `abc863e`) - **resolved: FINDINGS (1), accepted → Dev fixes → request #11**
 
 **PM (2026-09-17T20:20:48-07:00):** Check that #6's one finding is closed, nothing else. Diff `git diff 539317c..abc863e -- . ':!team'` (1 commit after Dev's merge of `main` at `539317c`; 7 files, +399/-55; `internal/copy` now changes - the writer - which is expected). Dev's note: `team/channels/dev-questions.md`, Dev 2026-09-17T20:14 (worktree `~/Projects/media-vault-dev`, commit `34cc608` on that branch). PM independently at `abc863e` in a detached checkout: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all six test packages.
@@ -27,7 +102,7 @@ The case-fold and `..` examples are closed by the shared key function; the stagi
 
 **PM (2026-09-17T20:22:28-07:00):** FINDING accepted. A symlinked *directory component* under the destination root aliases two spellings to one physical file, and neither the key nor the writer's `Lstat` (which follows intermediate links) sees it. Fix direction to Dev: the same discipline `repair-dest` now has - walk the destination path component by component from the root with `Lstat` and refuse any symlink component before admitting or writing (new file or recopy); ownership stays on the cleaned key. Back to Dev on `overwrite-guard`, new commits only; re-review as **#11, fixes only**. **Reviewer availability:** Codex hit its usage limit at 2026-09-17T20:22:28-07:00 right after writing #9 - request #10 got no verdict and stays OPEN; retry from 21:34 (Codex's own message), or earlier if Eddy adds credits.
 
-### #10 - re-review of #7's fixes only (branch `repair-dest`, code tip `c6d9d42`)
+### #10 - re-review of #7's fixes only (branch `repair-dest`, code tip `c6d9d42`) - **resolved: FINDINGS (3), all accepted → Dev fixes → request #15**
 
 **PM (2026-09-17T20:20:48-07:00):** Check the three #7 findings and B33 are closed, nothing else. Diff `git diff 6c52d37..c6d9d42 -- . ':!team'` (1 commit after Dev's merge of `main` at `6c52d37`; 7 files, +340/-62). Dev's note: `team/channels/dev-questions.md`, Dev 2026-09-17T20:20 (commit `ce79253` on that branch). PM independently at `c6d9d42`: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all seven test packages.
 
@@ -40,6 +115,19 @@ The case-fold and `..` examples are closed by the shared key function; the stagi
 **This is wrong if:** any `os.Stat`/`os.Open`/`os.ReadFile` on a candidate or its directory remains that follows a symlink before the `Lstat` check; `under()` can be satisfied by a path whose ancestor is a symlink pointing back inside the root (still outside the one-level rule); a directory at `dest_path` can still count as intact anywhere (including `Apply`'s post-check); `OWNED` keying differs from `scan`'s physical key; or `Apply` can write a row whose plan outcome is not `REPAIR`.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-17):** FINDINGS — request #10, exactly `git diff 6c52d37..c6d9d42 -- . ':!team'`, reviewed by source trace; line references are to `c6d9d42`. No build or tests run.
+
+1. **[P2] The intact fast path bypasses the new containment and ancestor checks.** `internal/repair/repair.go:95-100` calls `Lstat(root/dest_path)` and immediately counts a regular leaf as intact; `containedDir` and `under` run only later, inside `locate`. For `root/Videos -> /outside/videos`, an existing regular `/outside/videos/X.MP4` and a row with `dest_path=Videos/X.MP4`, `Lstat` follows the intermediate symlink and the command reports intact, with exit 0 if this is the only row. An existing `../X.MP4` similarly bypasses lexical containment. Validate the row's directory and containment before the intact check, and keep rejected paths unresolved. The new ancestor regression covers only a missing old destination, so it does not exercise this branch.
+
+2. **[P2] B33 ownership is a frozen snapshot, so two repairs can claim the same candidate in one run.** `internal/repair/repair.go:81` builds claims once; lines 107-111 and 154-164 never reserve a chosen `NewDest`. Concrete input: two rows on disk `sony`, distinct source paths `a/X.JPG` and `b/X.JPG`, both with missing `dest_path=X.JPG` and identical size/hash; the only matching file is `root/DCIM/X.JPG`. Both changes become `REPAIR`. `Apply` (lines 235-244) writes both, even though after its first update another row already claims `DCIM/X.JPG`. The schema permits this (only source disk/path is unique). Reserve candidates during planning or mark conflicting planned repairs unresolved, and ensure application cannot create this duplicate ownership; add a two-row regression.
+
+3. **[P2] The new containment predicate rejects valid repairs when the destination root is `.`.** `internal/repair/repair.go:195-204` compares resolved paths using `HasPrefix(f, r + separator)` without making them absolute. With `vault repair-dest sony .`, missing `X.JPG`, and a matching regular `./DCIM/X.JPG`, `EvalSymlinks(".")` returns `"."` while the joined candidate resolves to `"DCIM/X.JPG"`; it does not start with `"./"`. The candidate is skipped before hashing, reported `NOT FOUND`, and a real run exits 1. Root `/` also constructs the incorrect prefix `//`. Normalize to absolute paths and use a component-aware relative containment check; cover both root forms.
+
+The leaf/subdirectory candidate symlink guards, directory-at-destination outcome and CLI exit handling, dry-run wording, and `Apply`'s non-`REPAIR` exclusion trace correctly. These do not close the paths above.
+
+
+**PM (2026-09-17T21:37:50-07:00):** FINDINGS accepted, all three (all P2, all real): the intact fast path must run the same directory-walk + containment before counting a leaf intact; planned repairs must reserve their candidate so two rows cannot claim one file (conflict → unresolved); containment must work on absolute paths for roots `.` and `/`. Back to Dev on `repair-dest`, new commits only; re-review as **#15, fixes only**.
 
 ### #8 - numbers: `kipp` gap report (Tester #19) - **resolved: FINDINGS (1, breakdown only); headline numbers reproduced → delivered to Eddy with the corrected breakdown**
 
