@@ -222,11 +222,15 @@ check "bounded slug: names sharing a 24-byte head get distinct files" test "$(ls
 check "bounded slug: each report filename stays well under the 255-byte limit" test "$(ls "$state"/gap-"$pfx"-*.tsv 2>/dev/null | head -1 | xargs -n1 basename | wc -c | tr -d ' ')" -lt 120
 rm -rf "$vols"/*
 
-# review #43: slug-collision guard. The bounded slug is injective in practice,
-# but if two names ever shared a slug, line 1 of each output (the full disk
-# name) proves ownership. Simulate a collision by tampering the line-1 name of
-# an existing report+tsv; the next run must refuse to overwrite them and log
-# SLUG COLLISION, leaving them intact and exiting non-zero.
+# review #43/#49/#50: the slug is collision-resistant, NOT injective; line 1
+# of every slug-keyed file names its owner, and a file whose line 1 names a
+# DIFFERENT volume is a SLUG COLLISION that fails the run. Exercised three-way
+# (report, tsv, marker) with two real names each (the file relabelled to a
+# different disk/volume).
+tslug() { printf '%s-%s' "$(printf '%s' "$1" | head -c 24 | od -An -v -tx1 | tr -d ' \n')" "$(printf '%s' "$1" | shasum -a 256 | cut -c1-16)"; }
+
+# report + tsv: tars writes its report, then its slug file is relabelled to
+# another real disk (kipp); the next run must refuse, log, and exit non-zero.
 rm -rf "$vols"/*; mkdir -p "$vols/tars/DCIM"; mk "$vols/tars/DCIM/new.ARW" "not archived yet"
 cat > "$work/mini5.env" <<ENV
 SCRATCH_DIR="$scratch"
@@ -235,35 +239,37 @@ ENV
 runcol() { MINI_ENV="$work/mini5.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; }
 runcol
 rep=$(ls "$state"/gap-74617273-*.txt | head -1); tsvf=$(ls "$state"/gap-74617273-*.tsv | head -1)
-check "slug collision: the first run wrote tars' report and tsv" test -n "$rep" -a -n "$tsvf"
-sed -i '' '1s|.*|disk: imposter|' "$rep" "$tsvf"   # pretend a different disk owns this slug
+check "collision(report/tsv): the first run wrote tars' report and tsv" test -n "$rep" -a -n "$tsvf"
+sed -i '' '1s|.*|disk: kipp|' "$rep" "$tsvf"   # a DIFFERENT real disk now owns tars' slug
 foreign=$(cat "$rep")
 before_state=$(wc -l < "$state/backup-state.tsv" | tr -d ' ')
-: > "$logf"
-runcol; colrc=$?
-check "slug collision: the run refuses (exit non-zero)" test "$colrc" -ne 0
-check "slug collision: SLUG COLLISION is logged, naming the disk" grep -q "GAP tars SLUG COLLISION" "$logf"
-check "slug collision: the foreign report is left untouched" test "$(cat "$rep")" = "$foreign"
-check "slug collision: the refused disk records no new state line" test "$(wc -l < "$state/backup-state.tsv" | tr -d ' ')" -eq "$before_state"
+: > "$logf"; runcol; colrc=$?
+check "collision(report/tsv): the run refuses (exit non-zero)" test "$colrc" -ne 0
+check "collision(report/tsv): SLUG COLLISION is logged, naming the disk" grep -q "GAP tars SLUG COLLISION" "$logf"
+check "collision(report/tsv): the foreign file is left untouched" test "$(cat "$rep")" = "$foreign"
+check "collision(report/tsv): the refused disk records no new state line" test "$(wc -l < "$state/backup-state.tsv" | tr -d ' ')" -eq "$before_state"
 rm -rf "$vols"/*
 
-# review #49: the collision guard covers all THREE slug-keyed outputs - the
-# report (.txt) and tsv (.tsv, above) and the unknown-volume marker. A marker
-# whose line 1 names a different volume is a collision: log it, leave it.
-rm -f "$state"/backup.unknown-*
-rm -rf "$vols"/*; mkdir -p "$vols/Random/DCIM"; mk "$vols/Random/DCIM/x" "z"   # an unknown volume
+# marker: a marker whose line 1 names a different, gone volume must FAIL the
+# tick (review #50), and owner-validated pruning must remove the stale marker
+# even though its slug is a live volume's - so the tick after is clean.
+rm -f "$state"/backup.unknown-*; rm -rf "$vols"/*; mkdir -p "$vols/Random/DCIM"; mk "$vols/Random/DCIM/x" "z"
 cat > "$work/mini7.env" <<ENV
 SCRATCH_DIR="$scratch"
 BACKUP_DISKS="tars"
 ENV
 runmk() { MINI_ENV="$work/mini7.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" > "$out" 2>&1; }
-: > "$logf"; runmk
+: > "$logf"; runmk; mkrc0=$?
 mk=$(ls "$state"/backup.unknown-* 2>/dev/null | head -1)
-check "marker collision: an unknown volume's marker names it on line 1" test "$(head -1 "$mk" 2>/dev/null)" = "volume: Random"
-sed -i '' '1s|.*|volume: Imposter|' "$mk"   # pretend a different volume owns this slug
-: > "$logf"; runmk
-check "marker collision: a foreign marker triggers SLUG COLLISION" grep -q "SLUG COLLISION: unknown-volume marker" "$logf"
-check "marker collision: the foreign marker is left untouched" test "$(head -1 "$mk")" = "volume: Imposter"
+check "collision(marker): a first run names the volume on line 1 and exits 0" test "$(head -1 "$mk" 2>/dev/null)" = "volume: Random" -a "$mkrc0" -eq 0
+sed -i '' '1s|.*|volume: Ghost|' "$mk"   # a DIFFERENT, gone volume now owns this slug
+: > "$logf"; runmk; mkrc=$?
+check "collision(marker): the run fails (exit non-zero, review #50)" test "$mkrc" -ne 0
+check "collision(marker): SLUG COLLISION is logged for the marker" grep -q "SLUG COLLISION: unknown-volume marker" "$logf"
+check "owner-pruning: the stale (owner-gone) marker is pruned though its slug is live" test ! -e "$mk"
+: > "$logf"; runmk; mkrc2=$?
+check "owner-pruning: the next tick is clean (exit 0)" test "$mkrc2" -eq 0
+check "owner-pruning: Random is tracked under its own name again" test "$(head -1 "$mk" 2>/dev/null)" = "volume: Random"
 rm -rf "$vols"/*; rm -f "$state"/backup.unknown-*
 
 # review #43/#49: a configured disk name longer than 255 bytes can never be a

@@ -49,18 +49,24 @@ The `<hexname>` in the output paths is a **bounded** slug: the hex of the
 disk name's first 24 bytes then 16 hex of its whole sha256 (~65 chars,
 `[0-9a-f]` only - so `Disk` and `disk` never share a file on a
 case-folding state dir, and a long name never overruns the filename limit).
-It is injective in practice; to prove it, **line 1 of every slug-keyed file
-is the full name** - the report (`disk: <name>`), the TSV (`disk: <name>`),
-and the unknown-volume marker (`volume: <name>`). Before writing, an existing
-file whose line 1 names a *different* volume is treated as a **SLUG
-COLLISION**: for a report/TSV the run refuses to overwrite it, logs
-`GAP <name> SLUG COLLISION …`, exits non-zero and leaves it (a `--force`
-re-report of the *same* disk matches line 1 and is replaced normally); for a
-marker it logs `SLUG COLLISION: unknown-volume marker …` and leaves it, so a
-second unknown volume sharing the slug is not silently swallowed. A configured
-`BACKUP_DISKS` name longer than 255 bytes - which no mount point can be - is
-refused at discovery (exit 2), before any report path is built and before any
-log call (the log directory is not created until a disk is due).
+It is collision-resistant, **not injective**: two names collide only if their
+24-byte heads match *and* their sha256 clashes in 16 hex (64 bits) - about
+1 in 1.8e19, negligible but not impossible. So **line 1 of every slug-keyed
+file is the full name** - the report (`disk: <name>`), the TSV
+(`disk: <name>`) and the unknown-volume marker (`volume: <name>`). Before
+writing, an existing file whose line 1 names a *different* volume is a **SLUG
+COLLISION**: the run logs it, leaves the file, and **exits non-zero** - a
+report/TSV logs `GAP <name> SLUG COLLISION …` and skips that disk (a `--force`
+re-report of the *same* disk matches line 1 and is replaced normally); a
+marker logs `SLUG COLLISION: unknown-volume marker …` and fails the tick too,
+so a second unknown volume sharing the slug is neither silently swallowed nor
+allowed to pass quietly. Markers are pruned by **owner**: a marker is removed
+when the volume named on its line 1 is no longer mounted-and-unknown, not
+merely when its slug is absent (so a slug clash cannot keep a dead volume's
+marker alive under a live one's slug). A configured `BACKUP_DISKS` name longer
+than 255 bytes - which no mount point can be - is refused at discovery
+(exit 2), before any report path is built and before any log call (the log
+directory is not created until a disk is due).
 
 ## Two owners, two kinds of setting
 
