@@ -97,9 +97,19 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 	cleanup := func() { os.Remove(tmpPath) }
 
 	hasher := sha256.New()
-	tee := io.TeeReader(&ctxReader{ctx: ctx, r: in}, hasher)
+	hashed := &byteCounter{}
+	tee := io.TeeReader(&ctxReader{ctx: ctx, r: in}, io.MultiWriter(hasher, hashed))
 
-	written, err := io.Copy(out, tee)
+	// The destination is fed from the tee, so the hasher and byteCounter see
+	// exactly the bytes that land. teeBypass is a test-only seam (nil in
+	// production) that lets a test feed io.Copy the raw source instead, proving
+	// the hashCovers assertion below refuses a row whose landed bytes were never
+	// counted through the tee (B38, review #64).
+	var src io.Reader = tee
+	if teeBypass != nil {
+		src = teeBypass(&ctxReader{ctx: ctx, r: in})
+	}
+	written, err := io.Copy(out, src)
 	if err != nil {
 		out.Close()
 		cleanup()
@@ -118,6 +128,18 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 		cleanup()
 		return manifest.Entry{}, fmt.Errorf("short write: wrote %d, expected %d", written, task.Size)
 	}
+	// Invariant (B38): a row's sha is the hash of the bytes streamed from the
+	// source through this writer — io.Copy fed the destination and the hasher
+	// from one source reader (the tee), and `written == task.Size` above — so
+	// it is the hash of exactly the source bytes, never a stat/scan of the
+	// destination after the fact (the shape that produced the B39 empty-dest
+	// rows and the B40 torn write). copy.File is the only path that mints a row;
+	// refuse to return one whose hash was not computed here.
+	sum := hex.EncodeToString(hasher.Sum(nil))
+	if err := hashCovers(sum, hashed.n, written); err != nil {
+		cleanup()
+		return manifest.Entry{}, err
+	}
 	mt := time.Unix(0, task.MtimeNs)
 	if err := os.Chtimes(tmpPath, mt, mt); err != nil {
 		cleanup()
@@ -134,11 +156,34 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 		DestPath:   dstRel,       // dst-relative — used by verify to find the file
 		Size:       task.Size,
 		MtimeNs:    task.MtimeNs,
-		SHA256:     hex.EncodeToString(hasher.Sum(nil)),
+		SHA256:     sum,
 		CopiedAt:   time.Now().UnixNano(),
 		Status:     "copied",
 	}, nil
 }
+
+// hashCovers guards the row-minting invariant (B38): the tee fed the hasher and
+// the destination from one source reader, so the bytes the hasher saw (hashed)
+// must equal the bytes written; if they ever diverge, the sha is not the hash of
+// what landed and no row may be recorded. Split out so a tee-bypass is testable.
+func hashCovers(sum string, hashed, written int64) error {
+	if sum == "" || hashed != written {
+		return fmt.Errorf("refusing to record a row: hashed %d bytes but wrote %d", hashed, written)
+	}
+	return nil
+}
+
+// teeBypass is a test-only seam (nil in production): when set, io.Copy reads the
+// reader it returns instead of the tee, so the hasher and byteCounter see none
+// of the landed bytes. It exists only so a test can prove the real File refuses
+// to return a row when the assertion is violated (review #64).
+var teeBypass func(in io.Reader) io.Reader
+
+// byteCounter counts the bytes written through it — the tee writes every byte
+// it reads here as well as to the hasher, so it counts exactly what was hashed.
+type byteCounter struct{ n int64 }
+
+func (c *byteCounter) Write(p []byte) (int, error) { c.n += int64(len(p)); return len(p), nil }
 
 type ctxReader struct {
 	ctx context.Context

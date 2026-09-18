@@ -1658,6 +1658,116 @@ func TestMoveCleanExitsZero(t *testing.T) {
 // TestGap is B22's report through main(): the GAP line with its arithmetic,
 // the TSV, a read-only manifest (byte-identical, no config created when
 // absent), and the exit codes.
+// TestAudit is B38 through main(): a torn archived file (no JPEG EOI) is
+// SUSPECT, a whole one PLAUSIBLE; the report exits 0 by default and 1 under
+// --strict; --tsv is written; the manifest is untouched (report-only).
+func TestAudit(t *testing.T) {
+	cfg, src, dst := t.TempDir(), t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(src, "DCIM", "good.JPG"), "a photo\xff\xd9", t0) // ends in the EOI marker
+	writeFile(t, filepath.Join(src, "DCIM", "torn.JPG"), "the whole image\xff\xd9", t0)
+	writeFile(t, filepath.Join(src, "DCIM", "clip.MOV"), "a movie", t0) // a type audit does not check → SKIPPED
+	if _, _, code := vault(t, cfg, "copy", "cam", src, dst); code != 0 {
+		t.Fatalf("copy: exit %d", code)
+	}
+	if _, _, code := vault(t, cfg, "verify", "cam", dst); code != 0 {
+		t.Fatalf("verify: exit %d", code)
+	}
+	// Simulate the torn write: overwrite the archived copy with zeros (audit
+	// reads the tail, not the row's hash).
+	if err := os.WriteFile(filepath.Join(dst, "DCIM", "torn.JPG"), make([]byte, 200), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dbBefore := readFile(t, filepath.Join(cfg, "manifest.db"))
+
+	out, _, code := vault(t, cfg, "audit", "cam", dst)
+	if code != 0 {
+		t.Fatalf("audit: exit %d, want 0 (report-only)\n%s", code, out)
+	}
+	if !strings.Contains(out, "SUSPECT") || !strings.Contains(out, "DCIM/torn.JPG") {
+		t.Errorf("audit should flag torn.JPG SUSPECT:\n%s", out)
+	}
+	if !strings.Contains(out, "AUDIT cam: 3 rows — 1 plausible, 1 suspect") {
+		t.Errorf("audit summary wrong:\n%s", out)
+	}
+	// The .MOV is a type audit does not check: named, with its ext:count.
+	if !strings.Contains(out, "SKIPPED (type not audited): .mov:1") {
+		t.Errorf("audit should name the skipped type as .mov:1:\n%s", out)
+	}
+	if readFile(t, filepath.Join(cfg, "manifest.db")) != dbBefore {
+		t.Errorf("audit changed the manifest")
+	}
+
+	_, _, code = vault(t, cfg, "audit", "cam", dst, "--strict")
+	if code != 1 {
+		t.Errorf("audit --strict with a SUSPECT: exit %d, want 1", code)
+	}
+
+	tsv := filepath.Join(t.TempDir(), "findings.tsv")
+	if _, _, code := vault(t, cfg, "audit", "cam", dst, "--tsv", tsv); code != 0 {
+		t.Fatalf("audit --tsv: exit %d", code)
+	}
+	if got := readFile(t, tsv); !strings.Contains(got, "SUSPECT\tDCIM/torn.JPG") {
+		t.Errorf("--tsv missing the suspect row:\n%s", got)
+	}
+	if got := readFile(t, tsv); !strings.Contains(got, "SKIPPED\t.mov\t1") {
+		t.Errorf("--tsv missing the skipped-type count row:\n%s", got)
+	}
+
+	// A whole archive is clean: exit 0 even under --strict.
+	if err := os.WriteFile(filepath.Join(dst, "DCIM", "torn.JPG"), []byte("restored\xff\xd9"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, _, code := vault(t, cfg, "audit", "cam", dst, "--strict"); code != 0 || !strings.Contains(out, "0 suspect") {
+		t.Errorf("clean audit --strict: exit %d, want 0\n%s", code, out)
+	}
+
+	// A per-row read ERROR (not only a SUSPECT) also fails --strict: replace a
+	// leaf with a symlink so it is no longer a regular file to audit. Plain
+	// audit reports it and stays exit 0; --strict exits 1.
+	if err := os.Remove(filepath.Join(dst, "DCIM", "good.JPG")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(dst, "DCIM", "torn.JPG"), filepath.Join(dst, "DCIM", "good.JPG")); err != nil {
+		t.Fatal(err)
+	}
+	if out, _, code := vault(t, cfg, "audit", "cam", dst); code != 0 || !strings.Contains(out, "1 error") {
+		t.Errorf("audit with a read error: exit %d, want 0 with '1 error'\n%s", code, out)
+	}
+	if _, _, code := vault(t, cfg, "audit", "cam", dst, "--strict"); code != 1 {
+		t.Errorf("audit --strict with a read error: exit %d, want 1", code)
+	}
+}
+
+// TestAuditAllSkipped: a disk of only types audit does not check exits 0, names
+// each skipped type as ext:count on the summary, and writes the SKIPPED count
+// rows to the TSV — even under --strict, since nothing is SUSPECT or unreadable.
+func TestAuditAllSkipped(t *testing.T) {
+	cfg, src, dst := t.TempDir(), t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(src, "clip1.MP4"), "moovdata one", t0)
+	writeFile(t, filepath.Join(src, "clip2.mp4"), "moovdata two", t0)
+	if _, _, code := vault(t, cfg, "copy", "cam", src, dst); code != 0 {
+		t.Fatalf("copy: exit %d", code)
+	}
+	if _, _, code := vault(t, cfg, "verify", "cam", dst); code != 0 {
+		t.Fatalf("verify: exit %d", code)
+	}
+
+	tsv := filepath.Join(t.TempDir(), "skipped.tsv")
+	out, _, code := vault(t, cfg, "audit", "cam", dst, "--strict", "--tsv", tsv)
+	if code != 0 {
+		t.Fatalf("all-skipped audit --strict: exit %d, want 0\n%s", code, out)
+	}
+	if !strings.Contains(out, "AUDIT cam: 2 rows — 0 plausible, 0 suspect") {
+		t.Errorf("summary should show 2 rows, none plausible/suspect:\n%s", out)
+	}
+	if !strings.Contains(out, "SKIPPED (type not audited): .mp4:2") {
+		t.Errorf("summary should name .mp4:2:\n%s", out)
+	}
+	if got := readFile(t, tsv); !strings.Contains(got, "SKIPPED\t.mp4\t2") {
+		t.Errorf("--tsv missing the skipped-type count row:\n%s", got)
+	}
+}
+
 func TestGap(t *testing.T) {
 	cfg, src, dst, ssd := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
 	writeFile(t, filepath.Join(src, "DCIM", "a.ARW"), "archived raw", t0)

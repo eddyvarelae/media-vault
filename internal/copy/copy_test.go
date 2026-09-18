@@ -4,12 +4,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/eddyvarelae/media-vault/internal/manifest"
 	"github.com/eddyvarelae/media-vault/internal/scan"
 	"github.com/eddyvarelae/media-vault/internal/testguard"
 )
@@ -84,6 +86,29 @@ func TestFileCopiesAtomicallyAndPreservesMtime(t *testing.T) {
 		t.Errorf("dest mtime = %v, want %v", info.ModTime(), mtime)
 	}
 	noPartials(t, dst)
+}
+
+// TestFileRowHashIsAlwaysTheSourceContent pins the B38 invariant: copy.File is
+// the only path that mints a row, and the row's sha is always the hash of the
+// exact bytes streamed from the source — never derived from a name, size, or a
+// later stat of the destination (the shape that produced the B39 empty-dest
+// rows and the B40 torn write). Even all-zero content records the hash of those
+// zeros, i.e. what copy actually read.
+func TestFileRowHashIsAlwaysTheSourceContent(t *testing.T) {
+	for _, content := range []string{"", "x", "the whole clip", string(make([]byte, 4096))} {
+		src, dst := t.TempDir(), t.TempDir()
+		mtime := time.Date(2024, 3, 9, 10, 0, 0, 0, time.UTC)
+		writeFile(t, filepath.Join(src, "f.bin"), content, mtime)
+		task := scan.FileTask{RelPath: "f.bin", Size: int64(len(content)), MtimeNs: mtime.UnixNano()}
+		e, err := File(context.Background(), src, dst, task, "diskA")
+		if err != nil {
+			t.Fatalf("content %d bytes: %v", len(content), err)
+		}
+		sum := sha256.Sum256([]byte(content))
+		if e.SHA256 == "" || e.SHA256 != hex.EncodeToString(sum[:]) {
+			t.Errorf("content %d bytes: row sha %q, want the source content's %s", len(content), e.SHA256, hex.EncodeToString(sum[:]))
+		}
+	}
 }
 
 func TestFileRemovesPartialOnShortWrite(t *testing.T) {
@@ -314,4 +339,44 @@ func TestFileRefusesDestinationsOutsideTheRoot(t *testing.T) {
 	if !Under(dst, filepath.Join(dst, "real", "x.mov")) || Under(dst, filepath.Join(dst, "out", "x.mov")) || Under(dst, filepath.Join(base, "outside.mov")) {
 		t.Errorf("Under: inside/through-link/outside decided wrong")
 	}
+}
+
+// TestHashCovers is the tee-bypass regression (B38): a row is refused unless the
+// bytes the hasher saw equal the bytes written and the sha is non-empty.
+func TestHashCovers(t *testing.T) {
+	if err := hashCovers("abcd", 100, 100); err != nil {
+		t.Errorf("equal counts + non-empty sha should pass: %v", err)
+	}
+	if hashCovers("abcd", 99, 100) == nil {
+		t.Errorf("hashed != written should be refused (a tee bypass)")
+	}
+	if hashCovers("", 100, 100) == nil {
+		t.Errorf("empty sha should be refused")
+	}
+}
+
+// TestFileRefusesTeeBypass proves the row-minting invariant on the real File:
+// with the tee bypassed (a test seam), the hasher and byte-counter see none of
+// the landed bytes, so File must return an error and leave no row, no partial
+// and no destination file — a row whose bytes were never counted is never
+// recorded (B38, review #64).
+func TestFileRefusesTeeBypass(t *testing.T) {
+	src, dst := t.TempDir(), t.TempDir()
+	mtime := time.Date(2024, 3, 9, 10, 0, 0, 0, time.UTC)
+	writeFile(t, filepath.Join(src, "f.bin"), "a non-empty clip", mtime)
+	teeBypass = func(in io.Reader) io.Reader { return in } // feed io.Copy raw source, skipping the counter
+	defer func() { teeBypass = nil }()
+
+	task := scan.FileTask{RelPath: "f.bin", Size: int64(len("a non-empty clip")), MtimeNs: mtime.UnixNano()}
+	e, err := File(context.Background(), src, dst, task, "diskA")
+	if err == nil {
+		t.Fatal("File returned a row with the tee bypassed; the hashCovers assertion must refuse it")
+	}
+	if e != (manifest.Entry{}) {
+		t.Errorf("a refused copy returned a non-zero entry, not the zero value: %+v", e)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "f.bin")); !os.IsNotExist(err) {
+		t.Errorf("a refused copy left a destination file: %v", err)
+	}
+	noPartials(t, dst)
 }
