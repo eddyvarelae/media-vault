@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T10:50:03-07:00) - Codex is out until 12:41; #55 waits. Idle.**
+
 **PM (2026-09-18T10:49:17-07:00) - #55 (`d49ce54`) accepted at `tested` and staged; Codex runs it now. Idle.**
 
 **PM (2026-09-18T10:38:15-07:00) - #54 on `backup`: FINDINGS (3) → **#55**.** (1) `slug()`: each component into a variable, status and non-emptiness checked, before the final `printf`; fixture with `shasum` shadowed to fail. (2) A test seam `BACKUP_FAIL_AT=<lookup|copy|rename>` (honored only when the harness sets it) that makes exactly that operation fail after `check_slugs` passed; the copy-read and lookup-error fixtures use it and assert the seam was reached (a marker line in the log). (3) All failure fixtures assert no report/marker written; add real tab and interior-newline name fixtures beside the trailing-newline one. Tri-state labels stay as your code has them (0 held / 1 free / ≥2 error). One commit + note.

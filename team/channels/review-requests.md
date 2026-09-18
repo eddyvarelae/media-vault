@@ -12,6 +12,8 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 Verdict goes below this line.
 
+**PM (2026-09-18T10:50:03-07:00):** #55 got no verdict - Codex usage limit again (retry 12:41). Stays OPEN; rerun scheduled 12:43.
+
 ### #54 - re-review of #53's fixes only (branch `backup`, code tip `2cf36a3`) - **resolved: FINDINGS (3), accepted → Dev → request #55**
 
 **PM (2026-09-18T10:36:33-07:00):** `git show 2cf36a3 -- . ':!team'` (fix commit after the pre-#54 `main` merge `e975665`). Claims: `slug_held_by_other` is tri-state (0 free / 1 held / 2 error) and `assign_slug` aborts on error; the base computation is checked for exit status and non-empty output; names are taken as `${mp##*/}` and validated with trailing-newline, interior-newline and tab fixtures; failure fixtures target the assignment operations (read-only registry directory → rename fails; copy-read failure), each asserting non-zero exit, registry bytes unchanged, no report/marker written. PM at `2cf36a3`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** any error path in the lookup or base computation can still yield a slug; a trailing-newline name can still be normalized; or a failure fixture does not reach the operation it claims.
