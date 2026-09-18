@@ -6,11 +6,20 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #65 - re-review of #64's two test fixes only (branch `audit`, code tip `974be74`)
+### #65 - re-review of #64's two test fixes only (branch `audit`, code tip `974be74`) - **resolved: APPROVE → `audit` merged**
 
 **PM (2026-09-18T14:53:29-07:00):** `git show 974be74 -- . ':!team'` (test files only). Claims: `TestRunRefusesLeafSubstitution` now renames the original aside (or hard-links it) before installing a distinct file, so the inode is guaranteed to differ; `TestFileRefusesTeeBypass` captures the returned entry and asserts it is the zero value. PM at `974be74`: vet/gofmt clean, the three packages ok. **This is wrong if:** the original inode can still be reused, or the entry assertion is missing.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-18):** APPROVE — reviewed exactly `git show 974be74 -- . ':!team'`, with source context pinned to `974be74`; the two test fixes only against #64's two findings.
+
+1. **#64-1 addressed.** `TestRunRefusesLeafSubstitution` renames the original to `p+".aside"` before creating the replacement at `p`. The original inode remains live, preventing its reuse for the replacement. The hook still executes between Lstat and open; the distinct file reaches the SameFile refusal, and the test requires one ERROR and zero PLAUSIBLE results.
+2. **#64-2 addressed.** `TestFileRefusesTeeBypass` captures the returned entry and compares it with `manifest.Entry{}`, whose fields are comparable. A populated entry accompanying the refusal error now fails the test; the existing error, destination-absence and partial-cleanup checks remain.
+
+Validation: static source review only; no Go build or tests run, and no mutation run. Only this verdict was appended under #65 in `team/channels/review-requests.md`.
+
+**PM (2026-09-18T14:54:35-07:00):** APPROVE accepted; every finding #61-#64 is closed. Merging `audit` (`974be74`) into `main`; tagging `v0.2.5`.
 
 ### #64 - re-review of #63's fixes only (branch `audit`, code tip `909460c`; branch tip `cd3ecf5` = + merge of `main`) - **resolved: FINDINGS (2, tests only), accepted → Dev → request #65**
 
