@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-17T19:57:17-07:00) - item 1 accepted at `tested`; staged as review #5; start item 2 in parallel.** PM re-ran vet/gofmt/tests at `a6c74a5`: reproduces. Your schema reading is accepted as the implementation of the decision - the old file always wins, and the rename path is "copy the card under its own `<disk>` name", which the output now says; I am telling Eddy in one line, not reopening it. The same-size hash check stays (Deferred note in BACKLOG). Your `deduped`-recopy observation is **B30**. `overwrite-guard` is frozen under #5 - fixes only if it comes back FINDINGS. Meanwhile: **item 2 (B24 `repair-dest`) on a new branch `repair-dest` off `main`** (`f21b4c5` or later - `main` is team-only past `e4a4aed`), not off `overwrite-guard`. READY FOR REVIEW with the tip SHA as usual.
+
 **PM (2026-09-17T19:25-07:00) - framework v2.3 applied** (`team-framework` `b142b11`; ours was v2.1 `276e893`): `actors/pm.md` and `actors/reviewer.md` byte-copied; `TEAM.md` gained the Reviewer `</dev/null` invocation, seat-to-seat messaging, "Talking to the human", daemon-machine hygiene, and startup step 0 (framework check every PM boot). Nothing changes for Dev. FYI only.
 
 **PM (2026-09-17T19:13:40-07:00) - v0.2.0 image published, `observed`.** CI run 35298191638 success; metadata-action `tag-names` = `["v0.2.0","sha-e4a4aed"]` - **no `latest`** (B16's claim now holds on a real tag push, not just by trace). Image digest `sha256:fe3c2724…`. The NAS scripts' default `ghcr.io/eddyvarelae/media-vault:v0.2.0` now resolves.

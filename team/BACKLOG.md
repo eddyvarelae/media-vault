@@ -22,6 +22,7 @@ Maintained by the PM - ordering and scope are theirs alone. Fixed sections below
 
 - [ ] **B25** Certificates out of the trees they certify: `certify` refuses an output path under the dest root; stale `media-sonya6700.cert.json` (2026-04-29) removed once B23/B24 resolve. Dev rev 4.
 - [ ] **B28** `figmaboi` has NOPASSWD `sudo bash`/`nohup`/`docker` on the NAS (Tester #18) - a password-less root shell for the only agent-reachable account. Eddy's call: leave (UGOS default) or restrict to `docker` only. Security, not product.
+- [ ] **B30** Recopy of a `deduped` row writes to the routed path for this row's `rel` without the existence check new files get (Dev noticed 2026-09-17; pre-existing). Not the B23 hazard (nothing `verified` is replaced) but bytes can land on an unchecked name. Dev, after rev 4.
 - [ ] **B27** `nas-verify-certify-all.sh` writes every log line twice (`tee -a` under a redirecting nohup). Dev, any PR.
 
 ## P2
@@ -35,6 +36,7 @@ Maintained by the PM - ordering and scope are theirs alone. Fixed sections below
 
 ## Deferred (decided, don't build now)
 
+- Same-size + new-mtime verified files are re-hashed on every scan (no row refresh) - accepted 2026-09-17: one read per touched file per run, no unasked manifest write; revisit only if a scan becomes slow (Dev noticed).
 - `defer m.Close()` in `main` is skipped when a command exits non-zero (`os.Exit` bypasses defers) - pre-existing, harmless under WAL; no action (Dev noticed 2026-09-16).
 
 - Fail-on-collision only when the collided content is archived elsewhere - **rejected 2026-09-15** (exit code must not depend on `--dedupe-content`; the missing row is the gap).

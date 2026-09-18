@@ -6,6 +6,21 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #5 - B23(b) overwrite guard (branch `overwrite-guard`, code tip `a6c74a5`)
+
+**PM (2026-09-17T19:57:17-07:00):** Review `git diff e4a4aed..a6c74a5 -- . ':!team'` (2 commits: `01d373c` reproduction test, `a6c74a5` fix; 6 files, +274/-52: `cmd/vault/main.go`, `cmd/vault/main_test.go`, `internal/scan/scan.go`, `internal/scan/scan_test.go`, `CLAUDE.md`, `README.md`). Context: on 2026-09-01 `copy` replaced 2,668 `verified` destinations in place because the same `(source_disk, source_path)` arrived with different content (Tester #5). Decision (DECISIONS.md 2026-09-17): a `verified` destination is never overwritten. Dev's evidence note: `team/channels/dev-questions.md`, Dev 2026-09-17T19:20 (in the `~/Projects/media-vault-dev` worktree, commit `9f4aa14`). PM independently at `a6c74a5` in a detached checkout: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all six test packages.
+
+**Claims:**
+1. `scan.Build` never places a row whose `status = verified` into the recopy set. Same size + newer mtime → the source is hashed; equal hash → counted `Retouched`, no write. Different size or hash → counted `VerifiedChanged`, never copied, under **every** `--on-collision` policy.
+2. `copy` reports `VerifiedChanged` (count always, list under `--dry-run`), names it in `INCOMPLETE:`, exits 1; `--dry-run` exits 0. The destination file and its manifest row (hash, `status`, `verified_at`) are byte-identical before and after.
+3. Recopy still happens for `copied` and `mismatch` rows (the repair path) - behavior there is unchanged.
+4. The reproduction test (`TestVerifiedDestinationNeverOverwritten`) fails at `01d373c` and passes at `a6c74a5`; it goes through `main()` and asserts destination bytes, row fields and exit code, not just output text.
+5. No change under `internal/verify`, `internal/copy`, `internal/manifest`.
+
+**This is wrong if:** any path in `scan.Build` or `runCopy` can still open a `verified` row's destination for writing (trace every `os.Create`/`Rename`/`.vault-partial` site back to the plan bucket it serves); a `verified` row can reach `ToRecopy` via a size change, an mtime change, a hash mismatch, or `--dedupe-content`; the reproduction test passes with the fix reverted (trace which assertion would catch it); `--dry-run` writes anything; `mismatch`/`copied` recopy changed; or the hash-first check on same-size files can skip a genuinely different file (hash collision aside).
+
+Verdict goes below this line.
+
 ### #4 - re-review of #3's fixes only (branch `tests-and-pinning`, code tip `52d30b0`) - **resolved: APPROVE → merged `e4a4aed`, tagged `v0.2.0`**
 
 **PM (2026-09-17T19:20-07:00):** Check the four #3 findings are closed, nothing else. Diff `git diff 0510072..52d30b0` (3 commits after Dev's merge of `main` at `0510072`; `main` itself only added F4 under `internal/verify`, which Dev did not touch). Dev's mapping: `team/channels/dev-questions.md`, Dev note 2026-09-17T18:52. PM independently at `52d30b0` in a detached checkout: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all six test packages (`cmd/vault`, `internal/{certify,copy,scan,testguard}`, `scripts/test`).
