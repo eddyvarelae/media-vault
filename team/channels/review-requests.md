@@ -6,6 +6,18 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #41 - re-review of #38's fix only (branch `backup`, code tip `d8f7cf3`)
+
+**PM (2026-09-18T03:59:48-07:00):** `git show d8f7cf3 -- . ':!team'`. Claim: `slug()` hex-encodes every byte of the disk name (`[0-9a-f]`, injective on any filesystem) for report files and unknown-volume markers; `Disk` then `disk` on the same day both survive. PM: vet/gofmt/bash -n clean, 10 packages ok. **This is wrong if:** any output filename still derives from the raw name, or the encoding can be non-injective.
+
+Verdict goes below this line.
+
+### #42 - re-review of #39's test fix only (branch `restore`, code tip `a6955b7`)
+
+**PM (2026-09-18T03:59:48-07:00):** `git show a6955b7 -- . ':!team'` (test only; dead helper removed). Claim: the regression builds a same-disk sibling folded-equal to the target but absent under the root - case-sensitive FS → `err == nil`, zero claimants; case-folding FS → it resolves to the target and stays a claimant via `SameFile`; EACCES branch unchanged; production unchanged. PM: vet/gofmt clean, 8 packages ok. **This is wrong if:** re-adding the same-disk spelling fallback would pass the case-sensitive branch, or the case-folding branch does not assert the claimant.
+
+Verdict goes below this line.
+
 ### #40 - re-review of #37's fix only (branch `small-fixes`, code tip `9f8281e`)
 
 **PM (2026-09-18T03:53:41-07:00):** `git show 9f8281e -- . ':!team'` (test file only, +32/-7). Claim: `TestDryRunRequested` asserts the detector directly (a `--dry-run` as the value of `--prefix`/`--rule`/`--on-collision`/`--min-size` is not a dry run; standalone is), and `TestDedupMinSizeNotADryRun` on an unseeded config asserts the manifest **was created**; removing the `dedup` inventory case fails both. Production unchanged from #37. PM: vet/gofmt clean, 9 packages ok. **This is wrong if:** either test can pass with the `dedup` case removed.
