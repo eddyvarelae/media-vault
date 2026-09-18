@@ -89,11 +89,16 @@ attach_id() { stat -f '%d:%i:%B' "$1"; }
 # persisted slug (review #52), so the base need not be injective. BACKUP_SLUG_HOOK
 # is a test seam: set to a command, it computes the base instead, so a test can
 # force two names onto one base and exercise the -N disambiguation for real.
+# Each component is computed and CHECKED on its own before the printf (review
+# #55): a failed pipeline (pipefail) or an empty result is not a slug, so a
+# broken shasum/od can never yield a half-formed base that looks valid.
 slug() {
-  if [[ -n "${BACKUP_SLUG_HOOK:-}" ]]; then "$BACKUP_SLUG_HOOK" "$1"; return; fi
-  printf '%s-%s' \
-    "$(printf '%s' "$1" | head -c 24 | od -An -v -tx1 | tr -d ' \n')" \
-    "$(printf '%s' "$1" | shasum -a 256 | cut -c1-16)"
+  if [[ -n "${BACKUP_SLUG_HOOK:-}" ]]; then "$BACKUP_SLUG_HOOK" "$1" || return 1; return; fi
+  local hexhead sha
+  hexhead=$(set -o pipefail; printf '%s' "$1" | head -c 24 | od -An -v -tx1 | tr -d ' \n') || return 1
+  sha=$(set -o pipefail; printf '%s' "$1" | shasum -a 256 | cut -c1-16) || return 1
+  [[ -n "$hexhead" && -n "$sha" ]] || return 1
+  printf '%s-%s' "$hexhead" "$sha"
 }
 
 # The slug is ASSIGNED and PERSISTED, not derived, so two names can never share
@@ -102,9 +107,14 @@ slug() {
 # -v un-escapes backslash sequences - a volume literally named `a\tb` would then
 # be compared as `a<TAB>b` (review #53). recorded_slug prints a name's stored
 # slug (empty if none); returns non-zero only on an I/O error.
+# BACKUP_FAIL_AT is a test seam (review #55): set to lookup|copy|rename, it makes
+# that assignment op run against $SLUGS_FILE/x - a path under a regular file, so
+# every access is ENOTDIR - which makes the REAL op fail after check_slugs has
+# already passed, exercising each op's fail-closed guard in isolation.
 recorded_slug() {
   [[ -f "$SLUGS_FILE" ]] || return 0
-  nm="$1" awk -F'\t' 'BEGIN{n=ENVIRON["nm"]} $1==n{print $2; exit}' "$SLUGS_FILE"
+  local f="$SLUGS_FILE"; [[ "${BACKUP_FAIL_AT:-}" == lookup ]] && f="$SLUGS_FILE/x"
+  nm="$1" awk -F'\t' 'BEGIN{n=ENVIRON["nm"]} $1==n{print $2; exit}' "$f" 2>/dev/null
 }
 # slug_held_by_other is TRI-STATE (review #54): 0 = a name OTHER than $2 holds
 # slug $1, 1 = not held, 2 = the registry could not be read. A read error must
@@ -139,12 +149,14 @@ assign_slug() {
     break                                                             # not held: take it
   done
   tmp="$SLUGS_FILE.tmp"   # a fixed name is safe: the lock guarantees one writer (review #53)
-  if [[ -f "$SLUGS_FILE" ]]; then cat "$SLUGS_FILE" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  local src="$SLUGS_FILE"; [[ "${BACKUP_FAIL_AT:-}" == copy ]] && src="$SLUGS_FILE/x"       # ENOTDIR (test seam)
+  if [[ -f "$SLUGS_FILE" ]]; then cat "$src" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
   else : > "$tmp" 2>/dev/null || return 1; fi
   printf '%s\t%s\n' "$name" "$cand" >> "$tmp" || { rm -f "$tmp"; return 1; }
   new_n=$(wc -l < "$tmp") || { rm -f "$tmp"; return 1; }
   (( new_n == old_n + 1 )) || { rm -f "$tmp"; return 1; }   # never install a copy that lost rows
-  mv "$tmp" "$SLUGS_FILE" || { rm -f "$tmp"; return 1; }
+  local target="$SLUGS_FILE"; [[ "${BACKUP_FAIL_AT:-}" == rename ]] && target="$SLUGS_FILE/x"   # ENOTDIR (test seam)
+  mv "$tmp" "$target" 2>/dev/null || { rm -f "$tmp"; return 1; }
   printf '%s' "$cand"
 }
 # check_slugs: non-zero (after logging) if the registry maps a name to two slugs

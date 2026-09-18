@@ -59,10 +59,12 @@ worry is gone). The mapping persists across ticks and re-attaches.
 The **single-instance lock is held before the registry is read** and to the end
 of the tick, on every tick including unknown-only and nothing-due ones, so no
 two ticks ever race `slugs.tsv`. `assign_slug` is **fail-closed**: every step -
-the base computation (a failed or empty base is not a slug), the "is this base
-held by another name?" check (tri-state: held / not-held / unreadable, and an
-unreadable registry never reads as not-held), the copy-read, the line-count
-check and the rename - is checked; the full new content is written to a temp
+the base computation (each component - the hex head and the sha - is computed
+with `pipefail` and checked non-empty before they are joined, so a broken
+`shasum`/`od` yields no slug, not a half-formed one), the "is this base held by
+another name?" check (tri-state: held / not-held / unreadable, and an unreadable
+registry never reads as not-held), the copy-read, the line-count check and the
+rename - is checked; the full new content is written to a temp
 file, its line count verified to be exactly one more than the old (so a
 truncated read can never install a registry that dropped a row), and only then
 renamed. On any I/O error it records nothing and the tick aborts with the
@@ -92,8 +94,11 @@ line 1 and is replaced normally.
 A configured `BACKUP_DISKS` name longer than 255 bytes - which no mount point
 can be - is refused at discovery (exit 2), before any report path is built and
 before any log call (the log directory is not created until a disk is due).
-`BACKUP_SLUG_HOOK`, if set to a command, computes the slug in place of the
-built-in - a test seam for forcing two names onto one slug.
+`BACKUP_SLUG_HOOK`, if set to a command, computes the base in place of the
+built-in - a test seam for forcing two names onto one base. `BACKUP_FAIL_AT`
+(`lookup`/`copy`/`rename`), if set, makes that one assignment op fail on the
+real command after `check_slugs` has passed - a test seam for exercising each
+fail-closed guard in isolation.
 
 ## Two owners, two kinds of setting
 

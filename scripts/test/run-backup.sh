@@ -415,69 +415,63 @@ check "backslash-t name: exactly one registry row (no awk -v un-escaping)" test 
 check "backslash-t name: the row's name field is the literal name" test "$(awk -F'\t' 'NR==1{print $1}' "$state/slugs.tsv")" = "$weird"
 rm -rf "$vols"/*; rm -f "$state/slugs.tsv"
 
-# review #54: name=${mp##*/}, not $(basename) - a trailing newline in a volume
-# name survives the expansion and is refused at discovery (basename's command
-# substitution would strip it and silently conflate the volume with another).
-rm -rf "$vols"/*; rm -f "$state/slugs.tsv"; : > "$state/backup-state.tsv"
-nlname=$'trail\n'   # a directory whose name ends in a newline (ANSI-C quoting keeps it)
-mkdir -p "$vols/$nlname/DCIM"; mk "$vols/$nlname/DCIM/x" "z"
-cat > "$work/mini-nl.env" <<ENV
+# review #54/#55: the volume name is read with ${mp##*/} (not $(basename), whose
+# command substitution strips a trailing newline). A name with a trailing tab or
+# newline, a REAL interior tab, or an interior newline is refused at discovery
+# (exit 2) and writes no report, marker or registry.
+cat > "$work/mini-nm.env" <<ENV
 SCRATCH_DIR="$scratch"
 BACKUP_DISKS="tars"
 ENV
-: > "$logf"; MINI_ENV="$work/mini-nl.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" > "$out" 2>&1; nlrc=$?
-check "trailing-newline name: refused at discovery, exit 2" test "$nlrc" -eq 2
-check "trailing-newline name: the diagnostic says tab or newline" grep -q "tab or newline" "$out"
-check "trailing-newline name: no registry written" test ! -e "$state/slugs.tsv"
+runnm() { MINI_ENV="$work/mini-nm.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" > "$out" 2>&1; }
+for badname in $'trail\n' $'a\tb' $'a\nb'; do
+  case "$badname" in *$'\n'*) kind="newline";; *) kind="tab";; esac
+  rm -rf "$vols"/*; rm -f "$state/slugs.tsv" "$state"/gap-*.txt "$state"/gap-*.tsv "$state"/backup.unknown-*; mkdir -p "$vols/$badname/DCIM"; mk "$vols/$badname/DCIM/x" "z"
+  : > "$logf"; runnm; nmrc=$?
+  check "bad name ($kind): refused at discovery, exit 2" test "$nmrc" -eq 2
+  check "bad name ($kind): the diagnostic says tab or newline" grep -q "tab or newline" "$out"
+  check "bad name ($kind): no report, marker or registry" test -z "$(ls "$state"/gap-*.txt "$state"/gap-*.tsv "$state"/backup.unknown-* "$state/slugs.tsv" 2>/dev/null)"
+done
 rm -rf "$vols"/*; rm -f "$state/slugs.tsv"
 
-# review #54: the base computation is checked - a hook that yields an empty base,
-# or fails, must abort the tick fail-closed (never record an empty/garbage slug).
-mkvol Empty; mk "$vols/Empty/DCIM/x" "z"
-cat > "$work/mini-eb.env" <<ENV
+# review #54/#55: the base computation is checked component by component - an
+# empty base, a failing hook, or a broken shasum aborts the tick fail-closed and
+# writes nothing.
+rm -f "$state"/gap-*.txt "$state"/gap-*.tsv "$state"/backup.unknown-*; mkvol Base; mk "$vols/Base/DCIM/x" "z"; : > "$state/backup-state.tsv"
+cat > "$work/mini-b.env" <<ENV
 SCRATCH_DIR="$scratch"
-BACKUP_DISKS="Empty"
+BACKUP_DISKS="Base"
 ENV
-printf '#!/bin/bash\n' > "$work/hook-empty"; chmod +x "$work/hook-empty"   # prints nothing -> empty base
-: > "$logf"; MINI_ENV="$work/mini-eb.env" BACKUP_SLUG_HOOK="$work/hook-empty" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; ebrc=$?
-check "empty base: the tick aborts (exit non-zero)" test "$ebrc" -ne 0
-check "empty base: no registry row recorded" test ! -e "$state/slugs.tsv" -o -z "$(grep -F Empty "$state/slugs.tsv" 2>/dev/null)"
-printf '#!/bin/bash\nexit 3\n' > "$work/hook-fail"; chmod +x "$work/hook-fail"   # base computation fails
-: > "$logf"; MINI_ENV="$work/mini-eb.env" BACKUP_SLUG_HOOK="$work/hook-fail" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; fbrc=$?
-check "failing base: the tick aborts (exit non-zero)" test "$fbrc" -ne 0
+runb() { MINI_ENV="$work/mini-b.env" PATH="$1" BACKUP_SLUG_HOOK="$2" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; }
+printf '#!/bin/bash\n' > "$work/hook-empty"; chmod +x "$work/hook-empty"
+printf '#!/bin/bash\nexit 3\n' > "$work/hook-fail"; chmod +x "$work/hook-fail"
+mkdir -p "$work/binfail"; printf '#!/bin/bash\nexit 1\n' > "$work/binfail/shasum"; chmod +x "$work/binfail/shasum"
+: > "$logf"; runb "$work/bin:$PATH" "$work/hook-empty"; check "empty base: aborts" test "$?" -ne 0
+check "empty base: nothing written" test -z "$(ls "$state"/gap-*.txt "$state"/backup.unknown-* 2>/dev/null)" -a ! -e "$state/slugs.tsv"
+: > "$logf"; runb "$work/bin:$PATH" "$work/hook-fail"; check "failing hook base: aborts" test "$?" -ne 0
+check "failing hook base: nothing written" test -z "$(ls "$state"/gap-*.txt "$state"/backup.unknown-* 2>/dev/null)" -a ! -e "$state/slugs.tsv"
+: > "$logf"; runb "$work/binfail:$work/bin:$PATH" ""; check "shasum fails: aborts" test "$?" -ne 0
+check "shasum fails: nothing written" test -z "$(ls "$state"/gap-*.txt "$state"/backup.unknown-* 2>/dev/null)" -a ! -e "$state/slugs.tsv"
 rm -rf "$vols"/*; rm -f "$state/slugs.tsv"
 
-# review #54: failure at the rename op. An immutable registry file makes the mv
-# fail (the temp is created fine); the tick aborts fail-closed and the registry
-# is byte-identical.
-printf 'Keep\tkeepslug\n' > "$state/slugs.tsv"; cp "$state/slugs.tsv" "$work/reg-base"
-chflags uchg "$state/slugs.tsv" 2>/dev/null || { echo "SKIP: chflags unavailable"; }
-mkvol RenameFail; mk "$vols/RenameFail/DCIM/x" "z"
-cat > "$work/mini-rn.env" <<ENV
+# review #55: BACKUP_FAIL_AT injects a failure at a specific assignment op AFTER
+# check_slugs has passed, so each op's fail-closed guard is exercised on the real
+# op. Each aborts with the registry byte-identical and no report/marker.
+mkvol OpFail; mk "$vols/OpFail/DCIM/x" "z"; : > "$state/backup-state.tsv"
+cat > "$work/mini-op.env" <<ENV
 SCRATCH_DIR="$scratch"
-BACKUP_DISKS="RenameFail"
+BACKUP_DISKS="OpFail"
 ENV
-: > "$logf"; MINI_ENV="$work/mini-rn.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; rnrc=$?
-chflags nouchg "$state/slugs.tsv" 2>/dev/null
-check "rename failure: the tick aborts (exit non-zero)" test "$rnrc" -ne 0
-check "rename failure: diagnostic mentions the slug assignment" grep -q "could not assign a slug" "$logf"
-check "rename failure: the registry is byte-identical" cmp -s "$state/slugs.tsv" "$work/reg-base"
-check "rename failure: RenameFail was not recorded" test -z "$(grep -F RenameFail "$state/slugs.tsv")"
-rm -f "$state/slugs.tsv" "$state/slugs.tsv.tmp"; rm -rf "$vols"/*
-
-# review #54: failure at the copy-read op. An unreadable registry makes the read
-# fail; the tick aborts fail-closed and the registry is byte-identical.
-printf 'Keep\tkeepslug\n' > "$state/slugs.tsv"; cp "$state/slugs.tsv" "$work/reg-base"; chmod 000 "$state/slugs.tsv"
-mkvol ReadFail2; mk "$vols/ReadFail2/DCIM/x" "z"
-cat > "$work/mini-rd.env" <<ENV
-SCRATCH_DIR="$scratch"
-BACKUP_DISKS="ReadFail2"
-ENV
-: > "$logf"; MINI_ENV="$work/mini-rd.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; rd2=$?
-chmod 644 "$state/slugs.tsv"
-check "copy-read failure: the tick aborts (exit non-zero)" test "$rd2" -ne 0
-check "copy-read failure: the registry is byte-identical" cmp -s "$state/slugs.tsv" "$work/reg-base"
-rm -rf "$vols"/*; rm -f "$state/slugs.tsv"
+for op in lookup copy rename; do
+  rm -f "$state/slugs.tsv" "$state/slugs.tsv.tmp" "$state"/gap-*.txt "$state"/gap-*.tsv "$state"/backup.unknown-*; printf 'Keep\tkeepslug\n' > "$state/slugs.tsv"; cp "$state/slugs.tsv" "$work/reg-base"
+  : > "$logf"; BACKUP_FAIL_AT="$op" MINI_ENV="$work/mini-op.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; oprc=$?
+  check "fail-at $op: the tick aborts (exit non-zero)" test "$oprc" -ne 0
+  check "fail-at $op: diagnostic mentions the slug assignment" grep -q "could not assign a slug" "$logf"
+  check "fail-at $op: the registry is byte-identical" cmp -s "$state/slugs.tsv" "$work/reg-base"
+  check "fail-at $op: no report or marker written" test -z "$(ls "$state"/gap-*.txt "$state"/gap-*.tsv "$state"/backup.unknown-* 2>/dev/null)"
+  check "fail-at $op: OpFail was not recorded" test "$(nm=OpFail awk -F'\t' 'BEGIN{n=ENVIRON["nm"]} $1==n{c++} END{print c+0}' "$state/slugs.tsv")" -eq 0
+done
+rm -rf "$vols"/*; rm -f "$state/slugs.tsv" "$state/slugs.tsv.tmp"
 
 
 
