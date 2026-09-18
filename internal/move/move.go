@@ -310,7 +310,26 @@ func ParseRules(raw []string) ([]Rule, error) {
 		if i < 1 || i == len(s)-1 {
 			return nil, fmt.Errorf("invalid rule %q (expected EXT=SUBDIR)", s)
 		}
+		if err := checkSubdir(s[i+1:]); err != nil {
+			return nil, fmt.Errorf("invalid rule %q: %v", s, err)
+		}
 		out = append(out, Rule{Extension: s[:i], Subdir: s[i+1:]})
 	}
 	return out, nil
+}
+
+// checkSubdir keeps a routing rule inside the destination root. A subdir
+// with a ".." component or an absolute path routes writes outside the tree
+// the run was pointed at (B34) - the ownership guard sees through it, but a
+// rule that escapes its root is wrong on its own.
+func checkSubdir(sub string) error {
+	if filepath.IsAbs(sub) {
+		return fmt.Errorf("subdir must be relative to the destination root")
+	}
+	for _, c := range strings.Split(filepath.ToSlash(sub), "/") {
+		if c == ".." {
+			return fmt.Errorf("subdir must not contain \"..\"")
+		}
+	}
+	return nil
 }

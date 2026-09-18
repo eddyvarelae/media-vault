@@ -23,8 +23,10 @@ gets the same three-line `TestMain`. Never point a test at either root.
 `internal/verify` has package-level F4 tests (incremental pass over every
 non-verified status, verified rows untouched, bytes read as proof) and
 `cmd/vault` the CLI ones. `scripts/test/` holds bash tests of the NAS scripts (Docker shadowed by a
-stub on `PATH`, logs redirected via `VAULT_LOG`); `go test ./scripts/test/`
-runs them, so `go test ./...` is still the one command.
+stub on `PATH`, logs redirected via `VAULT_LOG`) and of the tagging job
+(a real manifest built by the freshly built `vault`, real xattrs, stubs for
+the machine); `go test ./scripts/test/` runs them, so `go test ./...` is
+still the one command.
 
 ## Package map
 
@@ -39,6 +41,7 @@ runs them, so `go test ./...` is still the one command.
 | `internal/inventory` | NAS-side rows with no `dest_path` (`inventoried`) |
 | `internal/repair` | `repair-dest`: rows whose `dest_path` is not a regular file under the root → same basename one directory down, `Lstat` only (no symlink as leaf, subdirectory or ancestor; containment proven under the resolved root), kept only on size **and** sha256 match and only if no other row's `dest_path` is that file (physical compare, as in `scan`); the row's own directory walked the same way *before* a leaf counts as intact; a chosen file is reserved so two rows of one run cannot repair to it (`CONFLICT`, both unresolved), and `Apply` re-checks claims at write time; outcomes `REPAIR` / `NOT FOUND` / `AMBIGUOUS` / `OWNED` / `NOT A FILE` / `UNSAFE` / `CONFLICT`; `Apply` rewrites `dest_path` alone (`UpdateDestPath`), status untouched so `verify` still promotes |
 | `internal/dedup`, `internal/move`, `internal/importer` | Duplicate reports, manifest-aware moves, video-tagger imports |
+| `scripts/tagging/` | The nightly video tagger (B17): `run-tagging.sh` + `tagging-helper.py`, `README.md` is the contract. Machine settings from mini-server's `mini.env`, job policy defaulted in the script (tiers, 200 GB, `verified` rows only, newest first), every policy override logged; the NAS manifest is read only through a per-run snapshot. Tested by `scripts/test/run-tagging.sh` against a manifest built by `vault` itself |
 | `scripts/*.sh` | How work runs on the NAS: `docker run --rm … ghcr.io/eddyvarelae/media-vault:<tag> <command>`, sequential, as root via `sudo nohup`. `nas-tars-copy-all.sh` and `nas-verify-certify-all.sh` log through a `log()` helper (once per line under any launch form — B27/B35). `nas-kipp-copy-all.sh` (B26): `KIPP_SRC` required (container path of the disk), `DRY_RUN=1` plans only, `--dedupe-content --on-collision rename-mtime-year` on every folder, per-folder flags per `team/context/runbook-kipp.md` step 2 |
 
 ## Manifest status vocabulary
@@ -128,10 +131,10 @@ command:
 
 | Command | Exits 1 when | Exits 0 even though |
 |---|---|---|
-| `scan` | scan error (unreadable source, cancelled) | collisions/recopies/verified-changed are predicted — it only reports |
+| `scan` | scan error (unreadable source, cancelled); a `--rule` whose subdir is absolute or has a `..` component (`invalid rule`, `die`) — same for `copy` and `move`, B34 | collisions/recopies/verified-changed are predicted — it only reports |
 | `copy` | run finished `INCOMPLETE:` — any file failed, any unresolved destination collision, any file whose verified archive copy holds different content (kept, never overwritten), any file whose destination or staging path a verified row owns, any file whose destination path passes through a symlinked directory, any intra-run duplicate left unarchived (stderr names which); interrupted between files; `die` on scan or manifest-write error | no-op (including only retouched files), `--dry-run` (even with predicted collisions, verified-changed or owned files). `--dry-run` writes **no archive file and no manifest row**, and (B31) neither creates the config dir nor initializes `manifest.db`: the manifest is opened read-only (`OpenReadOnly`, `mode=ro`, proven by a write that must fail) or, when none exists, planned against an empty in-memory one with a notice on stderr. A read-only open of a WAL database still creates `-shm`/empty `-wal` beside it — SQLite's, not ours |
 | `verify` | any mismatch, missing, or read error; `die` on cancel | — |
-| `certify` | any row not `verified` (`Cannot certify: …`); no rows for the disk; key/sign/marshal/write error | — |
+| `certify` | output path not a regular file or absent (a symlink at the output name — dangling or not — a directory: `Cannot certify: certificate output path is not a regular file`); output path inside the tree it certifies (`Cannot certify: certificate output is inside the archive …`) — with `--root <dest-dir>` by physical containment (resolved paths, `filepath.Rel`), without it by recognising the tree from its own files (`certify.InsideArchive`: an ancestor of the output path under which a row's `dest_path` exists as a regular file of the row's size — a fallback that a damaged tree defeats, so the scripts always pass `--root`); all before signing and before the key is created; the certificate is then written to `<out>.vault-partial` opened `O_CREATE|O_EXCL|O_NOFOLLOW`, fsynced and renamed over the leaf — a symlink substituted at `out` after the check is *replaced* by the rename, never followed (the parent directory itself is not bound; that needs `os.Root`, Go 1.25 — backlog); a stale `<out>.vault-partial` refuses (`die`); `--root` without a value or an unknown flag (`die`); any row not `verified` (`Cannot certify: …`); no rows for the disk; key/sign/marshal/write error | — |
 | `repair-dest` | unknown flag (`die`); query, read-dir or hash error (`die`); write error mid-run (`die`, names how many rows were already written — each was hash-backed, so they stand); after a real run, any row still unresolved — `NOT FOUND`, `AMBIGUOUS`, `OWNED`, `NOT A FILE`, `UNSAFE`, `CONFLICT` (`INCOMPLETE:` on stderr, counts per outcome) | `--dry-run` (even with unresolved rows) — it writes no manifest row, and `repair-dest` never writes archive files; the config dir / `manifest.db` initialization on open is pre-existing (B31); a disk with no rows |
 | `inventory` | `die` on walk error | per-file hash errors — counted in `Errors:`, exit 0 |
 | `dedup` | unknown arg or bad `--min-size` (`die`, not usage); query error | — |
@@ -163,6 +166,12 @@ number nobody can recompute is a finding, not a fact.
 ## Hard rules
 
 - Never write to a source disk. Containers mount `/sources` read-only.
+- Certificates live beside the manifest (`/volume1/docker/vault-certs/` on
+  the NAS, `VAULT_CERTS` in `nas-verify-certify-all.sh`), never inside the
+  tree they certify; `certify --root <dest-dir>` refuses (always pass
+  `--root` from scripts — without it the tree is only recognised by files
+  that still match their rows), and never writes through a symlink at the
+  output name. A `--rule` never routes outside the destination root.
 - Atomic destination writes only (`.vault-partial` created `O_EXCL` → fsync
   → rename). The staging path must be empty; the writer never truncates.
 - A `verified` destination is never overwritten — by `copy` or by `move`

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Nightly video tagging (B17): pull new NAS footage to scratch, tag, write
+     results back. The job is media-vault's; the machine (mounts, scratch,
+     Ollama, the tagger venv) is mini-server's - see scripts/tagging/README.md.
+     Install (B18, one act, after the Tester has observed a real run):
+       copy to ~/Library/LaunchAgents/com.varela.video-tagger.plist (drop the
+       .example); ProgramArguments points at the PM's checkout on main; then
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.varela.video-tagger.plist -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.varela.video-tagger</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/varela/Projects/media-vault/scripts/tagging/run-tagging.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>2</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+  <key>StandardOutPath</key><string>/Users/varela/Library/Logs/mini-server/video-tagger.log</string>
+  <key>StandardErrorPath</key><string>/Users/varela/Library/Logs/mini-server/video-tagger.log</string>
+</dict>
+</plist>
