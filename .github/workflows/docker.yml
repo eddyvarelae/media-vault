@@ -30,6 +30,9 @@ jobs:
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}
+          # latest=auto (the default) adds :latest to every stable semver tag
+          # on its own, whether or not a raw latest line is listed here.
+          flavor: latest=false
           tags: |
             type=sha,prefix=sha-
             type=semver,pattern=v{{version}}

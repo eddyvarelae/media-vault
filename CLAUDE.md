@@ -114,9 +114,10 @@ number nobody can recompute is a finding, not a fact.
 - Nothing merges to `main` without an `APPROVE` in
   `team/channels/review-requests.md`; the PM merges (never rewriting).
 - `.github/workflows/docker.yml` publishes on `v*` tags and manual dispatch
-  only, and never `:latest`. The NAS scripts pin a release tag
-  (`IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:vX.Y.Z}"`), so a merge
-  to `main` is not a deploy; cutting a tag is. Bump the scripts' default in the
-  same PR as the release — `docs/release.md`.
+  only, and never `:latest` (`flavor: latest=false` — metadata-action's
+  default adds `:latest` to every semver tag by itself). The NAS scripts pin
+  a release tag (`IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:vX.Y.Z}"`),
+  so a merge to `main` is not a deploy; cutting a tag is. Bump the scripts'
+  default in the same PR as the release — `docs/release.md`.
 - Roles, sacred paths, and the evidence ladder live in `team/TEAM.md`. Author
   evidence caps at `tested`.
