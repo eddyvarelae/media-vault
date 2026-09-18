@@ -62,6 +62,17 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-19T05:15-07:00) - PR-B (B43 os.Root bindings) done. READY FOR REVIEW. Branch `os-root`, code tip `0ae021c`, merged tip `64aca19`** (off `linux-tests`, now on `main` via #70; diff vs `main` is PR-B only). **`test.yml` GREEN: run 35404673491 on `64aca19`**, 12 pkgs ok on `golang:1.25-alpine` incl. all four re-anchored sites. Local (darwin) green, `gofmt -l cmd/ internal/` clean (standalone). **Rung: `tested`.** Built to ruling A — keep the walk (re-anchored to the Root fd) + leaf policy, add os.Root as the atomic escape backstop:
+- **`scan.SymlinkComponentRoot`** walks via `root.Lstat`; `SetTestAfterWalk` is the test-only seam fired between the walk and the caller's op.
+- **`copy.File`**: `os.OpenRoot(dstRoot)` → walk → `Root.Lstat` leaf checks → `Root.MkdirAll/OpenFile(O_EXCL)/Chtimes/Rename`. `Escapes` kept for its message; the manual `Under` is subsumed.
+- **`audit`**: one Root per run; leaf policy is `Root.Lstat` regular + `SameFile` (O_NOFOLLOW is **not** honored through Root, so it can't carry the leaf policy — confirmed empirically).
+- **`restore.Build`**: dest resolution + hash anchored (Lstat + SameFile + hash the open fd); `Apply` already writes via `copy.File`. The **claimant scan stays on `os.Stat`** — its cross-row identity semantics (#30/#39) are deliberate; re-anchoring would change escaping-row handling.
+- **Tests**: `TestParentSwapRefused` (escaping parent swapped after the walk → refused) through `copy.File`, `audit.Run`, `restore.Build` via the seam; `TestInRootAliasSwapRefused` pins the honest narrower residual at the writer (an in-root relative symlink swapped in after the walk is **followed** by os.Root — it blocks only escapes — and lands **inside** the archive, never outside; the static in-root alias is still refused by the walk). Existing `readTail` substitution test adapted to the Root signature (SameFile, not O_NOFOLLOW).
+
+**One structural finding to rule on — `certify.WriteOutput`.** The other three anchor on a trusted root ARGUMENT (`dstRoot`/`destRoot`) and address the leaf relative to it, so every parent below the root is bound. `WriteOutput` is handed a full `out` path and opens `out`'s own parent, which `os.OpenRoot` resolves (following it) — so a swap of that parent between the caller's `CheckOutput` and the open is still followed. I bound what I could (within-dir ops pinned, leaf never followed, temp O_EXCL, rename replaces) and documented the residual honestly in the code and CLAUDE.md. **Fully closing it needs `WriteOutput(certsRoot, name, data)` — the caller (`runCertify`) holds `VAULT_CERTS`, a fixed trusted path.** Small follow-up; do it in this PR or as its own? Your call — I did not widen the signature without a ruling.
+
+os.Root facts I verified (for the record): it follows in-root **relative** symlinks, refuses **absolute** and **escaping** ones; `Root.MkdirAll/Chtimes/Rename` are the methods that need Go 1.25.
+
 **PM (2026-09-18T15:54:21-07:00) - `linux-tests` merged → `main` `ee6a7fa`; `main`'s Linux job is green (35403465105). Rebase/merge `main` into `os-root` when you post it.**
 
 **PM (2026-09-18T15:51:02-07:00) - #70 (`fbb6e1d`) staged; Codex runs it now. Keep building PR-B.**
