@@ -6,7 +6,7 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #8 - numbers: `kipp` gap report (Tester #19) - headed to Eddy as "plug this SSD into the NAS"
+### #8 - numbers: `kipp` gap report (Tester #19) - **resolved: FINDINGS (1, breakdown only); headline numbers reproduced → delivered to Eddy with the corrected breakdown**
 
 **PM (2026-09-17T20:12:11-07:00):** Not code. The Tester (2026-09-17T20:09, `team/channels/tester-feedback.md` item 19) reports for the SSD `kipp` (`/Volumes/kipp`, attached to this Mac, read-only): **needs archiving: YES - 9,872 files, 1,921,695,784,449 bytes (1.92 TB)**, archived already: 521 files / 31,897,100,927 B. This figure decides which SSD Eddy plugs into the NAS next. Recompute it from the Tester's artifacts on `/Volumes/Scratch1/tester/` (read them; write nothing there): `gap-kipp.tsv` (10,393 rows: relpath, size, category, sha256, matched manifest rows), `gap-kipp.summary.txt`, `gap-kipp.ns-differs.tsv` (the 13), `gap-kipp.log`, scripts `gap-report.py` and `gap-confirm-ns.py`, manifest snapshot `manifest-2026-09-17.db` (open read-only: `sqlite3 'file:/Volumes/Scratch1/tester/manifest-2026-09-17.db?mode=ro&immutable=1'`).
 
@@ -19,6 +19,43 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 **This is wrong if:** the TSV's per-category counts or byte sums differ from claim 1; any `GAP` row's sha256 appears on any row of the manifest snapshot; any of the 13 in `ns-differs.tsv` has a sha present in the snapshot; the 521/13 split does not reproduce from the TSV + `ns-differs.tsv`; the per-folder sums do not add to the gap total; the classification in `gap-report.py` can label a file `GAP` when its sha is in the manifest (read the code); or a file on the SSD was skipped (compare the TSV row count with a fresh `find /Volumes/kipp -type f | wc -l`, excluding dotfiles/`._*` as the script does - read-only). Report the recomputed numbers next to the claimed ones.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-17):** FINDINGS — request #8, independently recomputed from the artifacts, the read-only immutable manifest snapshot, and the SSD.
+
+1. **Claim 4 omits the 13 name+size false positives from the folder breakdown.** Its folder counts total **9,859**, not the corrected **9,872**; their underlying byte sums total **1,921,420,981,751 B**, short by **274,802,698 B**. Add seven files / 205,344,768 B to SonyA6700 and six files / 69,457,930 B to Backup. Corrected figures (decimal GB, rounded to one place):
+
+   | Folder | Claimed files / GB | Recomputed files / exact bytes / GB |
+   | --- | --- | --- |
+   | SonyA6700 | 5,971 / 582.3 | **5,978 / 582,500,142,174 / 582.5** |
+   | Backup | 3,642 / 260.0 | **3,648 / 260,029,966,795 / 260.0** |
+   | Multicam | 34 / 426.2 | 34 / 426,213,426,772 / 426.2 |
+   | Auditorium | 10 / 336.2 | 10 / 336,153,884,340 / 336.2 |
+   | GoPro | 184 / 230.9 | 184 / 230,939,809,540 / 230.9 |
+   | SonyZVE10 | 18 / 85.9 | 18 / 85,858,554,828 / 85.9 |
+   | Total | 9,859 / 1,921.5 (sum of displayed rounded GB) | **9,872 / 1,921,695,784,449 / 1,921.7** |
+
+Claims 1–3 reproduce:
+
+| Quantity | Claimed files / bytes | Recomputed files / bytes |
+| --- | --- | --- |
+| SSD total | 10,393 / 1,953,592,885,376 | 10,393 / 1,953,592,885,376 |
+| NS_VERIFIED before confirmation | 534 / 32,171,903,625 | 534 / 32,171,903,625 |
+| HASH_ARCHIVED | 0 / 0 | 0 / 0 |
+| Original GAP | 9,859 / 1,921,420,981,751 | 9,859 / 1,921,420,981,751 |
+| Confirmed archived | 521 / 31,897,100,927 | 521 / 31,897,100,927 |
+| Name+size false positives | 13 / 274,802,698 | 13 / 274,802,698 |
+| Corrected gap | 9,872 / 1,921,695,784,449 | 9,872 / 1,921,695,784,449 |
+
+Arithmetic: 534 + 0 + 9,859 = 10,393; 534 − 13 = 521; 32,171,903,625 − 274,802,698 = 31,897,100,927; 9,859 + 13 = 9,872; 1,921,420,981,751 + 274,802,698 = 1,921,695,784,449. Archived + gap = 10,393 files / 1,953,592,885,376 B. The gap is 1.921695784449 decimal TB, correctly rounded to **1.92 TB**; **needs archiving: YES** is supported relative to this manifest snapshot.
+
+Evidence checks: all 10,393 TSV paths are unique. The snapshot has 67,735 rows / 64,317 distinct nonempty hashes; **0 of 9,859 GAP hashes** occurs anywhere in it. All 534 NS rows reproduce their unique basename+size manifest hash. Independently reading and hashing all 534 SSD files reproduces **521 equal / 13 different**, with the different-path set exactly matching `gap-kipp.ns-differs.tsv`; **0 of those 13 freshly computed hashes** occurs anywhere in the snapshot. No hashing read failed. NS_UNVERIFIED is 0 / 0 B. The summary and log reproduce the original categories, but their gap totals and folder breakdown precede the 13-file correction.
+
+Source trace: `gap-report.py` builds `bysha` from every nonempty manifest hash without a status filter and emits `GAP` only in the `sha not in bysha` branch; a hash present in this snapshot cannot take that branch. Its NS categories alone do not establish content identity; the independent confirmation above supplies that check. `gap-confirm-ns.py` compares freshly read hashes with the recorded expected hash, but does not itself search the whole manifest for differing hashes; that search was independently performed here. Neither artifact script was executed, avoiding their output writes. The 9,859 original GAP files were checked through their recorded hashes, not rehashed from the SSD.
+
+Completeness: fresh `find /Volumes/kipp -name '.*' -prune -o -type f -print0` exited 0, with **10,393 files (claimed 10,393)** and an exact path-set match to the TSV. Fresh stat sizes matched every row and summed to **1,953,592,885,376 B (claimed the same)**. An initial unpruned find reported `Operation not permitted` for exactly `/Volumes/kipp/.Spotlight-V100` and `/Volumes/kipp/.Trashes`; both are excluded dot-directories under the stated counting rule, and pruning them eliminated all traversal errors. No required in-scope read was blocked. Only this review-channel file was modified.
+
+
+**PM (2026-09-17T20:15:20-07:00):** Accepted. The decision-driving figures (gap 9,872 files / 1,921,695,784,449 B; archived 521 / 31,897,100,927 B; 10,393 files on disk, fresh `find` match) reproduced exactly; the only finding is the per-folder table lacking the 13 corrected files, which the Reviewer's table fixes (SonyA6700 5,978 / 582.5 GB, Backup 3,648 / 260.0 GB). Delivered to Eddy with the Reviewer's table. `kipp` copy itself waits for the overwrite guard release (B23(b), v0.2.1) - under v0.2.0 a `media-sonya6700` copy from `kipp` would hit the exact recopy path that lost 2,668 files.
 
 ### #7 - B24 `repair-dest` (branch `repair-dest`, code tip `e3c694b`) - **resolved: FINDINGS (3), all accepted → Dev fixes → request #10**
 
