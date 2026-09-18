@@ -1,8 +1,10 @@
 # Runs the Go suite on the runtime platform (alpine/linux), not just a dev's
 # darwin box: vet + the cmd/ and internal/ tests under golang:1.25-alpine with
-# CGO_ENABLED=0 (the same static build the image ships). This exists so the
-# os.Root path bindings (B43), whose escape semantics are syscall-backed and
-# differ between darwin and linux, are exercised where the binary actually runs.
+# CGO_ENABLED=0 (the same static build the image ships). This prepares the Linux
+# test environment B43 needs: the os.Root path bindings' escape semantics are
+# syscall-backed and differ between darwin and linux, so once those bindings land
+# they must run where the binary actually does. This job proves nothing about
+# os.Root on its own (PR-A adds no bindings) — it is the ground they will run on.
 # The image job (docker.yml) stays tag-only; this job builds no image.
 #
 # Scope: the bash harnesses under scripts/test/ shell out to docker/bash and

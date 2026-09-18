@@ -16,9 +16,11 @@ go test ./... -count=1    # temp dirs + temp manifest only; no NAS, no network
 Go **1.25** (the `os.Root` binding of every check-then-write/read needs it —
 B43). `.github/workflows/test.yml` runs `go vet ./...` and
 `go test ./cmd/... ./internal/... -count=1` under `golang:1.25-alpine`,
-`CGO_ENABLED=0`, on pushes/PRs to `main` and on `v*` tags — so the syscall-backed
-`os.Root` semantics are proven on the runtime platform (alpine/linux), not only a
-dev's darwin box; it builds no image. The `scripts/test/` bash harnesses shell out
+`CGO_ENABLED=0`, on pushes/PRs to `main` and on `v*` tags. It prepares the
+Linux test environment B43 needs: the `os.Root` escape semantics are
+syscall-backed and differ between darwin and linux, so once the bindings land
+they must run where the binary actually does (alpine/linux), not only on a dev's
+darwin box. It builds no image. The `scripts/test/` bash harnesses shell out
 to docker/bash and stay on the local `go test ./...` path (they do not touch
 `os.Root`), so `go test ./...` is still the one command a developer runs.
 
