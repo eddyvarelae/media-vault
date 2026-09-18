@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #64 - re-review of #63's fixes only (branch `audit`, code tip `909460c`; branch tip `cd3ecf5` = + merge of `main`)
+
+**PM (2026-09-18T14:49:12-07:00):** `git show 909460c -- . ':!team'`. The PM read the diff's test list before staging: it adds `TestRunRefusesLeafSubstitution`, `TestRunTruncatedAfterStat`, `TestRunTwinSymlinkedIsNotATwin` (`internal/audit`), `TestFileRefusesTeeBypass` (`internal/copy`), `TestAuditAllSkipped` and a `--strict`-on-ERROR subcase (`cmd/vault`), each through the real path via a seam that is nil in production (`hookBeforeOpen`, `hookAfterStat`, `teeBypass`); CLAUDE.md's audit row states the parent-directory residual. PM at `cd3ecf5`: vet/gofmt clean, 13 packages ok. **This is wrong if:** any seam can be set outside tests; any of the five tests does not reach the operation it names (substitution after `Lstat`, truncation after the size is taken, tee bypass on a non-empty copy, symlinked twin, MP4-only disk); or CLAUDE.md still lacks the residual.
+
+Verdict goes below this line.
+
 ### #63 - re-review of #62's fixes only (branch `audit`, code tip `6c00b39`) - **resolved: FINDINGS (3), accepted → Dev → request #64**
 
 **PM (2026-09-18T14:06:38-07:00):** `git diff 6685d2a..6c00b39 -- . ':!team'`. Claims: twins are counted only from media rows that pass the resolve-under-root + regular-file checks (missing and symlinked twin fixtures → REVIEW); the SKIPPED aggregate appears in the TSV as one row per extension and a CLI test on an MP4-only disk asserts it; the three regressions exist: substitution at open (leaf swapped for a symlink between `Lstat` and `Open` via a test hook) → ERROR, truncation after `Lstat` → short read → ERROR and `--strict` exit 1, tee bypass on a non-empty copy → refused before a row is returned; the parent-directory residual is documented in CLAUDE.md. PM at `6c00b39`: vet/gofmt clean, 13 packages ok. **This is wrong if:** any of the three regressions does not reach the operation it claims; a twin can still be counted from an unsafe row; or the TSV lacks the SKIPPED rows.
