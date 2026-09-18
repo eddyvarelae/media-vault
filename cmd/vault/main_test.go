@@ -625,11 +625,20 @@ func TestRepairDest(t *testing.T) {
 	writeFile(t, filepath.Join(src, "DSC0001.JPG"), "a photo", t0)
 	writeFile(t, filepath.Join(src, "DSC0002.JPG"), "photo two", t0)
 	writeFile(t, filepath.Join(src, "OK.MOV"), "fine", t0)
+	writeFile(t, filepath.Join(src, "DIR.MOV"), "became a dir", t0)
 	if _, _, code := vault(t, cfg, "copy", "sony", src, dst); code != 0 {
 		t.Fatalf("copy: exit %d", code)
 	}
 	// Reproduce the shape: the files live one directory down, the rows do
 	// not know. DSC0002's bytes on disk differ from its row - not repairable.
+	// DIR.MOV's destination is a directory now (review #7 finding 2): not
+	// intact, not repairable, and the run must say so rather than exit 0.
+	if err := os.Remove(filepath.Join(dst, "DIR.MOV")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dst, "DIR.MOV"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	mv := func(name, sub string) {
 		t.Helper()
 		if err := os.MkdirAll(filepath.Join(dst, sub), 0o755); err != nil {
@@ -651,15 +660,16 @@ func TestRepairDest(t *testing.T) {
 	before := rowsOf(t, cfg, "sony")
 
 	out, _, code = vault(t, cfg, "repair-dest", "sony", dst, "--dry-run")
-	if code != 0 || !strings.Contains(out, "(dry-run; nothing written)") {
+	if code != 0 || !strings.Contains(out, "(dry-run; no manifest row written, and repair-dest never writes archive files)") {
 		t.Fatalf("dry-run: exit %d\n%s", code, out)
 	}
 	for _, want := range []string{
-		"4 rows with a dest_path, 1 intact, 3 missing",
-		"REPAIR    C0001.XML : C0001.XML → CLIP/C0001.XML",
-		"REPAIR    DSC0001.JPG : DSC0001.JPG → DCIM/DSC0001.JPG",
-		"NOT FOUND DSC0002.JPG : DSC0002.JPG",
-		"Repairable: 2   Not found: 1   Ambiguous: 0",
+		"5 rows with a dest_path, 1 intact, 4 unresolved",
+		"REPAIR     C0001.XML : C0001.XML → CLIP/C0001.XML",
+		"REPAIR     DSC0001.JPG : DSC0001.JPG → DCIM/DSC0001.JPG",
+		"NOT FOUND  DSC0002.JPG : DSC0002.JPG",
+		"NOT A FILE DIR.MOV : DIR.MOV is a directory",
+		"Repairable: 2   Not found: 1   Ambiguous: 0   Owned: 0   Not a file: 1",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dry-run output missing %q:\n%s", want, out)
@@ -670,7 +680,7 @@ func TestRepairDest(t *testing.T) {
 	}
 
 	out, errOut, code := vault(t, cfg, "repair-dest", "sony", dst)
-	if code != 1 || !strings.Contains(errOut, "INCOMPLETE: 1 row(s) still without a destination this tool can back with a hash (1 not found, 0 ambiguous)") {
+	if code != 1 || !strings.Contains(errOut, "INCOMPLETE: 2 row(s) still without a destination this tool can back with a hash (1 not found, 0 ambiguous, 0 owned by another row, 1 not a file)") {
 		t.Fatalf("repair: exit %d, stderr %q", code, errOut)
 	}
 	if !strings.Contains(out, "repaired  C0001.XML : C0001.XML → CLIP/C0001.XML") || !strings.Contains(out, "Repaired 2 row(s). Status untouched") {
@@ -690,18 +700,23 @@ func TestRepairDest(t *testing.T) {
 		}
 	}
 
-	// A second run has nothing left to repair but the same unrepairable row.
+	// A second run has nothing left to repair but the same unrepairable rows.
 	_, errOut, code = vault(t, cfg, "repair-dest", "sony", dst)
-	if code != 1 || !strings.Contains(errOut, "1 not found") {
+	if code != 1 || !strings.Contains(errOut, "1 not found, 0 ambiguous, 0 owned by another row, 1 not a file") {
 		t.Errorf("second repair: exit %d, stderr %q", code, errOut)
 	}
-	// verify now promotes the repaired rows; DSC0002 stays missing.
+	// verify now promotes the repaired rows; DSC0002 stays missing and the
+	// directory is a read error.
 	out, _, code = vault(t, cfg, "verify", "sony", dst)
-	if code != 1 || !strings.Contains(out, "Verified: 3   Mismatch: 0   Missing: 1") {
+	if code != 1 || !strings.Contains(out, "Verified: 3   Mismatch: 0   Missing: 1   Errors: 1") {
 		t.Fatalf("verify after repair: exit %d\n%s", code, out)
 	}
-	// Restore DSC0002 by hand (it was our own copy) and the disk certifies.
+	// Restore both by hand (they were our own copies) and the disk certifies.
 	writeFile(t, filepath.Join(dst, "DSC0002.JPG"), "photo two", t0)
+	if err := os.Remove(filepath.Join(dst, "DIR.MOV")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dst, "DIR.MOV"), "became a dir", t0)
 	if _, _, code = vault(t, cfg, "verify", "sony", dst); code != 0 {
 		t.Fatalf("verify after restore: exit %d", code)
 	}

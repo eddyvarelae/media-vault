@@ -533,25 +533,32 @@ func runRepairDest(ctx context.Context, m *manifest.Manifest, args []string) int
 	if err != nil {
 		die("repair-dest: %v", err)
 	}
-	repairable, notFound, ambiguous := plan.Counts()
+	repairable, unresolved, by := plan.Counts()
 
-	fmt.Printf("Disk %s at %s: %d rows with a dest_path, %d intact, %d missing (%d inventoried rows have no dest_path and were not examined)\n",
+	fmt.Printf("Disk %s at %s: %d rows with a dest_path, %d intact, %d unresolved (%d inventoried rows have no dest_path and were not examined)\n",
 		disk, root, plan.Checked, plan.Intact, len(plan.Changes), plan.NoDest)
 	for _, c := range plan.Changes {
 		switch c.Outcome {
 		case repair.Repairable:
-			fmt.Printf("  %-9s %s : %s → %s\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath, c.NewDest)
+			fmt.Printf("  %-10s %s : %s → %s\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath, c.NewDest)
 		case repair.Ambiguous:
-			fmt.Printf("  %-9s %s : %s → %s\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath, strings.Join(c.Candidates, " | "))
+			fmt.Printf("  %-10s %s : %s → %s\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath, strings.Join(c.Candidates, " | "))
+		case repair.Owned:
+			fmt.Printf("  %-10s %s : %s → %s (already the dest_path of %s)\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath, strings.Join(c.Candidates, " | "), c.Owner)
+		case repair.NotAFile:
+			fmt.Printf("  %-10s %s : %s is %s\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath, c.Detail)
 		default:
-			fmt.Printf("  %-9s %s : %s\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath)
+			fmt.Printf("  %-10s %s : %s\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath)
 		}
 	}
-	fmt.Printf("\nRepairable: %d   Not found: %d   Ambiguous: %d   Bytes hashed: %s\n",
-		repairable, notFound, ambiguous, human(plan.BytesHashed))
+	fmt.Printf("\nRepairable: %d   Not found: %d   Ambiguous: %d   Owned: %d   Not a file: %d   Bytes hashed: %s\n",
+		repairable, by[repair.NotFound], by[repair.Ambiguous], by[repair.Owned], by[repair.NotAFile], human(plan.BytesHashed))
 
 	if dryRun {
-		fmt.Println("(dry-run; nothing written)")
+		// repair-dest never writes archive files; the only thing it can
+		// write is dest_path, and dry-run does not. (Opening the manifest
+		// initializes it when absent - every command does; B31.)
+		fmt.Println("(dry-run; no manifest row written, and repair-dest never writes archive files)")
 		return 0
 	}
 	n, err := repair.Apply(m, plan, func(c repair.Change) {
@@ -563,9 +570,9 @@ func runRepairDest(ctx context.Context, m *manifest.Manifest, args []string) int
 		die("repair-dest: after %d row(s) written: %v", n, err)
 	}
 	fmt.Printf("\nRepaired %d row(s). Status untouched — run `vault verify %s %s` to promote them.\n", n, disk, root)
-	if notFound > 0 || ambiguous > 0 {
-		fmt.Fprintf(os.Stderr, "\nINCOMPLETE: %d row(s) still without a destination this tool can back with a hash (%d not found, %d ambiguous).\n",
-			notFound+ambiguous, notFound, ambiguous)
+	if unresolved > 0 {
+		fmt.Fprintf(os.Stderr, "\nINCOMPLETE: %d row(s) still without a destination this tool can back with a hash (%d not found, %d ambiguous, %d owned by another row, %d not a file).\n",
+			unresolved, by[repair.NotFound], by[repair.Ambiguous], by[repair.Owned], by[repair.NotAFile])
 		return 1
 	}
 	return 0

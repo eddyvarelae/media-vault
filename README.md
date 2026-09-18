@@ -104,8 +104,11 @@ unless every file is in `verified` status.
    wrong destination root (the file is at `DCIM/X.JPG`, the row says
    `X.JPG`), `vault repair-dest <disk> <dest-dir> --dry-run` shows which
    rows can be pointed at the same basename one directory down — only when
-   that file's size **and** sha256 match the row — and without `--dry-run`
-   rewrites exactly `dest_path`, nothing else, so `verify` can promote them.
+   that file is a regular file reached through real directories under the
+   root, its size **and** sha256 match the row, and no other row already
+   claims it — and without `--dry-run` rewrites exactly `dest_path`,
+   nothing else, so `verify` can promote them. Anything it cannot back is
+   listed and the run exits 1.
 
 4. **Wipe certificate** takes a `source_disk` name, refuses (exit 1) if any
    row for it is not `verified`, and otherwise emits an Ed25519-signed JSON

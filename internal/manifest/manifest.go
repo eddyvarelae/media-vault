@@ -509,6 +509,31 @@ func (m *Manifest) listByDisk(disk string, onlyUnverified bool) ([]Entry, error)
 	return out, rows.Err()
 }
 
+// AllDestPaths returns (source_disk, source_path, dest_path, status) for
+// every row with a dest_path, any status. repair-dest indexes them by
+// physical location so a candidate file another row already claims is
+// never chosen.
+func (m *Manifest) AllDestPaths() ([]Entry, error) {
+	rows, err := m.db.Query(`
+		SELECT source_disk, source_path, dest_path, status
+		FROM files
+		WHERE dest_path != ''
+		ORDER BY source_disk, source_path`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Entry
+	for rows.Next() {
+		var e Entry
+		if err := rows.Scan(&e.SourceDisk, &e.SourcePath, &e.DestPath, &e.Status); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 func (m *Manifest) MarkVerified(disk, sourcePath string, verifiedAt int64) error {
 	_, err := m.db.Exec(`
 		UPDATE files SET verified_at = ?, status = 'verified'
