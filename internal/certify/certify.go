@@ -152,6 +152,13 @@ func describe(fi os.FileInfo) string {
 // parent swapped to an in-root symlink after the walk is followed - os.Root
 // blocks only escapes.
 func WriteOutput(certsRoot, name string, data []byte) error {
+	// name is one component under the trusted root - runCertify passes
+	// filepath.Base(out). Reject anything else (a separator, "..", "." or an
+	// absolute path) so a caller can never smuggle a subdirectory or an escape
+	// past the single OpenRoot below.
+	if name == "" || name == "." || name == ".." || filepath.Base(name) != name || filepath.IsAbs(name) {
+		return fmt.Errorf("certificate name %q must be a single path component", name)
+	}
 	root, err := os.OpenRoot(certsRoot)
 	if err != nil {
 		return fmt.Errorf("open certificate directory %s: %w", certsRoot, err)

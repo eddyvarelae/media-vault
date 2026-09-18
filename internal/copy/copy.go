@@ -159,9 +159,13 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 		return manifest.Entry{}, err
 	}
 	mt := time.Unix(0, task.MtimeNs)
-	// Caveat (os.Root doc): on Unix Root.Chtimes has a regular-file→symlink
-	// race — but tmpRel is the file we just created O_EXCL through the same
-	// Root fd and have not closed the handle on, so it is not attacker-reachable.
+	// Caveat (os.Root doc): on Unix Root.Chtimes has a documented
+	// regular-file→symlink race on its target — if tmpRel were swapped for a
+	// symlink between os.Root's internal lstat and the chtimes, the link's
+	// target would be timestamped. tmpRel is a .vault-partial this call created
+	// O_EXCL under the pinned root fd moments ago, a name nothing else holds, so
+	// the swap is not a realistic threat; the race is the residual, noted, not
+	// relied upon.
 	if err := root.Chtimes(tmpRel, mt, mt); err != nil {
 		cleanup()
 		return manifest.Entry{}, fmt.Errorf("chtimes: %w", err)

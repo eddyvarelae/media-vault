@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/eddyvarelae/media-vault/internal/manifest"
@@ -478,9 +479,7 @@ func SymlinkComponent(root, rel string) (string, error) {
 func SymlinkComponentRoot(root *os.Root, rel string) (string, error) {
 	dir := filepath.Dir(filepath.Clean(rel))
 	if dir == "." {
-		if testAfterWalk != nil {
-			testAfterWalk()
-		}
+		fireAfterWalk()
 		return "", nil
 	}
 	parts := strings.Split(dir, string(filepath.Separator))
@@ -502,9 +501,7 @@ func SymlinkComponentRoot(root *os.Root, rel string) (string, error) {
 			return strings.Join(parts[:i+1], "/"), nil
 		}
 	}
-	if testAfterWalk != nil {
-		testAfterWalk()
-	}
+	fireAfterWalk()
 	return "", nil
 }
 
@@ -515,6 +512,14 @@ func SymlinkComponentRoot(root *os.Root, rel string) (string, error) {
 // backstop deterministically. Set and cleared by the binding sites' tests
 // (copy/audit/certify/restore) via SetTestAfterWalk; nil restores production.
 var testAfterWalk func()
+
+// fireAfterWalk runs the seam only under `go test` (testing.Testing()), so a
+// stray non-nil testAfterWalk can never alter a production run even in theory.
+func fireAfterWalk() {
+	if testAfterWalk != nil && testing.Testing() {
+		testAfterWalk()
+	}
+}
 
 // SetTestAfterWalk installs (or, with nil, clears) the after-walk test seam.
 // It exists only for the B43 parent-swap regressions in the binding packages,

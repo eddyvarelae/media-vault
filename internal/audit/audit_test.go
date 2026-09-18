@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/eddyvarelae/media-vault/internal/manifest"
@@ -405,7 +406,11 @@ func TestParentSwapRefused(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "sub", "x.JPG"), append([]byte("photo"), 0xFF, 0xD9), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(outside, "secret.JPG"), append([]byte("secret"), 0xFF, 0xD9), 0o644); err != nil {
+	// Same basename as the leaf, and a valid JPEG: if os.Root FOLLOWED the
+	// escaping parent, resolve would find this and the row would be PLAUSIBLE.
+	// It must instead be a containment ERROR, proving the escape was refused —
+	// not merely that the target was absent.
+	if err := os.WriteFile(filepath.Join(outside, "x.JPG"), append([]byte("secret"), 0xFF, 0xD9), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	done := false
@@ -430,11 +435,19 @@ func TestParentSwapRefused(t *testing.T) {
 		Size: 1, MtimeNs: 1, SHA256: "x", CopiedAt: 1, Status: "verified"}); err != nil {
 		t.Fatal(err)
 	}
-	r, err := Run(context.Background(), m, "cam", root, func(Finding) {})
+	var reason string
+	r, err := Run(context.Background(), m, "cam", root, func(f Finding) {
+		if f.Verdict == ErrorV {
+			reason = f.Reason
+		}
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if r.Errors != 1 || r.Plausible != 0 {
 		t.Errorf("parent swapped to an escaping symlink: errors=%d plausible=%d, want 1 error, 0 plausible", r.Errors, r.Plausible)
+	}
+	if !strings.Contains(reason, "escape") {
+		t.Errorf("want a containment (escape) error, got %q", reason)
 	}
 }

@@ -12,28 +12,44 @@ import (
 	"github.com/eddyvarelae/media-vault/internal/testguard"
 )
 
-// TestParentSwapRefused is the B43 escape regression at certify's write: a seam
-// swaps a parent directory for a symlink pointing out of the trusted certs root
-// in the window after the component walk. os.Root, anchored to the certs root
-// fd, refuses the escaping component, so no certificate is written through it.
+// TestParentSwapRefused is the B43 trusted-dir regression at certify's write.
+// name is one component, so the only parent is the trusted certs dir itself; the
+// seam swaps THAT dir for a symlink pointing outside, after WriteOutput has
+// opened it as an os.Root. Because the Root is pinned to the original directory
+// fd, the write lands in the original dir (renamed aside here so it stays
+// reachable), never through the swapped-in escape — nothing reaches outside.
 func TestParentSwapRefused(t *testing.T) {
 	certs, outside := t.TempDir(), t.TempDir()
-	if err := os.MkdirAll(filepath.Join(certs, "sub"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	scan.SetTestAfterWalk(func() { // sub was a real dir at the walk; now escape through it
-		os.RemoveAll(filepath.Join(certs, "sub"))
-		if err := os.Symlink(outside, filepath.Join(certs, "sub")); err != nil {
+	real := certs + ".real"
+	scan.SetTestAfterWalk(func() { // after OpenRoot pinned certs' fd, swap the name for an escape
+		if err := os.Rename(certs, real); err != nil { // keep the original inode alive under a new name
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, certs); err != nil {
 			t.Fatal(err)
 		}
 	})
 	defer scan.SetTestAfterWalk(nil)
 
-	if err := WriteOutput(certs, "sub/cert.json", []byte(`{"cert":1}`)); err == nil {
-		t.Fatal("wrote a certificate through a parent swapped to an escaping symlink; os.Root must refuse it")
+	if err := WriteOutput(certs, "cert.json", []byte(`{"cert":1}`)); err != nil {
+		t.Fatalf("pinned write to the original dir should succeed: %v", err)
 	}
 	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
-		t.Errorf("something landed through the escaping parent: %v", entries)
+		t.Errorf("a certificate reached outside the trusted dir through the swap: %v", entries)
+	}
+	if got, _ := os.ReadFile(filepath.Join(real, "cert.json")); string(got) != `{"cert":1}` {
+		t.Errorf("the certificate did not land in the pinned original dir: %q", got)
+	}
+}
+
+// TestWriteOutputRejectsMultiComponentName pins the one-component rule: a name
+// with a separator, "..", or an absolute path is refused before any open.
+func TestWriteOutputRejectsMultiComponentName(t *testing.T) {
+	certs := t.TempDir()
+	for _, name := range []string{"sub/cert.json", "../cert.json", "..", ".", filepath.Join(certs, "cert.json")} {
+		if err := WriteOutput(certs, name, []byte("x")); err == nil || !strings.Contains(err.Error(), "single path component") {
+			t.Errorf("name %q: err = %v, want a single-component refusal", name, err)
+		}
 	}
 }
 

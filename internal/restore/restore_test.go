@@ -341,7 +341,11 @@ func TestParentSwapRefused(t *testing.T) {
 	root, outside := t.TempDir(), t.TempDir()
 	write(t, filepath.Join(root, "sub", "x.JPG"), "torn")
 	write(t, filepath.Join(outside, "good.JPG"), "good")
-	write(t, filepath.Join(outside, "secret.JPG"), "secret")
+	// Same basename as the leaf: if os.Root FOLLOWED the escaping parent, Build
+	// would find this real regular file and proceed to hash it. It must instead
+	// be a containment refusal — proving the escape was refused, not that the
+	// target was absent.
+	write(t, filepath.Join(outside, "x.JPG"), "torn")
 	if err := m.Upsert(manifest.Entry{SourceDisk: "A", SourcePath: "x.JPG", DestPath: "sub/x.JPG", Size: 4, MtimeNs: 1,
 		SHA256: sha("torn"), CopiedAt: 1, VerifiedAt: 2, Status: "verified"}); err != nil {
 		t.Fatal(err)
@@ -360,7 +364,7 @@ func TestParentSwapRefused(t *testing.T) {
 	defer scan.SetTestAfterWalk(nil)
 
 	_, err := Build(context.Background(), m, "A", "x.JPG", filepath.Join(outside, "good.JPG"), root, sha("good"))
-	if !errors.Is(err, ErrRefused) {
-		t.Fatalf("parent swapped to an escaping symlink: err = %v, want ErrRefused", err)
+	if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "escape") {
+		t.Fatalf("parent swapped to an escaping symlink: err = %v, want a containment (escape) refusal", err)
 	}
 }
