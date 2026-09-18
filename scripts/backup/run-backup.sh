@@ -98,26 +98,47 @@ slug() {
 
 # The slug is ASSIGNED and PERSISTED, not derived, so two names can never share
 # a slug however their bases hash (review #52). $SLUGS_FILE maps name<TAB>slug,
-# append-only. recorded_slug returns a name's stored slug (empty if none).
-recorded_slug() { [[ -f "$SLUGS_FILE" ]] && awk -F'\t' -v n="$1" '$1==n{print $2; exit}' "$SLUGS_FILE"; }
-# assign_slug returns a name's slug, assigning and recording one on first sight:
-# the base, else base-2, base-3, … until no OTHER name holds it; recorded via a
-# temp file + rename so the append is atomic. Idempotent: a recorded name is
-# returned without touching the file.
+# append-only. Names reach awk through the ENVIRONMENT, never `awk -v`, because
+# -v un-escapes backslash sequences - a volume literally named `a\tb` would then
+# be compared as `a<TAB>b` (review #53). recorded_slug prints a name's stored
+# slug (empty if none); returns non-zero only on an I/O error.
+recorded_slug() {
+  [[ -f "$SLUGS_FILE" ]] || return 0
+  nm="$1" awk -F'\t' 'BEGIN{n=ENVIRON["nm"]} $1==n{print $2; exit}' "$SLUGS_FILE"
+}
+# slug_held_by_other: true when a name OTHER than $2 already holds slug $1.
+slug_held_by_other() {
+  [[ -f "$SLUGS_FILE" ]] || return 1
+  sg="$1" me="$2" awk -F'\t' 'BEGIN{s=ENVIRON["sg"]; me=ENVIRON["me"]} $2==s && $1!=me{f=1} END{exit !f}' "$SLUGS_FILE"
+}
+# assign_slug prints a name's slug, assigning and recording one on first sight:
+# the base, else base-2, base-3, … until no OTHER name holds it. It is
+# FAIL-CLOSED (review #53): every read/write/rename is checked; on any failure it
+# prints nothing and returns non-zero, and the registry is never left partial -
+# the full new content is written to a temp file, its line count verified to be
+# exactly one more than the old, and only then renamed into place, so a truncated
+# read can never install a registry that dropped rows. Idempotent for a recorded
+# name (returned without touching the file). Callers must abort on a non-zero
+# return, before building any path.
 assign_slug() {
-  local name="$1" existing base cand n tmp
-  existing=$(recorded_slug "$name"); [[ -n "$existing" ]] && { printf '%s' "$existing"; return; }
+  local name="$1" existing base cand n tmp old_n new_n
+  existing=$(recorded_slug "$name") || return 1
+  [[ -n "$existing" ]] && { printf '%s' "$existing"; return 0; }
+  old_n=0; if [[ -f "$SLUGS_FILE" ]]; then old_n=$(wc -l < "$SLUGS_FILE") || return 1; fi   # count BEFORE anything else
   base=$(slug "$name"); cand="$base"; n=1
-  while [[ -n "$(awk -F'\t' -v s="$cand" -v me="$name" '$2==s && $1!=me{print $1; exit}' "$SLUGS_FILE" 2>/dev/null)" ]]; do
-    n=$((n + 1)); cand="$base-$n"
-  done
-  tmp="$SLUGS_FILE.tmp.$$"
-  { [[ -f "$SLUGS_FILE" ]] && cat "$SLUGS_FILE"; printf '%s\t%s\n' "$name" "$cand"; } > "$tmp" && mv "$tmp" "$SLUGS_FILE"
+  while slug_held_by_other "$cand" "$name"; do n=$((n + 1)); cand="$base-$n"; done
+  tmp="$SLUGS_FILE.tmp"   # a fixed name is safe: the lock guarantees one writer (review #53)
+  if [[ -f "$SLUGS_FILE" ]]; then cat "$SLUGS_FILE" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  else : > "$tmp" 2>/dev/null || return 1; fi
+  printf '%s\t%s\n' "$name" "$cand" >> "$tmp" || { rm -f "$tmp"; return 1; }
+  new_n=$(wc -l < "$tmp") || { rm -f "$tmp"; return 1; }
+  (( new_n == old_n + 1 )) || { rm -f "$tmp"; return 1; }   # never install a copy that lost rows
+  mv "$tmp" "$SLUGS_FILE" || { rm -f "$tmp"; return 1; }
   printf '%s' "$cand"
 }
-# check_slugs aborts (touching nothing) if the registry is corrupt - a name
-# mapped to two different slugs, or a slug to two different names. assign_slug
-# never creates either; only a hand-edit can (review #52).
+# check_slugs: non-zero (after logging) if the registry maps a name to two slugs
+# or a slug to two names. assign_slug never creates either; only a hand-edit can.
+# It RETURNS rather than exits, so the caller can release the lock (review #52/#53).
 check_slugs() {
   [[ -f "$SLUGS_FILE" ]] || return 0
   local bad
@@ -129,8 +150,8 @@ check_slugs() {
     }
     END { for (k in nbad) print "name \"" k "\" maps to multiple slugs"
           for (k in sbad) print "slug \"" k "\" maps to multiple names" }
-  ' "$SLUGS_FILE")
-  [[ -z "$bad" ]] || { log "REFUSING: $SLUGS_FILE is corrupt — $bad — nothing written, pruned or recorded this tick; clear it by hand"; exit 1; }
+  ' "$SLUGS_FILE") || return 1
+  [[ -z "$bad" ]] || { log "REFUSING: $SLUGS_FILE is corrupt — $bad — nothing written, pruned or recorded this tick; clear it by hand"; return 1; }
 }
 boot_dev=$(df -P / | awk 'NR==2 {print $1}')
 scratch_dev=""; [[ -n "$SCRATCH_DIR" && -d "$SCRATCH_DIR" ]] && scratch_dev=$(df -P "$SCRATCH_DIR" | awk 'NR==2 {print $1}')
@@ -172,6 +193,13 @@ for mp in "$VOLUMES_DIR"/*; do
   [[ "$dev" != "$boot_dev" ]] || continue
   [[ -z "$scratch_dev" || "$dev" != "$scratch_dev" ]] || continue
   excluded "$name" && continue
+  # A tab or newline in a name would corrupt slugs.tsv (name<TAB>slug, one row
+  # per line) and the marker/report headers, so refuse such a volume at
+  # discovery, before any registry read (review #53). NUL cannot occur in a
+  # shell variable. Straight to stderr (the log dir may not exist yet).
+  case "$name" in
+    *$'\t'*|*$'\n'*) printf '[%s] REFUSING TO RUN: volume name contains a tab or newline, which slugs.tsv cannot represent: %s\n' "$(ts)" "'${name:0:48}'" >&2; exit 2 ;;
+  esac
   if ! known "$name"; then unknown+=("$name"); continue; fi
   id=$(attach_id "$mp")
   if (( force )) || ! reported "$name" "$id"; then due+=("$name"); fi
@@ -186,19 +214,51 @@ if (( dry_run )); then
   echo "  due now: ${due[*]-(none)}"
   exit 0
 fi
-# ── 1a. assign slugs, then a defense-in-depth foreign-owner check (review #52) ─
+# ── 1. lock first: hold the single-instance lock before reading the registry ──
+# The registry (slugs.tsv) and the markers are read and written on EVERY tick,
+# including unknown-only and nothing-due ones, so the lock must be held before
+# any of that, not just before the reports (review #53). Same discipline as the
+# tagger (review #26-3, #28-2): cleanup trap the instant the lock is ours.
+mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"
+rc=0 have_lock="" finishing=""
+finish() { finishing=1; [[ -n "$have_lock" ]] && rm -rf "$LOCK_DIR"; exit "$rc"; }
+# Never taken over automatically (review #38, as tagger #36): mkdir is the only
+# acquisition; any pre-existing lock - live, dead or info-less - makes this tick
+# refuse and leave it for a human. A stuck report that refuses quietly (the next
+# tick retries once a human clears it) is safer than two ticks racing the
+# registry or the snapshot.
+acquire_lock() {
+  if mkdir "$LOCK_DIR" 2>/dev/null; then return 0; fi
+  local info pid
+  info=$(cat "$LOCK_DIR/info" 2>/dev/null || echo "no info yet")
+  pid=${info%% *}
+  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then return 1; fi   # a tick is running
+  if [[ ! -f "$STATE_DIR/backup.stale-lock" ]] || (( $(date +%s) - $(stat -f %m "$STATE_DIR/backup.stale-lock") >= 3600 )); then
+    touch "$STATE_DIR/backup.stale-lock"
+    log "STALE LOCK: $LOCK_DIR ($info), its process is gone or unknown — not cleared automatically; inspect, then rmdir it by hand"
+  fi
+  return 1
+}
+acquire_lock || exit 1
+have_lock=1
+rm -f "$STATE_DIR/backup.stale-lock"
+trap 'log "interrupted — the tick in flight is not recorded"; rc=143; finish' TERM INT
+trap '[[ -n "$finishing" ]] || { log "UNEXPECTED EXIT (rc=$?) — releasing the lock"; rc=1; finish; }' EXIT
+{ echo "$$ started $(ts)" > "$LOCK_DIR/info.tmp" && mv "$LOCK_DIR/info.tmp" "$LOCK_DIR/info"; }
+
+# ── 1a. assign slugs (under the lock), then a defense-in-depth owner check ─────
 # Slugs are assigned and persisted (assign_slug), so distinct names never share
-# an output path - the #51 planned-collision cases cannot arise. Two guards
-# remain, run before ANYTHING is written, pruned or appended: a corrupt
-# registry aborts (check_slugs), and any existing output whose line-1 header
-# names a volume other than the one the registry assigns is a corruption/tamper
-# signal - log each, touch nothing, exit 1. Only a clean tick prunes and writes.
-mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"   # so the diagnostic can be logged; writes nothing else
-check_slugs                                       # a hand-corrupted registry aborts, touching nothing
+# an output path - the #51 planned-collision cases cannot arise. Guards run
+# before ANYTHING is written, pruned or appended, each releasing the lock on
+# abort: a corrupt registry (check_slugs), a fail-closed assign_slug (any I/O
+# error), and any existing output whose line-1 header names a volume other than
+# the one the registry assigns (corruption/tamper). Only a clean tick prunes
+# and writes (review #52/#53).
+check_slugs || { rc=1; finish; }                  # a hand-corrupted registry aborts, touching nothing
 d=$(today)
 foreign=0
 for name in "${due[@]+"${due[@]}"}"; do
-  slug=$(assign_slug "$name")
+  slug=$(assign_slug "$name") || { log "REFUSING: could not assign a slug for '$name' (registry I/O error) — nothing written this tick"; rc=1; finish; }
   for f in "$STATE_DIR/gap-$slug-$d.txt" "$STATE_DIR/gap-$slug-$d.tsv"; do
     [[ -e "$f" ]] || continue
     if [[ "$(head -1 "$f" 2>/dev/null)" != "disk: $name" ]]; then
@@ -208,7 +268,7 @@ for name in "${due[@]+"${due[@]}"}"; do
   done
 done
 for u in "${unknown[@]+"${unknown[@]}"}"; do
-  slug=$(assign_slug "$u")
+  slug=$(assign_slug "$u") || { log "REFUSING: could not assign a slug for '$u' (registry I/O error) — nothing written this tick"; rc=1; finish; }
   marker="$STATE_DIR/backup.unknown-$slug"
   [[ -e "$marker" ]] || continue
   if [[ "$(head -1 "$marker" 2>/dev/null)" != "volume: $u" ]]; then
@@ -216,7 +276,7 @@ for u in "${unknown[@]+"${unknown[@]}"}"; do
     foreign=1
   fi
 done
-(( foreign )) && { log "REFUSING: foreign output(s) above — nothing written, pruned or recorded this tick"; exit 1; }
+(( foreign )) && { log "REFUSING: foreign output(s) above — nothing written, pruned or recorded this tick"; rc=1; finish; }
 
 # ── 1b. a clean tick: log new unknown volumes, prune stale markers ────────────
 # Unknown mounted volumes get logged once, independent of whether any known
@@ -228,7 +288,7 @@ done
 # OWNER: a marker is stale when the volume named on its line 1 is no longer
 # mounted-and-unknown (review #50).
 for u in "${unknown[@]+"${unknown[@]}"}"; do
-  slug=$(assign_slug "$u")
+  slug=$(assign_slug "$u") || { log "REFUSING: could not assign a slug for '$u' (registry I/O error) — nothing written this tick"; rc=1; finish; }
   marker="$STATE_DIR/backup.unknown-$slug"
   [[ -f "$marker" ]] || {
     printf 'volume: %s\n' "$u" > "$marker"   # line 1 names the volume, for the foreign-owner check
@@ -242,18 +302,17 @@ for marker in "$STATE_DIR"/backup.unknown-*; do
   for u in "${unknown[@]+"${unknown[@]}"}"; do [[ "$u" == "$owner" ]] && { live=1; break; }; done
   (( live )) || rm -f "$marker"
 done
-(( ${#due[@]} > 0 )) || exit 0     # the normal tick: nothing more owed; say nothing
+(( ${#due[@]} > 0 )) || finish     # the normal tick: nothing more owed; release the lock, say nothing
 
 # ── 2. preconditions (only checked when something is due) ────────────────
 # A failure that will recur every five minutes - a missing OR unusable
 # manifest - is logged at most once an hour; a good tick clears the stamp
-# (review #28). throttled_fail logs+exits 2 the first time and stays quiet
-# until the hour is up.
-mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"
+# (review #28). throttled_fail logs once then releases the lock and exits 2
+# (the lock is now held from the top of the tick — review #53).
 THROTTLE="$STATE_DIR/backup.precondition-failed"
 throttled_fail() {
-  if [[ ! -f "$THROTTLE" ]] || (( $(date +%s) - $(stat -f %m "$THROTTLE") >= 3600 )); then touch "$THROTTLE"; die "$*"; fi
-  exit 2
+  if [[ ! -f "$THROTTLE" ]] || (( $(date +%s) - $(stat -f %m "$THROTTLE") >= 3600 )); then touch "$THROTTLE"; log "REFUSING TO RUN: $*"; fi
+  rc=2; finish
 }
 [[ -f "$MANIFEST_DB" ]] || throttled_fail "manifest not found at $MANIFEST_DB (is the NAS docker share mounted?) — ${due[*]} due"
 
@@ -280,38 +339,6 @@ ensure_vault() {
   log "built vault at $VAULT_BIN from $REPO_DIR @ $head"
 }
 
-# ── 4. lock, snapshot, one report per due disk ───────────────────────────
-# Same discipline as the tagger (review #26-3, #28-2): cleanup trap the
-# instant the lock is ours; a lock dir with no info yet is being acquired,
-# not dead; a dead lock is taken over by renaming it away, which only one
-# competitor can win.
-rc=0 have_lock="" finishing=""
-finish() { finishing=1; [[ -n "$have_lock" ]] && rm -rf "$LOCK_DIR"; exit "$rc"; }
-# Never taken over automatically (review #38, as tagger #36): mkdir is the
-# only acquisition; any pre-existing lock - live, dead or info-less - makes
-# this tick refuse and leave it for a human. A directory lock's takeover
-# cannot be made race-free, and a stuck report that refuses quietly (the
-# next tick tries again once a human clears it) is safer than two reports
-# racing the snapshot.
-acquire_lock() {
-  if mkdir "$LOCK_DIR" 2>/dev/null; then return 0; fi
-  local info pid
-  info=$(cat "$LOCK_DIR/info" 2>/dev/null || echo "no info yet")
-  pid=${info%% *}
-  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then return 1; fi   # a report is running
-  # Dead or info-less: report it once (throttled) and leave it.
-  if [[ ! -f "$STATE_DIR/backup.stale-lock" ]] || (( $(date +%s) - $(stat -f %m "$STATE_DIR/backup.stale-lock") >= 3600 )); then
-    touch "$STATE_DIR/backup.stale-lock"
-    log "STALE LOCK: $LOCK_DIR ($info), its process is gone or unknown — not cleared automatically; inspect, then rmdir it by hand"
-  fi
-  return 1
-}
-acquire_lock || exit 1
-have_lock=1
-rm -f "$STATE_DIR/backup.stale-lock"
-trap 'log "interrupted — the report in flight is not recorded"; rc=143; finish' TERM INT
-trap '[[ -n "$finishing" ]] || { log "UNEXPECTED EXIT (rc=$?) — releasing the lock"; rc=1; finish; }' EXIT
-{ echo "$$ started $(ts)" > "$LOCK_DIR/info.tmp" && mv "$LOCK_DIR/info.tmp" "$LOCK_DIR/info"; }
 
 for o in "${policy_overrides[@]+"${policy_overrides[@]}"}"; do log "POLICY OVERRIDE: $o"; done
 ensure_vault || { rc=1; finish; }

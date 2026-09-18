@@ -331,6 +331,91 @@ check "clean tick: the stale-owner marker is pruned" test ! -e "$state/backup.un
 check "clean tick: the live-owner marker is retained on the next clean tick" test -e "$rmk" -a "$(head -1 "$rmk" 2>/dev/null)" = "volume: Random"
 rm -rf "$vols"/*; rm -f "$state"/backup.unknown-* "$state/slugs.tsv"
 
+# review #53: the lock is held before the registry is read, on unknown-only ticks
+# too. A live lock makes even a nothing-due, unknown-only tick refuse, writing no
+# marker and no registry.
+rm -rf "$vols"/*; rm -f "$state"/backup.unknown-* "$state/slugs.tsv"; mkvol Random; mk "$vols/Random/z" "u"
+cat > "$work/mini-lk.env" <<ENV
+SCRATCH_DIR="$scratch"
+BACKUP_DISKS="tars"
+ENV
+mkdir -p "$state/backup.lock"; echo "$$ started test" > "$state/backup.lock/info"   # a live lock (this test's pid)
+: > "$logf"; MINI_ENV="$work/mini-lk.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" > "$out" 2>&1; lkrc=$?
+check "lock first: an unknown-only tick refuses when the lock is held" test "$lkrc" -ne 0
+check "lock first: no marker written while the lock was held" test -z "$(ls "$state"/backup.unknown-* 2>/dev/null)"
+check "lock first: no registry written while the lock was held" test ! -e "$state/slugs.tsv"
+rm -rf "$state/backup.lock"; rm -rf "$vols"/*
+
+# review #53: assign_slug installs the full registry + exactly one row; a row
+# appearing between the count and the write (a hook appends during base
+# computation) trips the line-count guard, so no row is lost and the tick aborts.
+rm -f "$state"/gap-* "$state/slugs.tsv" "$state/slugs.tsv.tmp"; : > "$state/backup-state.tsv"
+printf 'Existing\texistingslug\n' > "$state/slugs.tsv"
+cat > "$work/slughook-grow" <<HOOK
+#!/bin/bash
+[ "\$1" = Grow ] && printf 'Sneaky\tsneakyslug\n' >> "$state/slugs.tsv"
+printf growbase
+HOOK
+chmod +x "$work/slughook-grow"
+mkvol Grow; mk "$vols/Grow/DCIM/g" "g"
+cat > "$work/mini-grow.env" <<ENV
+SCRATCH_DIR="$scratch"
+BACKUP_DISKS="Grow"
+ENV
+: > "$logf"; MINI_ENV="$work/mini-grow.env" BACKUP_SLUG_HOOK="$work/slughook-grow" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; grc=$?
+check "registry-preserve: the tick aborts (exit non-zero)" test "$grc" -ne 0
+check "registry-preserve: the pre-existing row survives" grep -q Existing "$state/slugs.tsv"
+check "registry-preserve: the concurrently-added row survives" grep -q Sneaky "$state/slugs.tsv"
+check "registry-preserve: Grow was not recorded (write refused)" test "$(nm=Grow awk -F'\t' 'BEGIN{n=ENVIRON["nm"]} $1==n{c++} END{print c+0}' "$state/slugs.tsv")" -eq 0
+rm -rf "$vols"/*; rm -f "$state"/gap-* "$state/slugs.tsv" "$state/slugs.tsv.tmp"
+
+# review #53: fail-closed on the write path - an un-creatable temp aborts, and the
+# registry is byte-identical.
+printf 'Keep\tkeepslug\n' > "$state/slugs.tsv"; cp "$state/slugs.tsv" "$work/reg-base"
+rm -rf "$state/slugs.tsv.tmp"; mkdir "$state/slugs.tsv.tmp"   # a directory where the temp must be written
+mkvol WriteFail; mk "$vols/WriteFail/DCIM/x" "z"
+cat > "$work/mini-wf.env" <<ENV
+SCRATCH_DIR="$scratch"
+BACKUP_DISKS="WriteFail"
+ENV
+: > "$logf"; MINI_ENV="$work/mini-wf.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; wrc=$?
+check "unwritable temp: the tick aborts (exit non-zero)" test "$wrc" -ne 0
+check "unwritable temp: diagnostic mentions the slug assignment" grep -q "could not assign a slug" "$logf"
+check "unwritable temp: no report written" test -z "$(ls "$state"/gap-*.txt 2>/dev/null)"
+check "unwritable temp: the registry is byte-identical" cmp -s "$state/slugs.tsv" "$work/reg-base"
+rm -rf "$state/slugs.tsv.tmp"; rm -rf "$vols"/*; rm -f "$state"/gap-* "$state/slugs.tsv"
+
+# review #53: fail-closed on the read path - an unreadable registry aborts, and it
+# is byte-identical.
+printf 'Keep\tkeepslug\n' > "$state/slugs.tsv"; cp "$state/slugs.tsv" "$work/reg-base"; chmod 000 "$state/slugs.tsv"
+mkvol ReadFail; mk "$vols/ReadFail/DCIM/x" "z"
+cat > "$work/mini-rf.env" <<ENV
+SCRATCH_DIR="$scratch"
+BACKUP_DISKS="ReadFail"
+ENV
+: > "$logf"; MINI_ENV="$work/mini-rf.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; rrc=$?
+chmod 644 "$state/slugs.tsv"
+check "unreadable registry: the tick aborts (exit non-zero)" test "$rrc" -ne 0
+check "unreadable registry: the registry is byte-identical" cmp -s "$state/slugs.tsv" "$work/reg-base"
+rm -rf "$vols"/*; rm -f "$state/slugs.tsv"
+
+# review #53: names reach awk via ENVIRON, not `awk -v` (which un-escapes), so a
+# volume literally named a\tb (backslash-t, not a tab) records as ONE row and is
+# found again idempotently rather than duplicated.
+weird='a\tb'
+rm -f "$state"/gap-* "$state/slugs.tsv" "$state/slugs.tsv.tmp"; : > "$state/backup-state.tsv"
+mkdir -p "$vols/$weird/DCIM"; mk "$vols/$weird/DCIM/x" "z"
+cat > "$work/mini-bs.env" <<ENV
+SCRATCH_DIR="$scratch"
+BACKUP_DISKS="$weird"
+ENV
+runbs() { MINI_ENV="$work/mini-bs.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; }
+: > "$logf"; runbs; runbs
+check "backslash-t name: exactly one registry row (no awk -v un-escaping)" test "$(nm="$weird" awk -F'\t' 'BEGIN{n=ENVIRON["nm"]} $1==n{c++} END{print c+0}' "$state/slugs.tsv")" -eq 1
+check "backslash-t name: the row's name field is the literal name" test "$(awk -F'\t' 'NR==1{print $1}' "$state/slugs.tsv")" = "$weird"
+rm -rf "$vols"/*; rm -f "$state/slugs.tsv"
+
+
 # review #43/#49: a configured disk name longer than 255 bytes can never be a
 # mount point; refuse it at discovery, before any report path is built AND
 # before any log call. Use a FRESH state dir whose log directory does not

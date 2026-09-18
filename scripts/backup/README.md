@@ -56,7 +56,18 @@ assigned slug, for known and unknown volumes alike, so **two names can never
 share a slug** however their bases hash (the earlier probabilistic-collision
 worry is gone). The mapping persists across ticks and re-attaches.
 
-Two guards remain, run before anything is written, pruned or recorded:
+The **single-instance lock is held before the registry is read** and to the end
+of the tick, on every tick including unknown-only and nothing-due ones, so no
+two ticks ever race `slugs.tsv`. `assign_slug` is **fail-closed**: every read,
+write and rename is checked; the full new content is written to a temp file, its
+line count verified to be exactly one more than the old (so a truncated read can
+never install a registry that dropped a row), and only then renamed. On any I/O
+error it records nothing and the tick aborts with the registry byte-identical.
+Names reach `awk` through the environment, never `awk -v` (which would un-escape
+a backslash sequence), and a volume name containing a tab or newline - which
+`slugs.tsv` cannot represent - is refused at discovery (exit 2).
+
+Two more guards run before anything is written, pruned or recorded:
 
 - **Corrupt registry → abort.** If `slugs.tsv` maps one name to two slugs, or
   one slug to two names (only a hand-edit can do this), the tick logs
