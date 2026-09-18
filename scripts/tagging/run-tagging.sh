@@ -32,7 +32,7 @@ set -euo pipefail
 
 # Two kinds of setting, from two owners (B17). The MACHINE is mini-server's:
 # where scratch, the mounts, Ollama, the tagger venv and the log live come
-# from its config/mini.env (path overridable with TAGGING_ENV). The JOB is
+# from its config/mini.env (path overridable with MINI_ENV). The JOB is
 # ours: which folders, in what order, how much per night, which extensions -
 # Eddy's decisions of 2026-09-17 (team/DECISIONS.md), defaulted right here.
 # mini.env may still override a policy key (it is Eddy's file), but every
@@ -46,9 +46,9 @@ policy_keys="TAG_SOURCES TAG_SOURCES_TIER2 TAG_BATCH_MAX_GB TAG_VIDEO_EXTS"
 machine_keys="SCRATCH_DIR TAG_STATE_DIR MEDIA_ROOT MANIFEST_DB OLLAMA_URL TAGGER_DIR LOG_FILE"
 overridable="$policy_keys $machine_keys"
 for v in $overridable; do eval "_pre_$v=\${$v-}"; done
-TAGGING_ENV="${TAGGING_ENV:-$HOME/Projects/mini-server/config/mini.env}"
-if [[ -f "$TAGGING_ENV" ]]; then
-  source "$TAGGING_ENV"
+MINI_ENV="${MINI_ENV:-$HOME/Projects/mini-server/config/mini.env}"
+if [[ -f "$MINI_ENV" ]]; then
+  source "$MINI_ENV"
 fi
 policy_overrides=()
 for v in $policy_keys; do
@@ -56,7 +56,7 @@ for v in $policy_keys; do
   eval "_def_$v=\$POLICY_DEFAULT_$v"
   eval "_e=\$_env_$v; _d=\$_def_$v"
   if [[ -n "$_e" && "$_e" != "$_d" ]]; then
-    policy_overrides+=("$v=[$_e] (default [$_d], from $TAGGING_ENV)")
+    policy_overrides+=("$v=[$_e] (default [$_d], from $MINI_ENV)")
   fi
   eval "[[ -n \$_env_$v ]] || $v=\$_def_$v"
 done
@@ -65,7 +65,7 @@ for v in $overridable; do eval "[[ -n \${_pre_$v} ]] && $v=\${_pre_$v}" || true;
 # launchd starts with a bare PATH; ffmpeg/exiftool/whisper-cli are Homebrew's.
 export PATH="/opt/homebrew/bin:$PATH"
 
-SCRATCH_DIR="${SCRATCH_DIR:?SCRATCH_DIR must be set in $TAGGING_ENV (mini-server config/mini.env)}"
+SCRATCH_DIR="${SCRATCH_DIR:?SCRATCH_DIR must be set in $MINI_ENV (mini-server config/mini.env)}"
 TAG_STATE_DIR="${TAG_STATE_DIR:-$HOME/Library/Application Support/mini-server}"
 MEDIA_ROOT="${MEDIA_ROOT:-$HOME/mounts/media}"
 MANIFEST_DB="${MANIFEST_DB:-$HOME/mounts/docker/vault-nas-config/manifest.db}"

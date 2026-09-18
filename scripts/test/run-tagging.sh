@@ -125,7 +125,7 @@ ENV
 # run [cmd...]: the script with the machine set up. Every setting is a
 # default the caller's environment may override (the precondition cases do).
 run() {
-  PATH="$work/bin:$PATH" TAGGING_ENV="${TAGGING_ENV:-$env_file}" TAG_STATE_DIR="${TAG_STATE_DIR:-$state}" \
+  PATH="$work/bin:$PATH" MINI_ENV="${MINI_ENV:-$env_file}" TAG_STATE_DIR="${TAG_STATE_DIR:-$state}" \
     MEDIA_ROOT="${MEDIA_ROOT:-$media}" MANIFEST_DB="${MANIFEST_DB:-$manifest}" TAGGER_DIR="${TAGGER_DIR:-$tagger}" \
     LOG_FILE="${LOG_FILE:-$logf}" OLLAMA_URL="${OLLAMA_URL:-http://stub}" \
     "$@"
@@ -133,7 +133,7 @@ run() {
 # runbg [args...]: the script in the background with $! being the script
 # itself (a subshell that execs), so a signal reaches it and not a wrapper.
 runbg() {
-  ( export PATH="$work/bin:$PATH" TAGGING_ENV="${TAGGING_ENV:-$env_file}" TAG_STATE_DIR="${TAG_STATE_DIR:-$state}" \
+  ( export PATH="$work/bin:$PATH" MINI_ENV="${MINI_ENV:-$env_file}" TAG_STATE_DIR="${TAG_STATE_DIR:-$state}" \
       MEDIA_ROOT="${MEDIA_ROOT:-$media}" MANIFEST_DB="${MANIFEST_DB:-$manifest}" TAGGER_DIR="${TAGGER_DIR:-$tagger}" \
       LOG_FILE="${LOG_FILE:-$logf}" OLLAMA_URL="${OLLAMA_URL:-http://stub}"; exec bash "$script" "$@" ) &
 }
@@ -186,12 +186,12 @@ SCRATCH_DIR="$scratch"
 TAG_BATCH_MAX_GB="50"
 TAG_SOURCES_TIER2="Backup"
 ENV
-TAGGING_ENV="$work/mini-override.env" run bash "$script" --dry-run > "$out" 2>&1
+MINI_ENV="$work/mini-override.env" run bash "$script" --dry-run > "$out" 2>&1
 check "override: cap from mini.env applied" grep -q "cap: 50 GB" "$out"
 check "override: logged against the default with its source" \
   grep -q "POLICY OVERRIDE: TAG_BATCH_MAX_GB=\[50\] (default \[200\], from $work/mini-override.env)" "$out"
 check "override: tier 2 override logged too" grep -q "POLICY OVERRIDE: TAG_SOURCES_TIER2=\[Backup\] (default \[Backup LeanTank Public\]" "$out"
-( export TAGGING_ENV="$work/mini-override.env" TAG_BATCH_MAX_GB=7; run bash "$script" --dry-run ) > "$out" 2>&1
+( export MINI_ENV="$work/mini-override.env" TAG_BATCH_MAX_GB=7; run bash "$script" --dry-run ) > "$out" 2>&1
 check "override: environment still wins over mini.env" grep -q "cap: 7 GB" "$out"
 
 # ── 3. torn snapshot: refused ─────────────────────────────────────────────

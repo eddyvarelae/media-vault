@@ -31,7 +31,7 @@ then changed here - `git log -- scripts/tagging` shows exactly what.
 
 The **machine** is mini-server's: `SCRATCH_DIR`, `MEDIA_ROOT`, `MANIFEST_DB`,
 `OLLAMA_URL`, `TAGGER_DIR`, `TAG_STATE_DIR`, `LOG_FILE` come from its
-`config/mini.env` (path in `TAGGING_ENV`, default
+`config/mini.env` (path in `MINI_ENV`, default
 `~/Projects/mini-server/config/mini.env`). The **job policy** is ours:
 `TAG_SOURCES`, `TAG_SOURCES_TIER2`, `TAG_BATCH_MAX_GB`, `TAG_VIDEO_EXTS`
 default in the script to the decisions above. `mini.env` may override a

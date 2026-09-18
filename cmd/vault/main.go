@@ -16,6 +16,7 @@ import (
 	"github.com/eddyvarelae/media-vault/internal/certify"
 	"github.com/eddyvarelae/media-vault/internal/copy"
 	"github.com/eddyvarelae/media-vault/internal/dedup"
+	"github.com/eddyvarelae/media-vault/internal/gap"
 	"github.com/eddyvarelae/media-vault/internal/importer"
 	"github.com/eddyvarelae/media-vault/internal/inventory"
 	"github.com/eddyvarelae/media-vault/internal/manifest"
@@ -41,6 +42,9 @@ Usage:
   vault repair-dest <source-disk-name> <dest-dir> [--dry-run]
                    (rows whose dest_path is missing: point them at the same
                     basename one directory down, only on a size+sha256 match)
+  vault gap        <source-dir> [--tsv <file>]
+                   (report-only: what on the dir is NOT archived, by content -
+                    size index over verified rows, sha256 only on a size match)
   vault inventory  <source-disk-name> <dir>
   vault dedup      [--min-size <bytes>]
   vault unique     <source-disk-name>
@@ -75,11 +79,12 @@ func main() {
 	dbPath := filepath.Join(configDir, "manifest.db")
 	var m *manifest.Manifest
 	var err error
-	if hasDryRun(args) {
+	if hasDryRun(args) || cmd == "gap" {
 		// A dry run writes nothing - not an archive file, not a row, and
 		// (B31) not the config dir or the manifest file either: the
 		// manifest is opened read-only, or planned against an empty
-		// in-memory one when none exists yet.
+		// in-memory one when none exists yet. `gap` is report-only by
+		// construction and gets the same open.
 		if _, statErr := os.Stat(dbPath); statErr == nil {
 			m, err = manifest.OpenReadOnly(dbPath)
 		} else if os.IsNotExist(statErr) {
@@ -117,6 +122,10 @@ func main() {
 		runCertify(m, configDir, args)
 	case "repair-dest":
 		if code := runRepairDest(ctx, m, args); code != 0 {
+			os.Exit(code)
+		}
+	case "gap":
+		if code := runGap(ctx, m, args); code != 0 {
 			os.Exit(code)
 		}
 	case "inventory":
@@ -652,6 +661,64 @@ func runRepairDest(ctx context.Context, m *manifest.Manifest, args []string) int
 		fmt.Fprintf(os.Stderr, "\nINCOMPLETE: %d row(s) still without a destination this tool can back with a hash (%d not found, %d ambiguous, %d owned by another row, %d not a file, %d unsafe, %d in conflict).\n",
 			unresolved, by[repair.NotFound], by[repair.Ambiguous], by[repair.Owned], by[repair.NotAFile], by[repair.Unsafe], by[repair.Conflict])
 		return 1
+	}
+	return 0
+}
+
+// runGap is B22's report: per folder, what an attached disk still needs
+// archived, by content. It copies nothing and writes nothing but the
+// optional TSV. 0 with the report (even when everything needs archiving -
+// the report is the answer); 1 on a walk/read/write error.
+func runGap(ctx context.Context, m *manifest.Manifest, args []string) int {
+	tsv := ""
+	var pos []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--tsv":
+			if i+1 >= len(args) {
+				die("--tsv needs a value")
+			}
+			tsv = args[i+1]
+			i++
+		default:
+			if strings.HasPrefix(args[i], "--") {
+				die("unknown flag: %s", args[i])
+			}
+			pos = append(pos, args[i])
+		}
+	}
+	if len(pos) != 1 {
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	root := pos[0]
+	r, err := gap.Run(ctx, m, root)
+	if err != nil {
+		die("gap: %v", err)
+	}
+	fmt.Printf("Gap report for %s against %d verified rows\n\n", root, r.VerifiedRows)
+	fmt.Printf("%-24s %9s %16s %9s %16s %9s %16s\n", "folder", "files", "bytes", "archived", "bytes", "absent", "bytes")
+	for _, f := range r.Folders {
+		fmt.Printf("%-24s %9d %16d %9d %16d %9d %16d\n", f.Name, f.Files, f.Bytes, f.Archived, f.ArchivedBytes, f.Absent, f.AbsentBytes)
+	}
+	fmt.Printf("%-24s %9d %16d %9d %16d %9d %16d\n", "TOTAL", r.Files, r.Bytes, r.Archived, r.ArchivedBytes, r.Absent, r.AbsentBytes)
+	needs := "no"
+	if r.Absent > 0 {
+		needs = "yes"
+	}
+	// The line a script or a person keys on: the verdict with its arithmetic.
+	fmt.Printf("\nGAP %s needs archiving: %s, %d files, %d bytes (of %d files / %d bytes on the disk; %d files / %d bytes archived by content; %d files / %d bytes hashed to prove it; check %d+%d=%d)\n",
+		root, needs, r.Absent, r.AbsentBytes, r.Files, r.Bytes, r.Archived, r.ArchivedBytes, r.Hashed, r.HashedBytes, r.Archived, r.Absent, r.Archived+r.Absent)
+	if tsv != "" {
+		var b strings.Builder
+		b.WriteString("path\tsize\tsha256\n")
+		for _, f := range r.AbsentFiles {
+			fmt.Fprintf(&b, "%s\t%d\t%s\n", f.Rel, f.Size, f.SHA256)
+		}
+		if err := os.WriteFile(tsv, []byte(b.String()), 0o644); err != nil {
+			die("write %s: %v", tsv, err)
+		}
+		fmt.Printf("absent files written to %s\n", tsv)
 	}
 	return 0
 }

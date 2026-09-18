@@ -63,3 +63,18 @@ func TestRunTaggingAgainstARealManifest(t *testing.T) {
 		t.Fatalf("shell test failed: %v", err)
 	}
 }
+
+func TestRunBackupAgainstARealManifest(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "vault")
+	build := exec.Command("go", "build", "-o", bin, "../../cmd/vault")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	cmd := exec.Command("bash", "./run-backup.sh")
+	cmd.Env = append(os.Environ(), "TMPDIR="+t.TempDir(), "VAULT_BIN="+bin)
+	out, err := cmd.CombinedOutput()
+	t.Logf("\n%s", out)
+	if err != nil {
+		t.Fatalf("shell test failed: %v", err)
+	}
+}

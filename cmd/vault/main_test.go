@@ -1380,3 +1380,72 @@ func TestMoveNeverLandsOnAVerifiedDestination(t *testing.T) {
 		t.Errorf("z.mov moved through the link: %q", got)
 	}
 }
+
+// TestGap is B22's report through main(): the GAP line with its arithmetic,
+// the TSV, a read-only manifest (byte-identical, no config created when
+// absent), and the exit codes.
+func TestGap(t *testing.T) {
+	cfg, src, dst, ssd := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(src, "DCIM", "a.ARW"), "archived raw", t0)
+	writeFile(t, filepath.Join(src, "DCIM", "b.ARW"), "archived two", t0)
+	if _, _, code := vault(t, cfg, "copy", "sony", src, dst); code != 0 {
+		t.Fatalf("copy: exit %d", code)
+	}
+	if _, _, code := vault(t, cfg, "verify", "sony", dst); code != 0 {
+		t.Fatalf("verify: exit %d", code)
+	}
+	writeFile(t, filepath.Join(ssd, "SonyA6700", "DCIM", "renamed.ARW"), "archived raw", t0) // archived by content
+	writeFile(t, filepath.Join(ssd, "SonyA6700", "DCIM", "new.ARW"), "brand new photo", t0)
+	writeFile(t, filepath.Join(ssd, "Backup", "db.bin"), "archived tw0", t0) // same size as b, other bytes
+	db := filepath.Join(cfg, "manifest.db")
+	before := sha(readFile(t, db))
+
+	tsv := filepath.Join(t.TempDir(), "gap.tsv")
+	out, _, code := vault(t, cfg, "gap", ssd, "--tsv", tsv)
+	if code != 0 {
+		t.Fatalf("gap: exit %d\n%s", code, out)
+	}
+	want := "GAP " + ssd + " needs archiving: yes, 2 files, 27 bytes (of 3 files / 39 bytes on the disk; 1 files / 12 bytes archived by content; 2 files / 24 bytes hashed to prove it; check 1+2=3)"
+	if !strings.Contains(out, want) {
+		t.Errorf("GAP line missing; want\n%s\ngot\n%s", want, out)
+	}
+	if !strings.Contains(out, "against 2 verified rows") {
+		t.Errorf("row count missing:\n%s", out)
+	}
+	got := readFile(t, tsv)
+	if got != "path\tsize\tsha256\nBackup/db.bin\t12\t"+sha("archived tw0")+"\nSonyA6700/DCIM/new.ARW\t15\t\n" {
+		t.Errorf("tsv = %q", got)
+	}
+	if sha(readFile(t, db)) != before {
+		t.Errorf("gap changed the manifest")
+	}
+	if entries, _ := os.ReadDir(filepath.Join(ssd, "SonyA6700", "DCIM")); len(entries) != 2 {
+		t.Errorf("gap wrote into the source: %v", entries)
+	}
+	// Everything archived: "no", with the hashing cost stated.
+	writeFile(t, filepath.Join(ssd, "Backup", "db.bin"), "archived two", t0)
+	if err := os.Remove(filepath.Join(ssd, "SonyA6700", "DCIM", "new.ARW")); err != nil {
+		t.Fatal(err)
+	}
+	if out, _, code := vault(t, cfg, "gap", ssd); code != 0 || !strings.Contains(out, "needs archiving: no, 0 files, 0 bytes (of 2 files / 24 bytes on the disk; 2 files / 24 bytes archived by content; 2 files / 24 bytes hashed to prove it; check 2+0=2)") {
+		t.Errorf("all archived: exit %d\n%s", code, out)
+	}
+	// Read-only by construction: no config is created for a gap against nothing.
+	none := filepath.Join(t.TempDir(), "never")
+	if out, errOut, code := vault(t, none, "gap", ssd); code != 0 || !strings.Contains(out, "needs archiving: yes, 2 files") || !strings.Contains(errOut, "creating nothing") {
+		t.Errorf("gap without a manifest: exit %d\n%s%s", code, out, errOut)
+	}
+	if _, err := os.Stat(none); err == nil {
+		t.Errorf("gap created the config dir")
+	}
+	// Exit codes.
+	if _, _, code := vault(t, cfg, "gap"); code != 2 {
+		t.Errorf("no dir: exit %d, want 2", code)
+	}
+	if _, _, code := vault(t, cfg, "gap", ssd, "--bogus"); code != 1 {
+		t.Errorf("unknown flag: exit %d, want 1", code)
+	}
+	if _, _, code := vault(t, cfg, "gap", filepath.Join(ssd, "nope")); code != 1 {
+		t.Errorf("missing dir: exit %d, want 1", code)
+	}
+}

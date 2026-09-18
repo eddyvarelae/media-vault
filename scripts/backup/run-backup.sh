@@ -1,0 +1,182 @@
+#!/bin/bash
+# Attached-SSD gap report, report-only (B22; DECISIONS 2026-09-15). launchd
+# runs this every five minutes. When a known source SSD is mounted under
+# /Volumes and has not been reported since it was attached (or today), run
+# `vault gap` on it against a fresh snapshot of the NAS manifest and write
+# the report: which files on the SSD are NOT in the archive, by content.
+# It copies nothing, stages nothing, and never writes to the SSD or the NAS.
+#
+#   run-backup.sh              the tick (launchd, every 5 min); silent when nothing is due
+#   run-backup.sh --dry-run    say what would be reported now; no snapshot, no state, no report
+#   run-backup.sh --force      report every known mounted SSD even if already reported
+#
+# Exit codes: 0 nothing due, or every due report written · 1 a report failed
+# (or the lock is held) · 2 a precondition failed with a disk due.
+set -euo pipefail
+
+# Machine settings from mini-server's config/mini.env (MINI_ENV); job policy
+# defaults here (the decided known-disk list). mini.env may override policy;
+# every override is logged. The environment overrides both.
+# Volume names can contain spaces ("Eddy's Media Vault"), so the lists are
+# |-separated and matched whole, never by word.
+POLICY_DEFAULT_BACKUP_DISKS="tars|kipp|case|Eddy's Media Vault"
+POLICY_DEFAULT_BACKUP_EXCLUDE="Scratch1"
+policy_keys="BACKUP_DISKS BACKUP_EXCLUDE"
+machine_keys="SCRATCH_DIR MANIFEST_DB BACKUP_STATE_DIR BACKUP_LOG_FILE VOLUMES_DIR VAULT_BIN REPO_DIR"
+overridable="$policy_keys $machine_keys"
+for v in $overridable; do eval "_pre_$v=\${$v-}"; done
+MINI_ENV="${MINI_ENV:-$HOME/Projects/mini-server/config/mini.env}"
+if [[ -f "$MINI_ENV" ]]; then
+  source "$MINI_ENV"
+fi
+policy_overrides=()
+for v in $policy_keys; do
+  eval "_env_$v=\${$v-}"
+  eval "_def_$v=\$POLICY_DEFAULT_$v"
+  eval "_e=\$_env_$v; _d=\$_def_$v"
+  if [[ -n "$_e" && "$_e" != "$_d" ]]; then
+    policy_overrides+=("$v=[$_e] (default [$_d], from $MINI_ENV)")
+  fi
+  eval "[[ -n \$_env_$v ]] || $v=\$_def_$v"
+done
+for v in $overridable; do eval "[[ -n \${_pre_$v} ]] && $v=\${_pre_$v}" || true; done
+export PATH="/opt/homebrew/bin:$PATH"
+
+SCRATCH_DIR="${SCRATCH_DIR:-}"
+MANIFEST_DB="${MANIFEST_DB:-$HOME/mounts/docker/vault-nas-config/manifest.db}"
+STATE_DIR="${BACKUP_STATE_DIR:-$HOME/Library/Application Support/mini-server}"
+LOG_FILE="${BACKUP_LOG_FILE:-$HOME/Library/Logs/mini-server/media-backup.log}"
+VOLUMES_DIR="${VOLUMES_DIR:-/Volumes}"
+here="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="${REPO_DIR:-$(cd "$here/../.." && pwd)}"
+# A VAULT_BIN given from outside is used as it is; only the job's own copy
+# under the state dir is (re)built from this checkout when missing or stale.
+managed_bin=0
+if [[ -z "${VAULT_BIN:-}" ]]; then VAULT_BIN="$STATE_DIR/bin/vault"; managed_bin=1; fi
+HELPER="$here/../tagging/tagging-helper.py"
+STATE_FILE="$STATE_DIR/backup-state.tsv"     # name <TAB> attach-identity <TAB> date, one line per reported disk
+LOCK_DIR="$STATE_DIR/backup.lock"
+SNAP_DIR="$STATE_DIR/gap-manifest"            # the snapshot lives here as manifest.db, so VAULT_CONFIG can point at it
+
+dry_run=0 force=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run) dry_run=1 ;;
+    --force) force=1 ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+ts() { date +%Y-%m-%dT%H:%M:%S%z; }
+log() { if (( dry_run )); then echo "$*"; else echo "[$(ts)] $*" >> "$LOG_FILE"; fi; }
+die() { log "REFUSING TO RUN: $*"; echo "[$(ts)] REFUSING TO RUN: $*" >&2; exit 2; }
+today() { date +%Y-%m-%d; }
+
+# A volume's attach identity: device + inode + birth time of its mount
+# point. A re-attach mounts a new device, so the identity changes; a report
+# is owed once per identity and once per day while it stays attached.
+attach_id() { stat -f '%d:%i:%B' "$1"; }
+boot_dev=$(df -P / | awk 'NR==2 {print $1}')
+scratch_dev=""; [[ -n "$SCRATCH_DIR" && -d "$SCRATCH_DIR" ]] && scratch_dev=$(df -P "$SCRATCH_DIR" | awk 'NR==2 {print $1}')
+in_list() {  # in_list <name> <|-separated list>: whole-name match
+  local IFS='|' d
+  for d in $2; do [[ "$d" == "$1" ]] && return 0; done
+  return 1
+}
+known() { in_list "$1" "$BACKUP_DISKS"; }
+excluded() { in_list "$1" "$BACKUP_EXCLUDE"; }
+reported() {  # reported <name> <attach-id>: already reported for this attach today?
+  [[ -f "$STATE_FILE" ]] && grep -qF "$1	$2	$(today)" "$STATE_FILE"
+}
+
+# ── 1. what is mounted, and what is due ──────────────────────────────────
+due=() unknown=()
+for mp in "$VOLUMES_DIR"/*; do
+  [[ -d "$mp" && ! -L "$mp" ]] || continue
+  name=$(basename "$mp")
+  dev=$(df -P "$mp" | awk 'NR==2 {print $1}')
+  [[ "$dev" != "$boot_dev" ]] || continue
+  [[ -z "$scratch_dev" || "$dev" != "$scratch_dev" ]] || continue
+  excluded "$name" && continue
+  if ! known "$name"; then unknown+=("$name"); continue; fi
+  id=$(attach_id "$mp")
+  if (( force )) || ! reported "$name" "$id"; then due+=("$name"); fi
+done
+
+if (( dry_run )); then
+  echo "DRY RUN — attached-SSD gap report"
+  echo "  known disks: $BACKUP_DISKS   excluded: $BACKUP_EXCLUDE"
+  for o in "${policy_overrides[@]+"${policy_overrides[@]}"}"; do echo "  POLICY OVERRIDE: $o"; done
+  echo "  manifest:    $MANIFEST_DB"
+  echo "  unknown mounted volumes (ignored): ${unknown[*]-(none)}"
+  echo "  due now: ${due[*]-(none)}"
+  exit 0
+fi
+(( ${#due[@]} > 0 )) || exit 0     # the normal tick: nothing attached that is owed a report; say nothing
+
+# ── 2. preconditions (only checked when something is due, once an hour) ──
+mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"
+precond_fail() {
+  local stamp="$STATE_DIR/backup.precondition-failed"
+  if [[ ! -f "$stamp" ]] || (( $(date +%s) - $(stat -f %m "$stamp") >= 3600 )); then touch "$stamp"; die "$*"; fi
+  exit 2
+}
+[[ -f "$MANIFEST_DB" ]] || precond_fail "manifest not found at $MANIFEST_DB (is the NAS docker share mounted?) — ${due[*]} due"
+rm -f "$STATE_DIR/backup.precondition-failed"
+
+# ── 3. the vault binary: built from this checkout into the state dir when missing or stale ──
+ensure_vault() {
+  if (( ! managed_bin )); then [[ -x "$VAULT_BIN" ]] || { log "VAULT_BIN=$VAULT_BIN is not executable"; return 1; }; return 0; fi
+  local head; head=$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo unknown)
+  local stamp="$VAULT_BIN.commit"
+  if [[ -x "$VAULT_BIN" && -f "$stamp" && "$(cat "$stamp")" == "$head" ]]; then return 0; fi
+  if [[ -x "$VAULT_BIN" && "$head" == unknown ]]; then return 0; fi   # not a checkout: use what is there
+  command -v go >/dev/null || { log "vault binary missing or stale at $VAULT_BIN and go is not installed"; return 1; }
+  mkdir -p "$(dirname "$VAULT_BIN")"
+  if ! (cd "$REPO_DIR" && go build -o "$VAULT_BIN.tmp" ./cmd/vault) >> "$LOG_FILE" 2>&1; then
+    log "go build failed (see above); keeping the previous binary if any"; rm -f "$VAULT_BIN.tmp"; [[ -x "$VAULT_BIN" ]]; return
+  fi
+  mv "$VAULT_BIN.tmp" "$VAULT_BIN"; echo "$head" > "$stamp"
+  log "built vault at $VAULT_BIN from $REPO_DIR @ $head"
+}
+
+# ── 4. lock, snapshot, one report per due disk ───────────────────────────
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  info=$(cat "$LOCK_DIR/info" 2>/dev/null || echo "no info"); lock_pid=${info%% *}
+  if [[ "$lock_pid" =~ ^[0-9]+$ ]] && kill -0 "$lock_pid" 2>/dev/null; then exit 1; fi   # a report is running; the next tick will look again
+  log "lock from a run that is no longer alive ($info) — taking it over"
+fi
+echo "$$ started $(ts)" > "$LOCK_DIR/info"
+rc=0
+finish() { rm -rf "$LOCK_DIR"; exit "$rc"; }
+trap 'log "interrupted — the report in flight is not recorded"; rc=143; finish' TERM INT
+
+for o in "${policy_overrides[@]+"${policy_overrides[@]}"}"; do log "POLICY OVERRIDE: $o"; done
+for u in "${unknown[@]+"${unknown[@]}"}"; do
+  [[ -f "$STATE_DIR/backup.unknown-$u" ]] || { touch "$STATE_DIR/backup.unknown-$u"; log "mounted volume '$u' is not in BACKUP_DISKS — ignored (add it to report it)"; }
+done
+ensure_vault || { rc=1; finish; }
+
+mkdir -p "$SNAP_DIR"
+if ! snap=$(python3 "$HELPER" snapshot --state "$STATE_DIR/tagging-state.db" --manifest "$MANIFEST_DB" --snapshot "$SNAP_DIR/manifest.db" 2>&1); then
+  log "manifest snapshot failed: $snap"; rc=2; finish
+fi
+read -r _ rows newest mtime <<< "$(head -1 <<< "$snap")"
+log "manifest snapshot: $rows rows, newest copied_at $newest, NAS file modified $mtime (from $MANIFEST_DB)"
+
+for name in "${due[@]}"; do
+  mp="$VOLUMES_DIR/$name"; id=$(attach_id "$mp"); d=$(today)
+  slug=$(printf '%s' "$name" | tr -c 'A-Za-z0-9._-' '_')
+  report="$STATE_DIR/gap-$slug-$d.txt"; tsv="$STATE_DIR/gap-$slug-$d.tsv"
+  log "GAP $name: report starting ($mp, attach $id)"
+  if VAULT_CONFIG="$SNAP_DIR" "$VAULT_BIN" gap "$mp" --tsv "$tsv" > "$report" 2>&1; then
+    log "$(grep '^GAP ' "$report" | sed "s|^GAP $mp|GAP $name|")"
+    log "GAP $name: report at $report, absent files at $tsv"
+    printf '%s\t%s\t%s\n' "$name" "$id" "$d" >> "$STATE_FILE"
+  else
+    log "GAP $name FAILED: $(tail -1 "$report")"; rc=1
+  fi
+done
+finish
