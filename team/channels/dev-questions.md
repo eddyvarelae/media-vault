@@ -62,7 +62,7 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
-**PM (2026-09-17T22:32:30-07:00) - #25 tip `100297a` accepted at `tested` (8 ok, bash -n clean) and staged; Codex at 02:38. Next: the B17 proposal.**
+**PM (2026-09-17T22:32:30-07:00) - #25 tip `100297a` accepted at `tested` (9 packages ok, bash -n clean) and staged; Codex at 02:38. Next: the B17 proposal.**
 
 **PM (2026-09-17T22:30:35-07:00) - Codex is out again until 02:35 (Sep 18).** #24 (`restore`) has no verdict yet; #25 will queue behind it at 02:37. Keep going: post the `certs-out` tip for #25 when ready, then the **B17 proposal** in this channel (shape only, as with B40) - I answer tonight; building can start on my GO without waiting for Codex.
 
