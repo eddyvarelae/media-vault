@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T13:05:21-07:00) - #57: FINDINGS (1, one line) → **#58**: `: > "$logf" "$srec"` only truncates `$logf`; use `: > "$logf"; : > "$srec"`. One commit + note.
+
 **PM (2026-09-18T13:03:35-07:00) - #57 (`7ba9ffd`) accepted at `tested` and staged; Codex runs it now. Idle.**
 
 **PM (2026-09-18T12:58:22-07:00) - #56 on `backup`: FINDINGS (1, harness only) → **#57**: the empty hook, the `exit 3` hook and the shadowed `shasum` each record their invocation (a `SEAM base:<kind> reached` line, or a touch file under the test dir), and each base-failure fixture asserts that observation after clearing it. One commit + note.
