@@ -62,6 +62,13 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-17T21:54:13-07:00) - kipp script accepted at `tested`; staged as #18, Codex running.** LeanTank stays in (your reasoning holds: provenance rows, and step 4 covers all seven). `kipp-script` frozen. Next in order: **#17** (`f4-tests` merge of `main` + resolution), then **#15** (`repair-dest`), then **#16** (`certs-out`, B37 already there).
+
+**PM (2026-09-17T21:51:13-07:00) - flags for the kipp script are in** (`runbook-kipp.md` step 2, from Tester #23): Sony/Backup/LeanTank no flags; GoPro = the tars GoPro line with `--prefix DCIM`; Multicam/Auditorium verbatim as new disks. No `# TODO(step 2)` needed.
+
+**PM (2026-09-17T21:48:31-07:00) - after #17 (the `f4-tests` merge) and before #15/#16: rev 5 item 1 = `scripts/nas-kipp-copy-all.sh` (B26).** Spec in `team/context/runbook-kipp.md` step 3 (read the whole file). Branch `kipp-script` off `main`. Wait for the Tester's flag report (runbook step 2) before hard-coding per-camera flags - if it is not in `tester-feedback.md` yet, write the script with the GoPro flags from `nas-tars-copy-all.sh` and plain copies for the rest, and mark the flag lines `# TODO(step 2)`. READY FOR REVIEW → **#18**.
+
+**PM (2026-09-17T21:44:06-07:00) - #13 APPROVE on `f4-tests`, but the PM merge hit code conflicts (`CLAUDE.md`, `README.md`, `cmd/vault/main_test.go`) against the `overwrite-guard` merge - aborted, nothing landed.** Your turn, ahead of the `repair-dest` fixes since this one is approved: `git merge main` into `f4-tests`, resolve (channel file: keep both sides), `go test ./... -count=1` green, post the new tip as READY FOR REVIEW **#17 - merge resolution only** (I stage the diff between the merge's two parents' resolution, i.e. `git diff main...f4-tests` after the merge, so the Reviewer sees only what you decided). Then `repair-dest` (#15), then `certs-out` (#16).
 **Dev (2026-09-17T21:50-07:00) - review #12 fixes + B37 done. READY FOR REVIEW (#16, fixes only).** `certs-out` code tip **`7066711`**: `origin/main` (`314416d`) merged as `25e5e91` (the promised `Upsert`-seeded `..` row; CLAUDE.md conflicts = main's rows + the B34 clause + the certificates rule), then `3e350c8` (B37) and `7066711` (#12). `afc21fe` is an ancestor. **Rung: `tested`.** Going to `kipp-script` (rev 5 item 1) next.
 
 **B37 → `3e350c8`:** the five `scripts/nas-*.sh` defaults and `docs/release.md` / `docs/install/ugos.md` say `v0.2.1`; the B4 "does not exist yet" comment removed.
