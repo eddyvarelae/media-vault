@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/eddyvarelae/media-vault/internal/manifest"
@@ -27,6 +28,14 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 	}
 	dstPath := filepath.Join(dstRoot, dstRel)
 
+	// The writer's own containment: a relative path that climbs out of the
+	// root, or an absolute one, names a file the root does not contain, and
+	// every check below would be protecting the wrong tree. Refused here as
+	// well as in the plan, because a manifest row can carry such a spelling
+	// (review #24) and every writer feeds through this function.
+	if why := Escapes(dstRoot, dstRel); why != "" {
+		return manifest.Entry{}, fmt.Errorf("refusing to write: %s", why)
+	}
 	// No directory on the way may be a symlink: through one, this path and
 	// another spelling are the same file, and every check below would be
 	// looking at the wrong name. The plan refused these already; the writer
@@ -39,6 +48,11 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
 		return manifest.Entry{}, fmt.Errorf("mkdir: %w", err)
+	}
+	// And physically, now that the directory exists: the resolved parent
+	// must lie under the resolved root.
+	if !Under(dstRoot, dstPath) {
+		return manifest.Entry{}, fmt.Errorf("refusing to write: %s resolves outside %s", dstPath, dstRoot)
 	}
 
 	// Nothing that exists is ever truncated or renamed over except a
@@ -149,4 +163,52 @@ func describe(fi os.FileInfo) string {
 	default:
 		return fi.Mode().String()
 	}
+}
+
+// Escapes reports why rel, joined to root, would name a file the root does
+// not contain: an absolute path, or one that climbs out with "..". "" when
+// it stays inside. Lexical only; Under is the physical half.
+func Escapes(root, rel string) string {
+	if filepath.IsAbs(rel) {
+		return fmt.Sprintf("destination %q is absolute; it must be relative to %s", rel, root)
+	}
+	clean := filepath.Clean(rel)
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return fmt.Sprintf("destination %q climbs out of %s", rel, root)
+	}
+	return ""
+}
+
+// Under reports whether path's directory, resolved (symlinks followed on
+// the part that exists), lies under the resolved root. Both are made
+// absolute first so "." and "/" roots work.
+func Under(root, path string) bool {
+	r, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	if rr, err := filepath.EvalSymlinks(r); err == nil {
+		r = rr
+	}
+	p, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	dir, rest := filepath.Dir(p), filepath.Base(p)
+	for {
+		if rd, err := filepath.EvalSymlinks(dir); err == nil {
+			p = filepath.Join(rd, rest)
+			break
+		}
+		if filepath.Dir(dir) == dir {
+			break
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
+		dir = filepath.Dir(dir)
+	}
+	rel, err := filepath.Rel(r, p)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

@@ -265,20 +265,26 @@ func under(root, full string) bool {
 	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// claimIndex maps the physical location of every row's dest_path (any disk,
-// any status) to that row, so a candidate some row already claims is never
-// handed to a second one. Physical as in scan: root-joined, cleaned,
-// case-folded.
+// claimIndex maps the physical location of every row's file (dest_path,
+// or source_path when that is empty; any disk, any status) to that row, so
+// a candidate some row already claims is never handed to a second one.
+// Physical as in scan: root-joined, cleaned, case-folded.
 type claimIndex map[string]manifest.Entry
 
 func buildClaims(m *manifest.Manifest, root string) (claimIndex, error) {
-	rows, err := m.AllDestPaths()
+	rows, err := m.AllRows()
 	if err != nil {
 		return nil, err
 	}
 	idx := make(claimIndex, len(rows))
 	for _, e := range rows {
-		k := physKey(root, e.DestPath)
+		// An empty dest_path locates its file by source_path (verify's
+		// rule; restore applies the same), so that file is claimed too.
+		rel := e.DestPath
+		if rel == "" {
+			rel = e.SourcePath
+		}
+		k := physKey(root, rel)
 		if _, dup := idx[k]; !dup {
 			idx[k] = e
 		}
