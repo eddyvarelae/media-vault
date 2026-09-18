@@ -8,8 +8,34 @@ import (
 	"testing"
 
 	"github.com/eddyvarelae/media-vault/internal/manifest"
+	"github.com/eddyvarelae/media-vault/internal/scan"
 	"github.com/eddyvarelae/media-vault/internal/testguard"
 )
+
+// TestParentSwapRefused is the B43 escape regression at certify's write: a seam
+// swaps a parent directory for a symlink pointing out of the trusted certs root
+// in the window after the component walk. os.Root, anchored to the certs root
+// fd, refuses the escaping component, so no certificate is written through it.
+func TestParentSwapRefused(t *testing.T) {
+	certs, outside := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(certs, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	scan.SetTestAfterWalk(func() { // sub was a real dir at the walk; now escape through it
+		os.RemoveAll(filepath.Join(certs, "sub"))
+		if err := os.Symlink(outside, filepath.Join(certs, "sub")); err != nil {
+			t.Fatal(err)
+		}
+	})
+	defer scan.SetTestAfterWalk(nil)
+
+	if err := WriteOutput(certs, "sub/cert.json", []byte(`{"cert":1}`)); err == nil {
+		t.Fatal("wrote a certificate through a parent swapped to an escaping symlink; os.Root must refuse it")
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Errorf("something landed through the escaping parent: %v", entries)
+	}
+}
 
 func TestMain(m *testing.M) {
 	testguard.Require() // never write fixtures under /volume1 or /mnt
@@ -267,7 +293,7 @@ func TestWriteOutputNeverFollowsASubstitutedLeaf(t *testing.T) {
 		if err := os.Symlink(photo, out); err != nil {
 			t.Fatal(err)
 		}
-		if err := WriteOutput(out, []byte(`{"cert":1}`)); err != nil {
+		if err := WriteOutput(filepath.Dir(out), filepath.Base(out), []byte(`{"cert":1}`)); err != nil {
 			t.Fatalf("write: %v", err)
 		}
 		if got, _ := os.ReadFile(photo); string(got) != "a verified photo" {
@@ -291,7 +317,7 @@ func TestWriteOutputNeverFollowsASubstitutedLeaf(t *testing.T) {
 		if err := os.Symlink(inside, out); err != nil {
 			t.Fatal(err)
 		}
-		if err := WriteOutput(out, []byte(`{"cert":2}`)); err != nil {
+		if err := WriteOutput(filepath.Dir(out), filepath.Base(out), []byte(`{"cert":2}`)); err != nil {
 			t.Fatalf("write: %v", err)
 		}
 		if _, err := os.Lstat(inside); err == nil {
@@ -307,7 +333,7 @@ func TestWriteOutputNeverFollowsASubstitutedLeaf(t *testing.T) {
 		if err := os.WriteFile(out+".vault-partial", []byte("stale"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := WriteOutput(out, []byte("x")); err == nil || !strings.Contains(err.Error(), "leftover") {
+		if err := WriteOutput(filepath.Dir(out), filepath.Base(out), []byte("x")); err == nil || !strings.Contains(err.Error(), "leftover") {
 			t.Errorf("stale temp: %v, want refusal that names the leftover", err)
 		}
 		if got, _ := os.ReadFile(out + ".vault-partial"); string(got) != "stale" {
@@ -321,7 +347,7 @@ func TestWriteOutputNeverFollowsASubstitutedLeaf(t *testing.T) {
 		if err := os.Symlink(photo, out+".vault-partial"); err != nil {
 			t.Fatal(err)
 		}
-		if err := WriteOutput(out, []byte("x")); err == nil {
+		if err := WriteOutput(filepath.Dir(out), filepath.Base(out), []byte("x")); err == nil {
 			t.Errorf("link at the temp name: want refusal")
 		}
 		if got, _ := os.ReadFile(photo); string(got) != "a verified photo" {
