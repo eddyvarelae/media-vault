@@ -6,11 +6,23 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #23 - acceptance: B24 live run may proceed (Tester #26 dry-run evidence vs the original finding #7)
+### #23 - acceptance: B24 live run may proceed (Tester #26 dry-run evidence vs the original finding #7) - **resolved: APPROVE → live run gated only on Eddy naming the executor**
 
 **PM (2026-09-17T22:13:58-07:00):** Not code. Before the PM runs `vault repair-dest` against the **live** NAS manifest (runbook `team/context/runbook-b24.md`), confirm the evidence proves each of the 195 rewrites points at the file whose bytes the row attests. Inputs on `/Volumes/Scratch1/tester/b24-dryrun/` (read-only): `manifest.db` (snapshot, sha `9db9b01a…`), `plan.txt` (the dry-run output, 195 `REPAIR` lines), `compare.txt` + the comparison script (independent re-hash of each row's file at `CLIP|DCIM|THMBNL/<basename>` over SMB), and Tester #7's `check195b.py` result from earlier today. Claims: (1) the 195 `copied` rows in the snapshot are exactly the rows in `plan.txt`; (2) for every plan line, the `→` path's file size and sha256 equal the row's; (3) no plan line targets a path that is any other row's `dest_path` in the snapshot; (4) the plan's counts add up (38,809 = 38,614 + 195; 39,414 = 39,219 + 195). **This is wrong if:** any row in the plan is not `copied`; any `→` path's recorded hash in `compare.txt` differs from the row; you can find a second candidate for any basename the plan did not report as `AMBIGUOUS`; or the snapshot's sha differs from the NAS file's current sha (`shasum -a 256 ~/mounts/docker/vault-nas-config/manifest.db`, read-only over SMB - note it opens nothing).
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-17):** APPROVE — request #23, acceptance of the 195-row B24 repair plan. Independently queried the snapshot using SQLite `?mode=ro&immutable=1`, parsed `plan.txt`, and re-hashed the NAS candidates read-only; no vault command or live database connection was run.
+
+- The plan contains exactly 195 unique source rows, equal to the snapshot's entire `media-sonya6700` `copied` set. Every old path equals its row's `dest_path`; all 195 old paths are absent on disk. Targets split as 10 `CLIP/` + 185 `DCIM/` = 195.
+- Enumerated every immediate real subdirectory of `~/mounts/media/SonyA6700` (`CLIP`, `DCIM`, `THMBNL`) and checked each row's basename in all three. Exactly 195 candidate files exist, one per row; each is regular, has the row's size, and its full SHA-256 equals the row's. Every matching path equals the plan's arrow target: 195 matches, 0 disagreements, 0 second candidates. Sum of row sizes = bytes independently hashed = **1,154,361,035** (about 1.075 GiB, consistent with the plan's rounded 1.1 GiB).
+- Across all snapshot disks and statuses, no other row claims any planned target, including after path normalization and case folding. The 195 planned targets are also mutually unique.
+- Recomputed counts: **38,809 = 38,614 + 195** rows with destinations; **39,414 = 39,219 verified + 195 copied = 38,809 + 605** total Sony rows. The 605 empty-destination rows are verified, as Tester #26 already notes; the plan's `inventoried` label is inaccurate but does not change the repair set. Parsed outcomes are 195 REPAIR and zero other outcomes.
+- Snapshot and current NAS manifest have identical full SHA-256, checked both before and after the independent media hashing: `9db9b01ae77cec245e6b3c79b1a83a7f01d795d9d357542d87b2db6f0864eb1a`. No live `manifest.db-wal` or `manifest.db-shm` was present in the directory listing.
+
+Evidence qualification: `compare.txt` records aggregate results, not per-file hashes, and the stated comparison script is not in `b24-dryrun/`. Those artifacts alone would not prove claim 2; the independent full-file hashing above supplies that evidence and reproduces its totals and Tester #7's result. Read `check195b.py` and the earlier report; did not execute that script. Approval covers this snapshot's repair plan, not a completed live repair or verification of all previously verified footage. The runbook's executor designation, single-writer lock, backup, live dry-run stop gate, and post-run verification/witness remain required. Only this review-channel file was modified.
+
+**PM (2026-09-17T22:16:43-07:00):** APPROVE accepted; the Reviewer re-hashed all 195 files itself and confirmed snapshot = NAS manifest. Runbook `team/context/runbook-b24.md` may run once Eddy names the executor and `v0.2.2` is published (CI in progress). Tester: keep the comparison script in `b24-dryrun/` next time - the Reviewer noted it was missing.
 
 ### #17 - `f4-tests` merge resolution only (branch `f4-tests`, tip `f54eb59`; approved content = `dc36e5f`, #13) - **resolved: resolution verified (finding = PM's stale diff base) → merge**
 
