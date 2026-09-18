@@ -30,7 +30,7 @@ On the NAS (UGREEN DXP, UGOS):
 
 In the repo: `vault-config/` (gitignored local config), `.github/workflows/docker.yml` publishes to production on push to `main` - a merge is a deploy until B4 (tag pinning) lands.
 
-Where the system has live side effects: exactly one running instance, ever - the manifest is single-writer. Test artifacts are tagged and cleaned up same-day.
+Where the system has live side effects: exactly one running instance, ever - the manifest is single-writer. Test artifacts are tagged and cleaned up same-day. **Seats share files only through git - never `cp` into another seat's worktree** (PM did, 2026-09-17; Tester #13).
 
 ## Isolation, deploys, and claims (learned the hard way - not optional)
 
@@ -80,5 +80,6 @@ Branch policy: Dev works in its own worktree (`~/Projects/media-vault-dev`) on a
 - Tester (`~/Projects/media-vault-tester`, detached): B2/B7 in progress from a manifest snapshot; last item says where it stopped.
 - NAS: DXP2800 `192.168.1.167`, SMB `figmaboi`; `~/mounts/media` and `~/mounts/docker` mount via `com.varela.mount-nas`. SSH enabled 2026-09-17, details unconfirmed.
 - Scope since 2026-09-17: every scheduled batch against the archive is ours (nightly tagger = B17, after rev 3).
-- Source SSDs: `tars`, `kipp`, `case` (certified, unwiped), plus `noahsarc`? - Tester confirms (B7). A 5th is now "Scratch1".
+- **P0 (Tester, 2026-09-17): 2,668 SonyA6700 photos overwritten on Sep 1, not found on any attached SSD - B23. Nothing gets wiped.** 195 rows need a dest_path fix before verify can pass - B24. Archive is 8.20 TiB (not 3.3).
+- Source SSDs mapped (B7 done): `tars`, `noahsarc`, `case`, `Eddy's Media Vault`; `kipp` never copied (B26). A 5th is now "Scratch1".
 - Reviewer = `codex exec`, run by the PM. Seats boot in visible Terminal windows with `--remote-control`; nudges need a trailing empty `do script`.

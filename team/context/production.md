@@ -4,7 +4,7 @@
 
 **Paths on the NAS (all sacred, see TEAM.md):**
 - `/volume1/docker/vault-nas-config/` - manifest DB + signing key. Single writer.
-- `/volume1/media/<Camera>/` - the archive. Disk names in the manifest: `media-djiflip`, `media-djimini2`, `media-iphone`, `media-sonya6700`, `media-sonyzve10`, `media-gopro` (the `nas-*` disks are inventory-only rows from the pre-migration NAS folders).
+- `/volume1/media/<Camera>/` - the archive, **8.20 TiB, 67,735 rows** (Tester, 2026-09-17 snapshot). `source_disk` is **per camera, not per physical SSD**: `media-djiflip`, `media-djimini2`, `media-iphone`, `media-sonya6700`, `media-sonyzve10`, `media-gopro`, plus `media-backup`, `media-leantank`, and `files-kolab-videos` (inventory-only). There are no `nas-*` rows. Physical SSDs → cameras is known only from the logs: `tars` (Apr 27), `noahsarc` (Apr 28), `case` (Sep 1, from the Mini), `Eddy's Media Vault` (Sep 2, from the Mini); `kipp` never copied. Certificates: `/volume1/docker/vault-certs/` (correct place) and, wrongly, inside each camera tree.
 - `/mnt/@usb/sdc1/` - the currently plugged source SSD (`tars` holds the four camera folders).
 - `/volume1/docker/{tars-copy,verify-certify,prune}.log` - run logs.
 
@@ -21,4 +21,4 @@
 - LaunchAgent templates in mini-server `launchd/`; installed = `com.varela.mount-nas`, `com.varela.tea-daemon`. Reboot chain verified 2026-09-16; tmux and seat windows die on reboot.
 - Source SSDs attach to the **Mini** (e.g. `tars`), not only the NAS - see B7.
 
-**Speed facts:** verify over Wi-Fi from a laptop ≈ 700 KB/s; on the NAS ≈ 400+ MB/s. A full verify of the 3.3 TiB archive ≈ 11 h. That is why `--only-unverified` exists and why nothing verifies from a laptop.
+**Speed facts:** verify over Wi-Fi from a laptop ≈ 700 KB/s; on the NAS ≈ 400+ MB/s. The Sep 13 full pass over all six camera disks took 02:42-12:50 (≈10 h) and ended with 1 failure (sonya6700, B24). That is why `--only-unverified` exists and why nothing verifies from a laptop.

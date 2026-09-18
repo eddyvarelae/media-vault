@@ -18,7 +18,7 @@
 | Item | State at handoff | Next step | Owner |
 |---|---|---|---|
 | B1 F4 `--only-unverified` | **Done.** Merged `7cca025`, pushed. CI built `:latest` with it. | none | - |
-| Review #2 (Dev's `tests-and-pinning` @ `14f4e2c`) | **FINDINGS**, five, all accepted. Dev on **rev 3** (fix all five + former rev-2 CI/docs items) - see its last channel note for progress. | when Dev writes READY FOR REVIEW: PM stages **#3 = "check the fixes only"** in `review-requests.md`, runs Codex (command in that file's header), merges on APPROVE | Dev → PM |
+| Review #3 (Dev rev 3 @ `c1f7fbd`, 7 commits fixing all five #2 findings + CI/docs) | **Staged 18:28; Codex was running at the restart.** PM verified `go vet`, `go test` (6 packages ok incl. new `testguard`, `scripts/test`), `gofmt -l` empty, CI on tags only. | Open `review-requests.md` #3: if a `**Reviewer (2026-09-17):**` verdict is there, act on it; if not, re-run Codex (header command, request #3). On APPROVE: `git merge --no-ff tests-and-pinning`, push, tag `v0.2.0`. | PM |
 | `v0.2.0` tag | not cut | after #3 merges: `git tag -a v0.2.0 -m "..." && git push origin v0.2.0` - the scripts on `main` already default to `v0.2.0`; CI publishes the semver tag | PM |
 | B2 NAS access | `docker` share mounted 18:20; SSH **enabled by Eddy** (user/sudo/docker facts not yet confirmed) | Tester reports the SSH probe result and the manifest snapshot queries (its items 1-2, staged in its channel) | Tester |
 | B7 source SSDs | candidates `tars`, `kipp`, `case`, `noahsarc`(?) - unconfirmed | Tester's item 1 answers it from the manifest | Tester |
@@ -27,6 +27,15 @@
 | B9 F4 tests | startable now (F4 on `main`) | fold into rev 4 with B17, or its own small branch | PM → Dev |
 | Permission rule | `.claude/settings.local.json` saved by Eddy with `git merge/push/tag/commit/add`, `go build/vet/test`, `python3 -` allows | should be live in the new session - if a merge is refused, tell Eddy | PM |
 | Retire mini-server's WO-1 part A | Eddy said he would tell that window | nothing unless it reappears | - |
+
+## What the Tester found at 18:24 (read its items 5-13 in full before anything else)
+
+- **#5 P0 data loss (B23):** 2,668 SonyA6700 photos (51.1 GB) overwritten 2026-09-01 by the `case` copy - same `(source_disk, source_path)`, different content, `copy` recopied in place. Not on `tars`, `kipp`, `Eddy's Media Vault`. List at `/Volumes/Scratch1/tester/sonya6700-overwritten-2026-09-01.tsv`. **Nothing gets wiped.** Candidates: `noahsarc`, the disk that fed the April 26 copy, camera cards.
+- **#7 (B24):** the 195 `copied` rows have `dest_path` missing `CLIP/`/`DCIM/`; bytes verified 195/195. B6 cannot pass until repaired (Dev rev 4 item 2).
+- **#9 (B25):** stale April cert inside `SonyA6700/` attests 51 GB that is gone. Certs must live outside the trees.
+- **#10 (B2):** SSH port open, key refused → Eddy runs `ssh-copy-id`.
+- Archive is **8.20 TiB / 67,735 rows**, not 3.3; `source_disk` is per camera; `kipp` never copied (B26); 3,193 duplicate sha groups (B8).
+- Tester's scratch artifacts under `/Volumes/Scratch1/tester/` stay until B23 closes.
 
 ## Facts the next PM should not re-derive
 
@@ -42,6 +51,9 @@
 
 ## Open questions for Eddy (carry into the first DECISIONS NEEDED)
 
-1. Who runs commands on the NAS now that SSH is on - the Tester as `figmaboi` (needs sudo for docker?), or Eddy by hand? Decides how B6 is executed.
-2. `noahsarc` - is that the fourth SSD?
-3. The Sep 13 verify pass: did Eddy run it? (Explains whether the 195 `copied` rows are still unverified.)
+1. **B23 policy** (PM recommends: a changed-content recopy over a `verified` row is a collision - never overwrite; rename-mtime-year or skip+exit 1).
+2. **Where might the 2,668 photos still exist?** Which disk fed the 2026-04-26 SonyA6700 copy; where is `noahsarc`; are the camera cards from before April 26 still unformatted? Attach them one at a time; the Tester hash-compares.
+3. `ssh-copy-id -i ~/.ssh/id_ed25519.pub figmaboi@192.168.1.167` on the Mini (Eddy types the password) - unblocks `docker ps`/sudo facts and lets a seat run NAS commands.
+4. Who runs NAS commands once SSH works - the Tester as `figmaboi`, or Eddy?
+5. Tagger `reports/` dirs (GoPro + iPhone) have no manifest rows: inventory them or exclude `reports/` from `scan`?
+6. Did Eddy run the Sep 13 verify pass? (Not in any record.)
