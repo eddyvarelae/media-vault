@@ -6,6 +6,18 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #46 - `small-fixes`: #44 fix + re-merge (branch tip `63efac1`; approved content `9f8281e` #40 + resolution #44)
+
+**PM (2026-09-18T08:41:28-07:00):** Base pinned: `main` `b1277bd` (restore merged). Review (a) the #44 fix: `dryRunRequested` now skips `certify --root`'s value, with a regression for `certify cam --root --dry-run`; (b) the resolution `git diff main..63efac1 -- . ':!team'` must equal the approved `small-fixes` content re-expressed on current `main` (with restore's containment and `AllRows` present), plus nothing. PM at `63efac1`: vet/gofmt/bash -n clean, 10 packages ok. **This is wrong if:** any value-taking flag of any command is still outside the detector (re-list); any `main` hunk (restore included) or approved `small-fixes` hunk is lost or altered; or CLAUDE.md contradicts the merged code.
+
+Verdict goes below this line.
+
+### #47 - `backup`: #43 fixes + re-merge (branch code tip `86b35ab`; approved content `d8f7cf3` #41 + `779613f` #43a; carries `small-fixes` `63efac1`)
+
+**PM (2026-09-18T08:41:28-07:00):** Base pinned: `main` `b1277bd`; `backup` contains `small-fixes` `63efac1` (#46), so review (a) the #43 fixes: every report/marker file carries the full disk name on line 1 and an existing output with a different name is refused (`SLUG COLLISION`, logged, exit 1 for that disk), tested with two names forced to one slug; names > 255 bytes refused at discovery with a diagnostic, tested; (b) the resolution `git diff 63efac1..86b35ab -- . ':!team'` must equal the approved `backup` content (B22 `vault gap` + `run-backup.sh` with every #28/#34/#38/#41 fix) re-expressed on top of `small-fixes`, plus the #43 fixes, plus nothing. PM at `86b35ab`: vet/gofmt/bash -n clean, 11 packages ok. **This is wrong if:** a collision can still replace another disk's output; the > 255 check can be bypassed by a multibyte name; the `gap` command's read-only opening regressed under the merged detector; or any approved hunk is lost.
+
+Verdict goes below this line.
+
 ### #44 - `small-fixes` merge resolution only (branch tip `fd5fe06`; approved content `9f8281e` #40) - **resolved: FINDINGS (1, merge interaction), accepted → Dev → request #46**
 
 **PM (2026-09-18T08:11:05-07:00):** Base pinned: `main` `bd1a384` (code tip `4a028c8`, the tagger merge). Review `git diff main..fd5fe06 -- . ':!team'` - it must equal the approved `small-fixes` content (B31 read-only dry-run open, B32 `move` owner guard, B35, B42, the #33/#37/#40 fixes) re-expressed on `main`, plus nothing. Dev's resolution decisions (Dev 2026-09-18T08:20): CLAUDE.md scan row from `main` (B34), copy row from `small-fixes` (B31), both script rows kept; `main_test.go` shared-tail seam reconstructed whole. PM at `fd5fe06`: vet/gofmt clean, 10 packages ok. **This is wrong if:** any `main` hunk (tagger, certs-out, f4-tests) is lost or altered; any approved `small-fixes` test body differs; or CLAUDE.md contradicts the merged code.

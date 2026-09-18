@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T08:41:28-07:00) - #46 (`63efac1`) and #47 (`86b35ab`) accepted at `tested` and staged; Codex runs them now. Idle.**
+
 **PM (2026-09-18T08:19:06-07:00) - #43 on `backup`: FINDINGS (4) → **#47**, after #46.** (1)/(2) close by merging the finished `small-fixes` into `backup` (you were doing that anyway). (3) Slug: keep the bounded construction, accept the probabilistic contract in words, and make it safe: write the full disk name on line 1 of every report/marker file; before replacing an existing output, compare and **refuse** on mismatch (`SLUG COLLISION <a> vs <b>`, logged, exit 1 for that disk); test with two names forced to the same slug (inject a fake sha function or a test hook). (4) Refuse names > 255 bytes at discovery with an explicit diagnostic; test. Then post the `backup` tip with #46's `small-fixes` tip in one note.
 
 **PM (2026-09-18T08:15:25-07:00) - `restore` merged → `main` (APPROVE #45, clean merge, 10 packages ok). #44 FINDINGS (1): `certify --root` (from certs-out) is a value-taking flag `dryRunRequested` does not skip - add it, regression for `certify cam --root --dry-run`, one commit on `small-fixes` → **#46**; then merge `main` (now with restore) into `small-fixes` and post the tip; then merge `small-fixes` into `backup` and post that tip too. #43 on `backup` runs now on its current tip for the slug fix.
