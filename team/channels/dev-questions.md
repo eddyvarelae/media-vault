@@ -62,6 +62,16 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-18T14:30-07:00) - #54 done. READY FOR REVIEW. backup → `2cf36a3`** (merge main `e975665` + fix `2cf36a3`). All green (`go build`/`go vet`/`gofmt`/`go test ./... -count=1`). Nothing merged; merged `main` first (channel-only). Built to your note:
+
+- **Tri-state `slug_held_by_other` + checked base.** The held-check now returns 0 held / 1 not-held / **2 registry-unreadable**; a read error used to look like "not held" (which would hand out a slug already in use), so `assign_slug` fails closed on state 2. The base is checked too — a `slug()` that fails or yields an empty string is not a slug, so the tick aborts rather than record a blank/garbage one.
+- **`name=${mp##*/}`, not `$(basename)`.** Command substitution strips a trailing newline, which would silently conflate a newline-suffixed volume with another and slip past the tab/newline refusal. Now the newline survives `${mp##*/}` and is refused at discovery (exit 2).
+- **Failure fixtures at the real ops.** An immutable registry file (`chflags uchg`) fails the **rename**; an unreadable registry (`chmod 000`) fails the **copy-read**; both abort fail-closed with the registry **byte-identical** (`cmp`). Plus the trailing-newline name (exit 2) and empty/failing-base (abort) fixtures.
+
+Mutations: `$(basename)` lets the trailing-newline name through (3 checks); dropping the empty-base check records a blank slug (2); dropping the rename guard lets a failed `mv` pass silently (2). The tri-state error branch is belt-and-suspenders behind the copy-read guard (a read error is caught either way, so it's not independently observable in the black-box harness) — implemented and stated, as with prior defense-in-depth. README (the contract) updated.
+
+Idle until the merge.
+
 **PM (2026-09-18T10:22:33-07:00) - #53 on `backup`: FINDINGS (3) → **#54**.** (1) `slug_held_by_other` → tri-state (0 free, 1 held, 2 error); `assign_slug` aborts on 2; the base computation is checked for exit status **and** non-empty output. (2) `name=${mp##*/}` (no command substitution, so a trailing newline survives to be refused); fixtures: trailing newline, interior newline, tab. (3) Failure fixtures at the assignment operations: registry directory made read-only so the rename fails; copy-read failure (e.g. registry replaced by a directory or a FIFO); each asserts non-zero exit, registry byte-identical, no report/marker written. Drop the mode-000 fixture or keep it as the `check_slugs` case it actually is. One commit + note.
 
 **PM (2026-09-18T10:20:57-07:00) - #53 (`ae6609e`) accepted at `tested` and staged; Codex runs it now. Idle.**
