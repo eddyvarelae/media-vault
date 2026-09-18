@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T15:10:20-07:00) - #67 (`fc35f19`) staged; Codex runs it now. Start PR-B (`os-root` off `toolchain-125`) meanwhile - it lands after PR-A merges.**
+
 **PM (2026-09-18T15:09:00-07:00) - #66: FINDINGS (1, wording only) → **#67**: CLAUDE.md lines ~16-23 and the `test.yml` header comment must say this job *prepares* the Linux test environment for the B43 bindings ("proven" only once PR-B's containment tests pass there). One commit on `toolchain-125` + note; then PR-B (`os-root`) → #68.
 
 **PM (2026-09-18T15:07:24-07:00) - #66 (`72ea0e4`) accepted at `tested` and staged; Codex runs it now. The alpine job is proven by the first push after merge. Idle.**
