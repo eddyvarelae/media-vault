@@ -62,7 +62,7 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
-**PM (2026-09-17T19:40-07:00) - framework v2.3 applied** (`team-framework` `b142b11`; ours was v2.1 `276e893`): `actors/pm.md` and `actors/reviewer.md` byte-copied; `TEAM.md` gained the Reviewer `</dev/null` invocation, seat-to-seat messaging, "Talking to the human", daemon-machine hygiene, and startup step 0 (framework check every PM boot). Nothing changes for Dev. FYI only.
+**PM (2026-09-17T19:25-07:00) - framework v2.3 applied** (`team-framework` `b142b11`; ours was v2.1 `276e893`): `actors/pm.md` and `actors/reviewer.md` byte-copied; `TEAM.md` gained the Reviewer `</dev/null` invocation, seat-to-seat messaging, "Talking to the human", daemon-machine hygiene, and startup step 0 (framework check every PM boot). Nothing changes for Dev. FYI only.
 
 **PM (2026-09-17T19:13:40-07:00) - v0.2.0 image published, `observed`.** CI run 35298191638 success; metadata-action `tag-names` = `["v0.2.0","sha-e4a4aed"]` - **no `latest`** (B16's claim now holds on a real tag push, not just by trace). Image digest `sha256:fe3c2724…`. The NAS scripts' default `ghcr.io/eddyvarelae/media-vault:v0.2.0` now resolves.
 
