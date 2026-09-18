@@ -1388,20 +1388,45 @@ func TestMoveNeverLandsOnAVerifiedDestination(t *testing.T) {
 // reads --dry-run as --min-size's value (dedup has no dry-run and is never
 // opened read-only), so the manifest open and the command agree. It fails
 // on the bad number, not by opening read-only behind the command's back.
-func TestDedupMinSizeNotADryRun(t *testing.T) {
-	cfg := t.TempDir()
-	// Seed a manifest so an accidental read-only open would be observable.
-	src, dst := t.TempDir(), t.TempDir()
-	writeFile(t, filepath.Join(src, "a.mov"), "clip", t0)
-	if _, _, code := vault(t, cfg, "copy", "cam", src, dst); code != 0 {
-		t.Fatalf("copy: exit %d", code)
+func TestDryRunRequested(t *testing.T) {
+	// The detector directly, so removing any command's value-flag case is
+	// caught here regardless of what the command then does (review #37/#40).
+	cases := []struct {
+		cmd  string
+		args []string
+		want bool
+	}{
+		{"copy", []string{"cam", "s", "d", "--dry-run"}, true},
+		{"copy", []string{"cam", "s", "d", "--prefix", "--dry-run"}, false}, // value of --prefix
+		{"copy", []string{"cam", "s", "d", "--rule", "--dry-run"}, false},   // value of --rule
+		{"scan", []string{"cam", "s", "d", "--on-collision", "--dry-run"}, false},
+		{"move", []string{"a", "b", "s", "d", "--prefix", "--dry-run"}, false},
+		{"dedup", []string{"--min-size", "--dry-run"}, false},      // value of --min-size (the #37 fix)
+		{"dedup", []string{"--min-size", "10", "--dry-run"}, true}, // a real (nonsense) dry-run
+		{"repair-dest", []string{"cam", "d", "--dry-run"}, true},
 	}
+	for _, c := range cases {
+		if got := dryRunRequested(c.cmd, c.args); got != c.want {
+			t.Errorf("dryRunRequested(%q, %v) = %v, want %v", c.cmd, c.args, got, c.want)
+		}
+	}
+}
+
+// End to end on an UNSEEDED config: with the fix, dedup --min-size --dry-run
+// is not a dry run, so main creates the config and manifest (a dry run would
+// not) and dedup fails on the bad size. Removing the dedup case makes main
+// open dry (no config created) - which this catches.
+func TestDedupMinSizeNotADryRun(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "fresh")
 	_, errOut, code := vault(t, cfg, "dedup", "--min-size", "--dry-run")
 	if code != 1 || !strings.Contains(errOut, "invalid --min-size") {
 		t.Errorf("dedup --min-size --dry-run: exit %d, stderr %q; want 1 invalid --min-size", code, errOut)
 	}
 	if strings.Contains(errOut, "planning against an empty one") {
 		t.Errorf("dedup was wrongly treated as a dry run:\n%s", errOut)
+	}
+	if _, err := os.Stat(filepath.Join(cfg, "manifest.db")); err != nil {
+		t.Errorf("a non-dry-run dedup should have created the manifest: %v", err)
 	}
 }
 
