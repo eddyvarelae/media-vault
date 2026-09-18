@@ -3,12 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -139,6 +142,54 @@ func noPartials(t *testing.T, dst string) {
 	})
 }
 
+// rowsOf reopens the manifest under cfg and returns the persisted rows for
+// disk, keyed by source path. A fresh open per call, never the subprocess's
+// handle: this is what the next `vault` run (and certify) will actually see.
+func rowsOf(t *testing.T, cfg, disk string) map[string]manifest.Entry {
+	t.Helper()
+	m, err := manifest.Open(filepath.Join(cfg, "manifest.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	rows, err := m.ListByDisk(disk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]manifest.Entry{}
+	for _, e := range rows {
+		out[e.SourcePath] = e
+	}
+	return out
+}
+
+func sha(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(sum[:])
+}
+
+// wantRow checks the fields a manifest row must carry for a file with the
+// given content, at the given status. VerifiedAt is checked for zero vs
+// non-zero here; ordering against earlier snapshots is asserted inline.
+func wantRow(t *testing.T, rows map[string]manifest.Entry, src, dst, content, status string) manifest.Entry {
+	t.Helper()
+	e, ok := rows[src]
+	if !ok {
+		t.Fatalf("no row for %s; rows: %v", src, rows)
+	}
+	if e.DestPath != dst || e.SHA256 != sha(content) || e.Size != int64(len(content)) || e.Status != status {
+		t.Errorf("row %s = {dest %q sha %s… size %d status %q}, want {dest %q sha %s… size %d status %q}",
+			src, e.DestPath, e.SHA256[:12], e.Size, e.Status, dst, sha(content)[:12], len(content), status)
+	}
+	if status == "verified" && e.VerifiedAt == 0 {
+		t.Errorf("row %s is verified with verified_at = 0", src)
+	}
+	if status == "copied" && e.VerifiedAt != 0 {
+		t.Errorf("row %s is copied but carries verified_at = %d", src, e.VerifiedAt)
+	}
+	return e
+}
+
 func statuses(t *testing.T, m *manifest.Manifest, disk string) map[string]string {
 	t.Helper()
 	rows, err := m.ListByDisk(disk)
@@ -177,6 +228,13 @@ func TestRoundTrip(t *testing.T) {
 		t.Errorf("dest content = %q", got)
 	}
 	noPartials(t, dst)
+	rows := rowsOf(t, cfg, "cam")
+	if len(rows) != 3 {
+		t.Fatalf("rows after copy = %d, want 3", len(rows))
+	}
+	wantRow(t, rows, "DCIM/C0001.MP4", "Videos/C0001.MP4", "clip one", "copied")
+	wantRow(t, rows, "DCIM/C0002.MP4", "Videos/C0002.MP4", "clip two", "copied")
+	wantRow(t, rows, "DCIM/C0001.JPG", "Photos/C0001.JPG", "still", "copied")
 
 	// Second copy is a no-op and exits 0.
 	out, _, code = vault(t, cfg, "copy", "cam", src, dst, "--prefix", "DCIM", "--rule", "MP4=Videos", "--rule", "JPG=Photos")
@@ -194,11 +252,25 @@ func TestRoundTrip(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "Verified: 3   Mismatch: 0   Missing: 0   Errors: 0") {
 		t.Fatalf("verify: exit %d", code)
 	}
+	verified := rowsOf(t, cfg, "cam")
+	wantRow(t, verified, "DCIM/C0001.MP4", "Videos/C0001.MP4", "clip one", "verified")
+	wantRow(t, verified, "DCIM/C0002.MP4", "Videos/C0002.MP4", "clip two", "verified")
+	wantRow(t, verified, "DCIM/C0001.JPG", "Photos/C0001.JPG", "still", "verified")
+	for src, e := range verified {
+		if e.SHA256 != rows[src].SHA256 || e.CopiedAt != rows[src].CopiedAt {
+			t.Errorf("verify changed sha/copied_at of %s: %+v vs %+v", src, e, rows[src])
+		}
+	}
 
 	certPath := filepath.Join(t.TempDir(), "cam.cert.json")
 	_, _, code = vault(t, cfg, "certify", "cam", certPath)
 	if code != 0 {
 		t.Fatalf("certify: exit %d", code)
+	}
+	// certify is read-only on the manifest: the persisted rows are the same
+	// bytes before and after, and the certificate's file refs are those rows.
+	if after := rowsOf(t, cfg, "cam"); !reflect.DeepEqual(after, verified) {
+		t.Errorf("certify changed manifest rows:\n before %+v\n after  %+v", verified, after)
 	}
 	var cert certify.Certificate
 	if err := json.Unmarshal([]byte(readFile(t, certPath)), &cert); err != nil {
@@ -206,6 +278,20 @@ func TestRoundTrip(t *testing.T) {
 	}
 	if cert.FileCount != 3 || cert.TotalBytes != int64(len("clip one")+len("clip two")+len("still")) || cert.SourceDisk != "cam" {
 		t.Errorf("cert = %+v", cert)
+	}
+	if len(cert.Files) != len(verified) {
+		t.Fatalf("cert lists %d files, manifest has %d rows", len(cert.Files), len(verified))
+	}
+	for _, f := range cert.Files {
+		e, ok := verified[f.SourcePath]
+		if !ok {
+			t.Errorf("cert lists %s, which has no manifest row", f.SourcePath)
+			continue
+		}
+		if f.DestPath != e.DestPath || f.SHA256 != e.SHA256 || f.Size != e.Size ||
+			!f.VerifiedAt.Equal(time.Unix(0, e.VerifiedAt)) {
+			t.Errorf("cert ref %+v disagrees with row %+v", f, e)
+		}
 	}
 	if err := certify.Verify(&cert); err != nil {
 		t.Errorf("certificate signature: %v", err)
@@ -229,11 +315,26 @@ func TestRoundTrip(t *testing.T) {
 	if got := readFile(t, filepath.Join(dst, "Videos", "C0001.MP4")); got != "clip one, re-exported" {
 		t.Errorf("recopied content = %q", got)
 	}
+	recopied := rowsOf(t, cfg, "cam")
+	wantRow(t, recopied, "DCIM/C0001.MP4", "Videos/C0001.MP4", "clip one, re-exported", "copied")
+	if recopied["DCIM/C0001.MP4"].MtimeNs != t0.Add(time.Hour).UnixNano() {
+		t.Errorf("recopied row mtime = %d, want the new source mtime", recopied["DCIM/C0001.MP4"].MtimeNs)
+	}
+	for _, src := range []string{"DCIM/C0002.MP4", "DCIM/C0001.JPG"} {
+		if !reflect.DeepEqual(recopied[src], verified[src]) {
+			t.Errorf("recopy touched an unrelated row %s: %+v vs %+v", src, recopied[src], verified[src])
+		}
+	}
 	if _, _, code = vault(t, cfg, "certify", "cam"); code != 1 {
 		t.Fatalf("certify after recopy: exit %d, want 1", code)
 	}
 	if _, _, code = vault(t, cfg, "verify", "cam", dst); code != 0 {
 		t.Fatalf("verify after recopy: exit %d", code)
+	}
+	reverified := rowsOf(t, cfg, "cam")
+	e := wantRow(t, reverified, "DCIM/C0001.MP4", "Videos/C0001.MP4", "clip one, re-exported", "verified")
+	if e.VerifiedAt <= verified["DCIM/C0001.MP4"].VerifiedAt {
+		t.Errorf("re-verify did not advance verified_at: %d → %d", verified["DCIM/C0001.MP4"].VerifiedAt, e.VerifiedAt)
 	}
 	if _, _, code = vault(t, cfg, "certify", "cam"); code != 0 {
 		t.Fatalf("certify after re-verify: exit %d", code)
@@ -254,16 +355,35 @@ func TestRoundTrip(t *testing.T) {
 	if code != 1 || !strings.Contains(out, "MISMATCH") || !strings.Contains(out, "C0002.MP4") {
 		t.Fatalf("verify with corruption: exit %d, want 1 naming the file", code)
 	}
+	// The row keeps the sha the file HAD (the certificate's claim), flips to
+	// mismatch, and stamps when the mismatch was seen. Nothing else moves.
+	mismatched := rowsOf(t, cfg, "cam")
+	e = wantRow(t, mismatched, "DCIM/C0002.MP4", "Videos/C0002.MP4", "clip two", "mismatch")
+	if e.VerifiedAt <= reverified["DCIM/C0002.MP4"].VerifiedAt {
+		t.Errorf("mismatch did not stamp verified_at: %d → %d", reverified["DCIM/C0002.MP4"].VerifiedAt, e.VerifiedAt)
+	}
+	for _, src := range []string{"DCIM/C0001.MP4", "DCIM/C0001.JPG"} {
+		if mismatched[src].Status != "verified" {
+			t.Errorf("row %s = %q after an unrelated mismatch, want verified", src, mismatched[src].Status)
+		}
+	}
 	_, errOut, code = vault(t, cfg, "certify", "cam")
 	if code != 1 || !strings.Contains(errOut, `"mismatch"`) {
 		t.Fatalf("certify with mismatch: exit %d, stderr %q", code, errOut)
 	}
+
+	// A missing destination file fails verify but leaves its row untouched
+	// (so a later copy can fix it): snapshot before, byte-identical after.
+	before := rowsOf(t, cfg, "cam")["DCIM/C0001.JPG"]
 	if err := os.Remove(filepath.Join(dst, "Photos", "C0001.JPG")); err != nil {
 		t.Fatal(err)
 	}
 	out, _, code = vault(t, cfg, "verify", "cam", dst)
 	if code != 1 || !strings.Contains(out, "missing") || !strings.Contains(out, "Missing: 1") {
 		t.Fatalf("verify with missing: exit %d", code)
+	}
+	if after := rowsOf(t, cfg, "cam")["DCIM/C0001.JPG"]; !reflect.DeepEqual(after, before) {
+		t.Errorf("missing-file verify touched the row:\n before %+v\n after  %+v", before, after)
 	}
 }
 
