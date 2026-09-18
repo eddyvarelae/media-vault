@@ -509,6 +509,31 @@ func (m *Manifest) listByDisk(disk string, onlyUnverified bool) ([]Entry, error)
 	return out, rows.Err()
 }
 
+// AllDestPaths returns (source_disk, source_path, dest_path, status) for
+// every row with a dest_path, any status. repair-dest indexes them by
+// physical location so a candidate file another row already claims is
+// never chosen.
+func (m *Manifest) AllDestPaths() ([]Entry, error) {
+	rows, err := m.db.Query(`
+		SELECT source_disk, source_path, dest_path, status
+		FROM files
+		WHERE dest_path != ''
+		ORDER BY source_disk, source_path`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Entry
+	for rows.Next() {
+		var e Entry
+		if err := rows.Scan(&e.SourceDisk, &e.SourcePath, &e.DestPath, &e.Status); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 // VerifiedRows returns every verified row, of every disk. scan.Build
 // indexes their dest_paths by physical location once per run, because the
 // writer touches physical paths and a spelling lookup cannot see that
@@ -544,6 +569,23 @@ func (m *Manifest) MarkVerified(disk, sourcePath string, verifiedAt int64) error
 		WHERE source_disk = ? AND source_path = ?
 	`, verifiedAt, disk, sourcePath)
 	return err
+}
+
+// UpdateDestPath moves a row's pointer and nothing else — size, hash,
+// status and timestamps stay, because the bytes it describes have not
+// changed, only where they are. `vault repair-dest` is the only caller.
+func (m *Manifest) UpdateDestPath(disk, sourcePath, destPath string) error {
+	res, err := m.db.Exec(`
+		UPDATE files SET dest_path = ?
+		WHERE source_disk = ? AND source_path = ?
+	`, destPath, disk, sourcePath)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return fmt.Errorf("update dest_path for %s/%s: %d rows affected, want 1", disk, sourcePath, n)
+	}
+	return nil
 }
 
 func (m *Manifest) MarkMismatch(disk, sourcePath string, verifiedAt int64) error {
