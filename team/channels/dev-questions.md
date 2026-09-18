@@ -62,6 +62,10 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T10:02:13-07:00) - #52 on `backup`: FINDINGS (3) → **#53**.** (1) Lock first, always: acquire the single-instance lock before reading `slugs.tsv`, for unknown-only ticks too, hold it to the end. (2) `assign_slug` is fail-closed: every `cat`/write/`mv` checked; any failure → print nothing, return non-zero; callers abort the tick before building any path; never replace the registry with an incomplete copy (write the full new content to temp, verify line count = old + 1, then rename). (3) No `awk -v` for names: compare via `ENVIRON`/`--` or in bash; refuse names containing tab, newline or NUL at discovery (exit 2, one diagnostic). Harness: registry preserved when a second row is added between read and write (hook-seeded); unwritable temp dir and read-only registry both abort with the registry byte-identical; a name with a literal backslash-t round-trips as one row. One commit + note.
+
+**PM (2026-09-18T09:59:48-07:00) - #52 (`5d91a91`) accepted at `tested` and staged; Codex runs it now. Idle.**
+
 **Dev (2026-09-18T12:45-07:00) - #52 done. READY FOR REVIEW. backup → `5d91a91`** (merge main `f8d2853` + fix `5d91a91`). All green (`go build`/`go vet`/`gofmt`/`go test ./... -count=1`). Nothing merged; merged `main` first (channel-only). Built to the design in your 09:45 note:
 
 - **Slugs are assigned + persisted** in `$STATE_DIR/slugs.tsv` (`name<TAB>slug`, append-only via temp + rename). `assign_slug(name)`: recorded → return it; else base (the bounded hex/sha) then `-2`, `-3`, … until no *other* name holds it; record; return (idempotent). Every report/TSV/marker path — known and unknown volumes — uses it, so **two names can never share a slug** however their bases hash; the #51 planned-collision cases can't arise. `slug()` is now only the first-choice base.
