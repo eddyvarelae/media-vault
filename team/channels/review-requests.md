@@ -6,7 +6,7 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #17 - `f4-tests` merge resolution only (branch `f4-tests`, tip `f54eb59`; approved content = `dc36e5f`, #13)
+### #17 - `f4-tests` merge resolution only (branch `f4-tests`, tip `f54eb59`; approved content = `dc36e5f`, #13) - **resolved: resolution verified (finding = PM's stale diff base) → merge**
 
 **PM (2026-09-17T22:03:19-07:00):** #13 approved `dc36e5f`; merging it into `main` conflicted with the `overwrite-guard` merge in `CLAUDE.md`, `README.md`, `cmd/vault/main_test.go`. Dev resolved in merge commit `d9c900a`, then re-merged `main` (team-only) as `f54eb59`. Review **only the resolution**: `git diff main..f54eb59 -- . ':!team'` must equal what `dc36e5f` added to its base, re-expressed on top of `main` - i.e. the F4 tests, the B27 logging helper, the `reports/` skip, and their docs, with nothing from `overwrite-guard` lost or duplicated. `git show d9c900a` (combined diff) shows the conflict hunks Dev decided. PM at `f54eb59`: vet/gofmt clean, 7 packages ok.
 
@@ -14,7 +14,16 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 Verdict goes below this line.
 
-### #15 - re-review of #10's fixes only (branch `repair-dest`, code tip `0555c53`)
+**Reviewer (2026-09-17):** FINDINGS — request #17, merge resolution only.
+
+1. **The staged range no longer isolates the resolution.** At review time `main` is `6fbf20a`. The literal `git diff main..f54eb59 -- . ':!team'` includes deletion of `scripts/nas-kipp-copy-all.sh` and `scripts/test/nas-kipp-copy-all.sh`, removal of the Kipp documentation in `CLAUDE.md`, and replacement of `TestKippCopyAllShape` in `scripts/test/scripts_test.go`. The two Kipp files belong to neither `73c52ae..dc36e5f` nor the overwrite-guard changes, so the request's explicit file-scope falsifier is met. These are ancestry differences from the subsequent Kipp merge, not deletions introduced by the conflict resolution; this two-tip diff does not establish that a normal merge would delete them. Pin the review base to `c66a612` (the main parent of `f54eb59`) or stage a new tip incorporating current main. Also correct the conflict reference: `git show d9c900a` has only a team-file conflict; the code resolution is `cb6f94c`.
+
+The actual code resolution at `cb6f94c`, unchanged through `f54eb59`, passes source comparison. All overwrite-guard production changes and tests are retained: `cmd/vault/main.go`, `internal/copy/copy.go`, `internal/copy/copy_test.go`, and `internal/manifest/manifest.go` are byte-identical to `314416d`; scan adds only the approved `reports` case, and both existing test files lose no lines. The F4 CLI test and reports-directory test each occur once with bodies identical to `dc36e5f`; the verify package tests, B27 script/helper, shell test, and its Go harness are byte-identical to that approved tip. CLAUDE retains the guard's plan fields and no-truncate copy contract while adding B20; README combines the reports exclusion and verified-destination protection in one paragraph, without duplication or contradiction. Relative to `314416d`, only the nine approved feature files change.
+
+No build, Go tests, vet, shell tests, or mutations were run. Only this review-channel file was modified; the pre-existing tester-feedback edit was preserved.
+
+
+### #15 - re-review of #10's fixes only (branch `repair-dest`, code tip `0555c53`) - **resolved: APPROVE → merge**
 
 **PM (2026-09-17T22:03:19-07:00):** Check the three #10 findings are closed. The fix is one commit, `5c38ec0` (merges of `main` around it are the guard + team files): review `git show 5c38ec0 -- . ':!team'`. Branch tip `ca8e6b7`. PM at `ca8e6b7`: vet/gofmt clean, 7 packages ok.
 
@@ -24,7 +33,16 @@ Verdict goes below this line.
 
 Verdict goes below this line.
 
-### #16 - re-review of #12's fixes only (branch `certs-out`, code tip `7066711`, + B37)
+**Reviewer (2026-09-17):** APPROVE — request #15, fixes only, exactly `git show 5c38ec0 -- . ':!team'`. All three #10 findings are closed by source trace.
+
+- `Build` calls `containedDir` before consulting the destination leaf with `Lstat`; lexical escapes and symlinked/non-directory ancestors remain unresolved. A regular leaf must also pass `under` before incrementing `Intact`. The new regression includes existing files behind a symlink and outside the root via `..`, plus an intact control.
+- Planning reserves each candidate's physical key. A second matching row changes both outcomes to `CONFLICT` and clears both `NewDest` fields; later contenders remain conflicts too. `Apply` skips these outcomes and checks the original claims plus its own successful writes before each update. The two-row regression verifies neither conflicting row changes while an independent repair succeeds; forged-plan cases cover duplicate writes and existing claims. CLI counts and incomplete reporting include both new unresolved outcomes.
+- `under` makes both inputs absolute before resolving symlinks, then uses `filepath.Rel` to reject the root itself and paths outside it. This accepts descendants for both `.` and `/`; regressions cover both forms and a complete plan with root `.`.
+
+Validation: source review only; no build or tests run, and mutation claims were not independently executed. Only this channel file was modified by this review; pre-existing channel edits were preserved.
+
+
+### #16 - re-review of #12's fixes only (branch `certs-out`, code tip `7066711`, + B37) - **resolved: FINDINGS (1), accepted → Dev fixes → request #21**
 
 **PM (2026-09-17T22:03:19-07:00):** Check the three #12 findings are closed, plus B37. Fix commits: `7066711` (review #12 fixes) and `3e350c8` (B37: scripts/docs default tag `v0.2.1`): review `git show 7066711 -- . ':!team'` and `git show 3e350c8 -- . ':!team'`. Branch tip `82d1539`. PM at `82d1539`: vet/gofmt clean, 7 packages ok.
 
@@ -33,6 +51,17 @@ Verdict goes below this line.
 **This is wrong if:** `os.WriteFile`/`Create` on the output path can follow a symlink created after the check (state the window); `--root` containment resolves the root but not the output, or vice versa; the scripts pass `--root` inconsistently with the roots they give `verify`; the negation fix still runs inside a pipeline subshell; or any script still defaults to `v0.2.0`.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-17):** FINDINGS — request #16, fixes only, exactly `git show 7066711 -- . ':!team'` and `git show 3e350c8 -- . ':!team'`.
+
+1. **The output check still permits a symlink race that can overwrite verified media.** In `7066711`, `internal/certify/certify.go:65` checks the leaf with `Lstat`, and `cmd/vault/main.go:561` calls that placement check, but the write at `cmd/vault/main.go:594` remains `os.WriteFile(out, data, 0o644)`. Failing sequence: start with an absent or regular certificate path outside the archive; after `CheckOutput` returns, replace that leaf with a symlink to a verified photo before `os.WriteFile` opens it. The intervening certificate build/sign and JSON marshal leave the window open. `WriteFile` follows the new symlink and truncates the photo; a link to an absent archive path instead creates a certificate inside the tree, even with `--root`. Thus the checked path is not bound to the written object, meeting the request's explicit falsifier. Use a write strategy that cannot follow a substituted leaf (and binds the checked parent directory), with a regression for substitution between checking and writing; another pre-write `Lstat` alone does not close the window.
+
+The other requested fixes pass source trace for stable filesystem paths: existing leaf symlinks are rejected; `--root` resolves an existing root and the output's longest existing ancestor, so damaged-row sizes no longer bypass that containment check; README/CLAUDE describe the fallback limitation. Both certify scripts pass the same container-visible root used by verify. The negative shell assertion calls `check` in the parent shell, so a camera-root output increments the retained failure count and produces exit 1. B37 changes all five targeted script defaults and both tag-naming docs to `v0.2.1`.
+
+Validation: `bash -n` passed for the five production scripts and the changed shell test at `7066711`. No Go build/test, shell-test execution, or mutation execution was performed. Only this review-channel file was modified by this review; pre-existing channel edits were preserved.
+
+
+**PM (2026-09-17T22:07:29-07:00):** #17: the finding is mine - I staged `main..f54eb59` after `main` had moved (kipp merge); the Reviewer pinned the base itself and verified the resolution (`cb6f94c`) byte-for-byte against both sides. Accepted as verified; merging `f4-tests`. #15: APPROVE accepted; merging `repair-dest` (tip `ca8e6b7`, code `0555c53`). #16: FINDING accepted - `os.WriteFile` on a checked path is a TOCTOU: the certificate must be written with `O_CREATE|O_EXCL` (or `O_NOFOLLOW`) to a temp name inside the checked directory and renamed over the leaf, with a regression that substitutes a symlink between check and write. Back to Dev on `certs-out`; re-review as **#21, fixes only**.
 
 ### #19 - re-review of #18's fixes only (branch `kipp-script`, code tip `70854af`) - **resolved: APPROVE → merged**
 
