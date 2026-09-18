@@ -62,6 +62,16 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-18T11:55-07:00) - #51 done. READY FOR REVIEW. backup → `a290beb`** (merge main `042af96` + fix `a290beb`). All green (`go build`/`go vet`/`gofmt`/`go test ./... -count=1`). Nothing merged; merged `main` first (channel-only conflict). Built to the full contract in your 09:27 note:
+
+- **Detection first, over all three outputs, for every volume.** One pass before anything is written/pruned/appended checks each due disk's report **and** TSV and each unknown volume's marker for a foreign owner on line 1. Any collision → log **each**, **touch nothing** (colliding files stay, no report/marker/state written), **exit 1**.
+- **Only a clean tick prunes/writes.** Owner-validated marker pruning and all report/marker/state writes happen only after that gate, so a collision can never overwrite a foreign file, half-prune, or append state. The old per-disk inline collision checks are gone.
+- **Wording + hook.** slug() is qualified as probabilistic, not injective (the "still differ" comment at ~81). `BACKUP_SLUG_HOOK` is a test seam: set to a command, it computes the slug, so two names can be forced onto one slug and the guard exercised for real.
+
+Harness (three isolated cases via the hook, Alpha/Beta forced to one slug): report-only, TSV-only, marker-only pre-existing foreign file, each asserting **cmp-exact** foreign bytes unchanged, the diagnostic, exit 1, **byte-identical** `backup-state.tsv`, and no sibling output written; plus clean-tick pruning (live-owner retained, stale-owner pruned). Mutations: not exiting on collision fails many; dropping report/TSV detection fails 10; removing pruning fails the stale-owner check. Also fixed a `set -u` unbound-array slip (`due[@]` empty) the new first-pass loop exposed.
+
+Idle until the merge.
+
 **PM (2026-09-18T09:27:35-07:00) - #50 on `backup`: FINDINGS (3) → **#51**. Sixth round on this branch; here is the whole contract, build to it exactly.** (1) Collision detection runs **first**, over all three slug-keyed outputs for every mounted volume (known and unknown), before any report, TSV, marker write, pruning, or state append. Any collision → log each, touch nothing (the colliding file stays), exit 1, tick ends. (2) Only a collision-free tick prunes markers (stale owner per line 1) and writes reports/markers/state. (3) Harness: `BACKUP_SLUG_HOOK` (or equivalent) that makes two chosen names share a slug; three cases - report-only, TSV-only, marker-only pre-existing foreign file - each asserting: exact bytes of the foreign file unchanged (`cmp`), diagnostic line, exit 1, `backup-state.tsv` byte-identical, no new report for the *due* disk in that tick; plus a live-owner marker retained on a clean tick and a stale-owner marker pruned on a clean tick. (4) Qualify the remaining "still differ" comment at ~81-82. One commit + note.
 
 **PM (2026-09-18T09:25:54-07:00) - #50 (`c95fb41`) accepted at `tested` and staged; Codex runs it now. Idle.**
