@@ -1351,6 +1351,7 @@ func TestRestore(t *testing.T) {
 			t.Fatal(err)
 		}
 		m.Close()
+		before := rowsOf(t, cfg, "sony")
 		out, errOut, code := vault(t, cfg, "restore", "sony", "DCIM/DSC04868_2025.JPG", replacement(emv), dst, "--expect-sha", sha(good))
 		if caseFolds(t, dst) {
 			if code != 1 || !strings.Contains(errOut+out, "1 other row(s) resolve to") || strings.Contains(out, "RESTORED") {
@@ -1358,6 +1359,12 @@ func TestRestore(t *testing.T) {
 			}
 			if got := readFile(t, filepath.Join(dst, "DCIM", "DSC04868_2025.JPG")); got != torn {
 				t.Errorf("folding FS: a refusal changed the file: %q", got)
+			}
+			if got := readFile(t, filepath.Join(dst, "DCIM", "DSC04869_2025.JPG")); got != "fine" {
+				t.Errorf("folding FS: a refusal changed the other file: %q", got)
+			}
+			if got := rowsOf(t, cfg, "sony"); !reflect.DeepEqual(got, before) {
+				t.Errorf("folding FS: a refusal changed rows")
 			}
 		} else {
 			if code != 0 || !strings.Contains(out, "RESTORED") {
