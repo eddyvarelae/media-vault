@@ -547,12 +547,14 @@ func runRepairDest(ctx context.Context, m *manifest.Manifest, args []string) int
 			fmt.Printf("  %-10s %s : %s → %s (already the dest_path of %s)\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath, strings.Join(c.Candidates, " | "), c.Owner)
 		case repair.NotAFile:
 			fmt.Printf("  %-10s %s : %s is %s\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath, c.Detail)
+		case repair.Unsafe, repair.Conflict:
+			fmt.Printf("  %-10s %s : %s (%s)\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath, c.Detail)
 		default:
 			fmt.Printf("  %-10s %s : %s\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath)
 		}
 	}
-	fmt.Printf("\nRepairable: %d   Not found: %d   Ambiguous: %d   Owned: %d   Not a file: %d   Bytes hashed: %s\n",
-		repairable, by[repair.NotFound], by[repair.Ambiguous], by[repair.Owned], by[repair.NotAFile], human(plan.BytesHashed))
+	fmt.Printf("\nRepairable: %d   Not found: %d   Ambiguous: %d   Owned: %d   Not a file: %d   Unsafe: %d   Conflict: %d   Bytes hashed: %s\n",
+		repairable, by[repair.NotFound], by[repair.Ambiguous], by[repair.Owned], by[repair.NotAFile], by[repair.Unsafe], by[repair.Conflict], human(plan.BytesHashed))
 
 	if dryRun {
 		// repair-dest never writes archive files; the only thing it can
@@ -571,8 +573,8 @@ func runRepairDest(ctx context.Context, m *manifest.Manifest, args []string) int
 	}
 	fmt.Printf("\nRepaired %d row(s). Status untouched — run `vault verify %s %s` to promote them.\n", n, disk, root)
 	if unresolved > 0 {
-		fmt.Fprintf(os.Stderr, "\nINCOMPLETE: %d row(s) still without a destination this tool can back with a hash (%d not found, %d ambiguous, %d owned by another row, %d not a file).\n",
-			unresolved, by[repair.NotFound], by[repair.Ambiguous], by[repair.Owned], by[repair.NotAFile])
+		fmt.Fprintf(os.Stderr, "\nINCOMPLETE: %d row(s) still without a destination this tool can back with a hash (%d not found, %d ambiguous, %d owned by another row, %d not a file, %d unsafe, %d in conflict).\n",
+			unresolved, by[repair.NotFound], by[repair.Ambiguous], by[repair.Owned], by[repair.NotAFile], by[repair.Unsafe], by[repair.Conflict])
 		return 1
 	}
 	return 0

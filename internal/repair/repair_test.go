@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/eddyvarelae/media-vault/internal/manifest"
@@ -268,10 +269,10 @@ func TestBuildNeverFollowsSymlinks(t *testing.T) {
 	want := map[string]Outcome{
 		"LEAF.JPG": NotFound,
 		"SUB.JPG":  NotFound,
-		"ANC.MP4":  NotFound,
+		"ANC.MP4":  Unsafe, // its own directory is a symlink: not examined at all
 		"SELF.JPG": NotAFile,
 		"DIR.JPG":  NotAFile,
-		"UP.JPG":   NotFound,
+		"UP.JPG":   Unsafe, // leaves the root lexically
 		"REAL.JPG": Repairable,
 	}
 	for src, w := range want {
@@ -284,6 +285,9 @@ func TestBuildNeverFollowsSymlinks(t *testing.T) {
 	}
 	if got["SELF.JPG"].Detail != "a symlink" || got["DIR.JPG"].Detail != "a directory" {
 		t.Errorf("NOT A FILE details: %q, %q", got["SELF.JPG"].Detail, got["DIR.JPG"].Detail)
+	}
+	if got["ANC.MP4"].Detail != "directory Videos is a symlink" || got["UP.JPG"].Detail != "dest_path leaves the root" {
+		t.Errorf("UNSAFE details: %q, %q", got["ANC.MP4"].Detail, got["UP.JPG"].Detail)
 	}
 	// Only the control was hashed: nothing behind a symlink was ever read.
 	if p.BytesHashed != int64(len("real bytes")) {
@@ -321,5 +325,145 @@ func TestBuildOwnedCandidateIsNeverChosen(t *testing.T) {
 	}
 	if r, u, by := p.Counts(); r != 0 || u != 1 || by[Owned] != 1 {
 		t.Errorf("Counts = %d/%d/%v", r, u, by)
+	}
+}
+
+// Review #10 finding 1: "intact" goes through the same walk. A regular
+// file reached through a symlinked directory, or by a dest_path that climbs
+// out, is not intact - it is UNSAFE and never examined, so a run cannot exit
+// 0 on it.
+func TestBuildIntactRequiresContainment(t *testing.T) {
+	m, err := manifest.Open(filepath.Join(t.TempDir(), "manifest.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	root, outside := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(outside, "videos", "X.MP4"), "outside bytes")
+	if err := os.Symlink(filepath.Join(outside, "videos"), filepath.Join(root, "Videos")); err != nil {
+		t.Fatal(err)
+	}
+	row(t, m, "X.MP4", "Videos/X.MP4", "outside bytes") // Lstat(root/Videos/X.MP4) finds a regular file - through the link
+	write(t, filepath.Join(outside, "UP.MP4"), "up bytes")
+	if err := os.Symlink(outside, filepath.Join(root, "..", "never-used")); err != nil { // keep the test honest: nothing relies on this
+		t.Fatal(err)
+	}
+	row(t, m, "UP.MP4", filepath.Join("..", filepath.Base(outside), "UP.MP4"), "up bytes") // exists via ..
+	write(t, filepath.Join(root, "OK.MP4"), "ok bytes")
+	row(t, m, "OK.MP4", "OK.MP4", "ok bytes")
+
+	p, err := Build(context.Background(), m, "sony", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := outcomes(p)
+	if p.Intact != 1 || len(p.Changes) != 2 {
+		t.Errorf("intact %d, changes %d; want 1/2", p.Intact, len(p.Changes))
+	}
+	if got["X.MP4"].Outcome != Unsafe || got["X.MP4"].Detail != "directory Videos is a symlink" {
+		t.Errorf("X.MP4 = %+v, want UNSAFE through the symlinked directory", got["X.MP4"])
+	}
+	if got["UP.MP4"].Outcome != Unsafe || got["UP.MP4"].Detail != "dest_path leaves the root" {
+		t.Errorf("UP.MP4 = %+v, want UNSAFE for leaving the root", got["UP.MP4"])
+	}
+	if r, u, _ := p.Counts(); r != 0 || u != 2 {
+		t.Errorf("Counts = %d/%d, want 0 repairable, 2 unresolved", r, u)
+	}
+}
+
+// Review #10 finding 2: two rows with the same bytes and the same missing
+// dest_path, one matching file. Neither gets it; Apply writes nothing; and
+// Apply refuses even a hand-built plan that would double-claim.
+func TestBuildReservesCandidates(t *testing.T) {
+	m, err := manifest.Open(filepath.Join(t.TempDir(), "manifest.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	root := t.TempDir()
+	write(t, filepath.Join(root, "DCIM", "X.JPG"), "same bytes")
+	row(t, m, "a/X.JPG", "X.JPG", "same bytes")
+	row(t, m, "b/X.JPG", "X.JPG", "same bytes")
+	write(t, filepath.Join(root, "DCIM", "Y.JPG"), "y bytes")
+	row(t, m, "Y.JPG", "Y.JPG", "y bytes")
+	before := rowsOf(t, m, "sony")
+
+	p, err := Build(context.Background(), m, "sony", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := outcomes(p)
+	for _, src := range []string{"a/X.JPG", "b/X.JPG"} {
+		if got[src].Outcome != Conflict || got[src].NewDest != "" || !strings.HasPrefix(got[src].Detail, "also wanted by sony:") {
+			t.Errorf("%s = %+v, want CONFLICT naming the other row", src, got[src])
+		}
+	}
+	if got["Y.JPG"].Outcome != Repairable {
+		t.Errorf("Y.JPG = %+v, want REPAIR", got["Y.JPG"])
+	}
+	n, err := Apply(m, p, nil)
+	if err != nil || n != 1 {
+		t.Fatalf("Apply = %d, %v; want exactly Y.JPG written", n, err)
+	}
+	after := rowsOf(t, m, "sony")
+	for _, src := range []string{"a/X.JPG", "b/X.JPG"} {
+		if !reflect.DeepEqual(after[src], before[src]) {
+			t.Errorf("%s changed: %+v", src, after[src])
+		}
+	}
+	// A plan that double-claims (built by hand) is refused at write time.
+	forged := &Plan{root: root, claims: p.claims, Changes: []Change{
+		{Row: before["a/X.JPG"], Outcome: Repairable, NewDest: "DCIM/X.JPG"},
+		{Row: before["b/X.JPG"], Outcome: Repairable, NewDest: "dcim/x.jpg"}, // case alias of the same file
+	}}
+	n, err = Apply(m, forged, nil)
+	if err == nil || n != 1 || !strings.Contains(err.Error(), "was just given to a/X.JPG") {
+		t.Errorf("forged Apply = %d, %v; want the second write refused", n, err)
+	}
+	// And a plan claiming a path another row already records is refused too
+	// (X.JPG is a/X.JPG's and b/X.JPG's dest_path, missing or not).
+	forged2 := &Plan{root: root, claims: p.claims, Changes: []Change{
+		{Row: before["Y.JPG"], Outcome: Repairable, NewDest: "x.jpg"},
+	}}
+	if _, err := Apply(m, forged2, nil); err == nil || !strings.Contains(err.Error(), "already the dest_path of") {
+		t.Errorf("forged2 Apply: %v; want refusal", err)
+	}
+}
+
+// Review #10 finding 3: containment works on absolute paths, so a root of
+// "." (the cwd) and "/" behave.
+func TestContainmentWithDotAndSlashRoots(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "DCIM", "X.JPG"), "x bytes")
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(wd) })
+	if !under(".", "DCIM/X.JPG") {
+		t.Errorf("under(\".\", DCIM/X.JPG) = false")
+	}
+	if !under("/", filepath.Join(root, "DCIM", "X.JPG")) {
+		t.Errorf("under(\"/\", <temp file>) = false")
+	}
+	if under(".", ".") || under("/", "/") || under(".", "..") {
+		t.Errorf("a root is not under itself, and .. is not under .")
+	}
+	// The whole tool with root ".": the B24 shape repairs.
+	m, err := manifest.Open(filepath.Join(t.TempDir(), "manifest.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	row(t, m, "X.JPG", "X.JPG", "x bytes")
+	p, err := Build(context.Background(), m, "sony", ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := outcomes(p)["X.JPG"]; c.Outcome != Repairable || c.NewDest != "DCIM/X.JPG" {
+		t.Errorf("root \".\": %+v, want REPAIR → DCIM/X.JPG", c)
 	}
 }

@@ -35,6 +35,8 @@ const (
 	Ambiguous  Outcome = "AMBIGUOUS"  // more than one candidate matches
 	Owned      Outcome = "OWNED"      // a matching candidate is already another row's dest_path
 	NotAFile   Outcome = "NOT A FILE" // something is at dest_path, but not a regular file
+	Unsafe     Outcome = "UNSAFE"     // dest_path leaves the root or passes through a symlink; not examined
+	Conflict   Outcome = "CONFLICT"   // two rows of this run would repair to the same file
 )
 
 // Change is one unresolved row and what was found for it.
@@ -44,7 +46,7 @@ type Change struct {
 	NewDest    string   // set when Outcome == Repairable
 	Candidates []string // every matching path, relative to the root (Ambiguous, Owned)
 	Owner      string   // Owned: "<disk>:<source_path>" of the row that claims the candidate
-	Detail     string   // NotAFile: what is there instead
+	Detail     string   // NotAFile / Unsafe / Conflict: what was found instead
 }
 
 // Plan is the result of looking at every row of a disk.
@@ -54,6 +56,9 @@ type Plan struct {
 	NoDest      int // rows without a dest_path (inventoried); not this tool's job
 	Changes     []Change
 	BytesHashed int64
+
+	claims claimIndex // every row's dest_path by physical key, plus this plan's reservations
+	root   string
 }
 
 // Counts returns how many changes are repairable, how many are not, and
@@ -82,7 +87,8 @@ func Build(ctx context.Context, m *manifest.Manifest, disk, root string) (*Plan,
 	if err != nil {
 		return nil, err
 	}
-	p := &Plan{}
+	p := &Plan{claims: claims, root: root}
+	reserved := map[string]int{} // physical key of a planned NewDest -> index in p.Changes
 	for _, row := range rows {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -92,14 +98,32 @@ func Build(ctx context.Context, m *manifest.Manifest, disk, root string) (*Plan,
 			continue
 		}
 		p.Checked++
-		if fi, err := os.Lstat(filepath.Join(root, row.DestPath)); err == nil {
+		// The same discipline before "intact" as before a repair: the row's
+		// directory must be real directories under the root, else Lstat on
+		// the leaf is looking through a link at some other place.
+		exists, why := containedDir(root, filepath.Dir(row.DestPath))
+		if why != "" {
+			p.Changes = append(p.Changes, Change{Row: row, Outcome: Unsafe, Detail: why})
+			continue
+		}
+		full := filepath.Join(root, row.DestPath)
+		if !exists {
+			// Nothing to look at and nothing to look in: NOT FOUND.
+			p.Changes = append(p.Changes, Change{Row: row, Outcome: NotFound})
+			continue
+		}
+		if fi, err := os.Lstat(full); err == nil {
 			// Anything but a regular file is not the archived copy, however
 			// it got there; the row stays unbacked and says so.
-			if fi.Mode().IsRegular() {
-				p.Intact++
+			if !fi.Mode().IsRegular() {
+				p.Changes = append(p.Changes, Change{Row: row, Outcome: NotAFile, Detail: describe(fi)})
 				continue
 			}
-			p.Changes = append(p.Changes, Change{Row: row, Outcome: NotAFile, Detail: describe(fi)})
+			if !under(root, full) {
+				p.Changes = append(p.Changes, Change{Row: row, Outcome: Unsafe, Detail: "resolves outside the root"})
+				continue
+			}
+			p.Intact++
 			continue
 		} else if !os.IsNotExist(err) {
 			return nil, err
@@ -107,6 +131,20 @@ func Build(ctx context.Context, m *manifest.Manifest, disk, root string) (*Plan,
 		c, err := locate(ctx, root, row, claims, &p.BytesHashed)
 		if err != nil {
 			return nil, err
+		}
+		if c.Outcome == Repairable {
+			// Reserve the file for this row. A second row wanting the same
+			// file is a conflict for both: the manifest would otherwise end
+			// up with two rows claiming one archived copy, and which of them
+			// is the real one is not this tool's call.
+			k := physKey(root, c.NewDest)
+			if i, taken := reserved[k]; taken {
+				other := &p.Changes[i]
+				other.Outcome, other.NewDest, other.Detail = Conflict, "", "also wanted by "+row.SourceDisk+":"+row.SourcePath
+				c.Outcome, c.NewDest, c.Detail = Conflict, "", "also wanted by "+other.Row.SourceDisk+":"+other.Row.SourcePath
+			} else {
+				reserved[k] = len(p.Changes)
+			}
 		}
 		p.Changes = append(p.Changes, c)
 	}
@@ -122,8 +160,8 @@ func locate(ctx context.Context, root string, row manifest.Entry, claims claimIn
 	c := Change{Row: row, Outcome: NotFound}
 	dir := filepath.Dir(row.DestPath)
 	base := filepath.Base(row.DestPath)
-	if !containedDir(root, dir) {
-		return c, nil // the row's own directory is gone, or not a real directory under the root
+	if exists, why := containedDir(root, dir); !exists || why != "" {
+		return c, nil // Build already handled a missing or unsafe directory; this is a guard
 	}
 	entries, err := os.ReadDir(filepath.Join(root, dir))
 	if err != nil {
@@ -168,40 +206,63 @@ func locate(ctx context.Context, root string, row manifest.Entry, claims claimIn
 	return c, nil
 }
 
-// containedDir reports whether rel names a real directory under root reached
+// containedDir checks that rel names a real directory under root reached
 // only through real directories: rel must not climb out lexically, and no
-// component may be a symlink. "." is the root itself.
-func containedDir(root, rel string) bool {
+// component may be a symlink. "." is the root itself. exists is false when
+// some component is simply absent (nothing to look in - NOT FOUND); unsafe
+// is non-empty when a component is a symlink, not a directory, or the path
+// leaves the root - such a row is never examined at all.
+func containedDir(root, rel string) (exists bool, unsafe string) {
 	rel = filepath.Clean(rel)
-	if filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return false
+	if filepath.IsAbs(rel) {
+		return false, "dest_path is absolute"
 	}
-	cur := root
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false, "dest_path leaves the root"
+	}
+	cur, sofar := root, ""
 	if rel != "." {
 		for _, comp := range strings.Split(rel, string(filepath.Separator)) {
-			cur = filepath.Join(cur, comp)
+			cur, sofar = filepath.Join(cur, comp), filepath.Join(sofar, comp)
 			fi, err := os.Lstat(cur)
-			if err != nil || !fi.IsDir() { // IsDir is false for a symlink under Lstat
-				return false
+			if err != nil {
+				return false, ""
+			}
+			if fi.Mode()&os.ModeSymlink != 0 {
+				return false, "directory " + sofar + " is a symlink"
+			}
+			if !fi.IsDir() {
+				return false, sofar + " is not a directory"
 			}
 		}
 	}
-	return true
+	return true, ""
 }
 
 // under proves containment the other way round: the resolved candidate lies
-// under the resolved root. The component walk above already refuses
+// under the resolved root, compared component-wise on absolute paths so a
+// root of "." or "/" works. The component walk above already refuses
 // symlinks; this is the check that does not depend on that walk being right.
 func under(root, full string) bool {
-	r, err := filepath.EvalSymlinks(root)
+	r, err := filepath.Abs(root)
 	if err != nil {
 		return false
 	}
-	f, err := filepath.EvalSymlinks(full)
+	if r, err = filepath.EvalSymlinks(r); err != nil {
+		return false
+	}
+	f, err := filepath.Abs(full)
 	if err != nil {
 		return false
 	}
-	return strings.HasPrefix(f, r+string(filepath.Separator))
+	if f, err = filepath.EvalSymlinks(f); err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(r, f)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // claimIndex maps the physical location of every row's dest_path (any disk,
@@ -234,13 +295,25 @@ func physKey(root, rel string) string {
 // moves: status stays as it was, so `verify` still has to promote it.
 func Apply(m *manifest.Manifest, p *Plan, report func(Change)) (int, error) {
 	n := 0
+	written := map[string]string{}
 	for _, c := range p.Changes {
 		if c.Outcome != Repairable {
 			continue
 		}
+		// Planning reserved every NewDest; this is the same rule enforced
+		// at the moment of writing, so no sequence of writes can leave two
+		// rows on one file even if the plan was built by someone else.
+		k := physKey(p.root, c.NewDest)
+		if owner, taken := p.claims[k]; taken {
+			return n, fmt.Errorf("%s: %s is already the dest_path of %s:%s", c.Row.SourcePath, c.NewDest, owner.SourceDisk, owner.SourcePath)
+		}
+		if prev, taken := written[k]; taken {
+			return n, fmt.Errorf("%s: %s was just given to %s", c.Row.SourcePath, c.NewDest, prev)
+		}
 		if err := m.UpdateDestPath(c.Row.SourceDisk, c.Row.SourcePath, c.NewDest); err != nil {
 			return n, fmt.Errorf("%s: %w", c.Row.SourcePath, err)
 		}
+		written[k] = c.Row.SourcePath
 		n++
 		if report != nil {
 			report(c)

@@ -669,7 +669,7 @@ func TestRepairDest(t *testing.T) {
 		"REPAIR     DSC0001.JPG : DSC0001.JPG → DCIM/DSC0001.JPG",
 		"NOT FOUND  DSC0002.JPG : DSC0002.JPG",
 		"NOT A FILE DIR.MOV : DIR.MOV is a directory",
-		"Repairable: 2   Not found: 1   Ambiguous: 0   Owned: 0   Not a file: 1",
+		"Repairable: 2   Not found: 1   Ambiguous: 0   Owned: 0   Not a file: 1   Unsafe: 0   Conflict: 0",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dry-run output missing %q:\n%s", want, out)
@@ -680,7 +680,7 @@ func TestRepairDest(t *testing.T) {
 	}
 
 	out, errOut, code := vault(t, cfg, "repair-dest", "sony", dst)
-	if code != 1 || !strings.Contains(errOut, "INCOMPLETE: 2 row(s) still without a destination this tool can back with a hash (1 not found, 0 ambiguous, 0 owned by another row, 1 not a file)") {
+	if code != 1 || !strings.Contains(errOut, "INCOMPLETE: 2 row(s) still without a destination this tool can back with a hash (1 not found, 0 ambiguous, 0 owned by another row, 1 not a file, 0 unsafe, 0 in conflict)") {
 		t.Fatalf("repair: exit %d, stderr %q", code, errOut)
 	}
 	if !strings.Contains(out, "repaired  C0001.XML : C0001.XML → CLIP/C0001.XML") || !strings.Contains(out, "Repaired 2 row(s). Status untouched") {
@@ -702,7 +702,7 @@ func TestRepairDest(t *testing.T) {
 
 	// A second run has nothing left to repair but the same unrepairable rows.
 	_, errOut, code = vault(t, cfg, "repair-dest", "sony", dst)
-	if code != 1 || !strings.Contains(errOut, "1 not found, 0 ambiguous, 0 owned by another row, 1 not a file") {
+	if code != 1 || !strings.Contains(errOut, "1 not found, 0 ambiguous, 0 owned by another row, 1 not a file, 0 unsafe, 0 in conflict") {
 		t.Errorf("second repair: exit %d, stderr %q", code, errOut)
 	}
 	// verify now promotes the repaired rows; DSC0002 stays missing and the
