@@ -6,6 +6,20 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #18 - `scripts/nas-kipp-copy-all.sh` (branch `kipp-script`, code tip `7938f58`) - the script Eddy will launch against the archive
+
+**PM (2026-09-17T21:54:13-07:00):** Review `git diff 176c041..7938f58 -- . ':!team'` (1 commit; 4 files, +196/-1: new `scripts/nas-kipp-copy-all.sh`, new `scripts/test/nas-kipp-copy-all.sh`, `scripts/test/scripts_test.go`, `CLAUDE.md`). Spec: `team/context/runbook-kipp.md` steps 2-3 (read it). This script will be run by the human on the NAS as root against the production archive (`/volume1/media`) and the live manifest, first with `DRY_RUN=1`, then for real (~1.9 TB). Dev's note: Dev 2026-09-17T21:53 (commit `c38c064` on that branch). PM independently at `7938f58`: `bash -n` clean on all scripts, `go vet` clean, `go test ./scripts/test -count=1` ok.
+
+**Claims:**
+1. Seven `docker run … copy` calls, in order SonyA6700, Backup, Multicam, Auditorium, GoPro, SonyZVE10, LeanTank, each `copy <disk> $SRC/<Folder> /volume1/media/<Folder> [flags] --dedupe-content --on-collision rename-mtime-year [--dry-run]`; disks `media-sonya6700`, `media-backup`, `media-multicam`, `media-auditorium`, `media-gopro`, `media-sonyzve10`, `media-leantank`; GoPro flags exactly `--prefix DCIM --rule MP4=Videos --rule LRV=Videos --rule THM=Videos --rule JPG=Photos --rule sav=Other`; every other folder has **no** routing flags.
+2. `KIPP_SRC` has no default; unset → the script exits non-zero before any docker call. `DRY_RUN=1` appends `--dry-run` to all seven. Image default `ghcr.io/eddyvarelae/media-vault:v0.2.1`, `VAULT_IMAGE` overrides. Mounts: `/volume1` rw, `/mnt/@usb` → `/usb` read-only, `VAULT_CONFIG=/volume1/docker/vault-nas-config`.
+3. A failing folder is logged `FAILED`, the pass continues, the final line reports the count, exit 1 if any failed. Log lines are written once under `nohup … >> $LOG 2>&1` (B27 helper).
+4. The stub test pins all of the above; dropping `--dedupe-content`, dropping `--dry-run` under `DRY_RUN=1`, or adding a routing flag to a flat folder fails it.
+
+**This is wrong if:** any call's source or destination path can differ from `$SRC/<Folder>` → `/volume1/media/<Folder>` (quoting, word splitting with `set -u`, a folder name with a space); `--dry-run` can be omitted or applied to only some calls; the script can write anything outside `$LOG` itself (it must not `mkdir`, `rm`, or touch `/volume1/media` directly - only the container does); `set -u` can abort mid-pass on an unset variable after the first docker call (leaving a partial pass silently); the exit status can be 0 with a `FAILED` folder; the test can pass with the GoPro flags on the wrong folder; or the usage comment's launch line (`sudo -E nohup …`) would run `docker` without root on the NAS (figmaboi needs `sudo docker`) - trace whether `sudo -E` on the script is sufficient.
+
+Verdict goes below this line.
+
 ### #14 - numbers: `tars` + `case` gap reports (Tester #20, #21) - **resolved: APPROVE → delivered to Eddy**
 
 **PM (2026-09-17T20:49:59-07:00):** Not code. The Tester (2026-09-17T20:49, `team/channels/tester-feedback.md` item 20) reports for the SSD `tars` (`/Volumes/tars`, read-only): **needs archiving: YES - 5,040 files, 1,188,169,289,959 bytes (1.19 TB)**; archived already 2,719 files / 772,522,033,618 B; every file hashed (`--hash-all`). Recompute from `/Volumes/Scratch1/tester/` (read-only, write nothing there): `gap-tars.tsv` (7,759 rows), `gap-tars.summary.txt`, `gap-tars.log`, script `gap-report.py`, snapshot `manifest-2026-09-17.db` (`?mode=ro&immutable=1`).

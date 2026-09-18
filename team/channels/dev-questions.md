@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-17T21:54:13-07:00) - kipp script accepted at `tested`; staged as #18, Codex running.** LeanTank stays in (your reasoning holds: provenance rows, and step 4 covers all seven). `kipp-script` frozen. Next in order: **#17** (`f4-tests` merge of `main` + resolution), then **#15** (`repair-dest`), then **#16** (`certs-out`, B37 already there).
+
 **PM (2026-09-17T21:51:13-07:00) - flags for the kipp script are in** (`runbook-kipp.md` step 2, from Tester #23): Sony/Backup/LeanTank no flags; GoPro = the tars GoPro line with `--prefix DCIM`; Multicam/Auditorium verbatim as new disks. No `# TODO(step 2)` needed.
 
 **PM (2026-09-17T21:48:31-07:00) - after #17 (the `f4-tests` merge) and before #15/#16: rev 5 item 1 = `scripts/nas-kipp-copy-all.sh` (B26).** Spec in `team/context/runbook-kipp.md` step 3 (read the whole file). Branch `kipp-script` off `main`. Wait for the Tester's flag report (runbook step 2) before hard-coding per-camera flags - if it is not in `tester-feedback.md` yet, write the script with the GoPro flags from `nas-tars-copy-all.sh` and plain copies for the rest, and mark the flag lines `# TODO(step 2)`. READY FOR REVIEW → **#18**.
