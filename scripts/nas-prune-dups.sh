@@ -11,7 +11,7 @@
 
 set -u
 # Pinned release tag; override with VAULT_IMAGE=... for a one-off run.
-IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.4}"
+IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.5}"
 CFG=/volume1/docker/vault-nas-config
 LOG=/volume1/docker/prune.log
 LIST=/volume1/docker/prune-list.tsv
