@@ -98,4 +98,4 @@ Branch policy: Dev works in its own worktree (`~/Projects/media-vault-dev`) on a
 - Scope since 2026-09-17: every scheduled batch against the archive is ours (nightly tagger = B17, after rev 3).
 - **P0 (2026-09-17): 2,668 SonyA6700 photos overwritten on Sep 1 are LOST - every disk Eddy owns was searched (B23a closed); the defect fix is Dev's current item (B23b).** 195 rows need a dest_path fix before verify can pass - B24. Archive is 8.20 TiB (not 3.3). Agents never wipe or write an SSD.
 - Source SSDs (B7 done): `tars`, `case`, `Eddy's Media Vault`, `kipp` (never copied, B26), and `Scratch1` = the former `noahsarc`, device-erased 2026-09-02 (Tester #17). The 2026-04-26 SonyA6700 source disk is unidentified. All five attached; agents read only.
-- Reviewer = `codex exec`, run by the PM. Seats boot in visible Terminal windows with `--remote-control`; nudges need a trailing empty `do script`.
+- Reviewer = `codex exec … </dev/null`, run by the PM. **Codex usage limit hit 2026-09-17 20:21; reviews resume 21:34** unless Eddy adds credits. Seats boot in visible Terminal windows with `--remote-control`; nudges need a trailing empty `do script`.
