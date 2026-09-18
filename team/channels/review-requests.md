@@ -6,7 +6,21 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #14 - numbers: `tars` gap report (Tester #20) - headed to Eddy as "this SSD needs archiving too"
+### #18 - `scripts/nas-kipp-copy-all.sh` (branch `kipp-script`, code tip `7938f58`) - the script Eddy will launch against the archive
+
+**PM (2026-09-17T21:54:13-07:00):** Review `git diff 176c041..7938f58 -- . ':!team'` (1 commit; 4 files, +196/-1: new `scripts/nas-kipp-copy-all.sh`, new `scripts/test/nas-kipp-copy-all.sh`, `scripts/test/scripts_test.go`, `CLAUDE.md`). Spec: `team/context/runbook-kipp.md` steps 2-3 (read it). This script will be run by the human on the NAS as root against the production archive (`/volume1/media`) and the live manifest, first with `DRY_RUN=1`, then for real (~1.9 TB). Dev's note: Dev 2026-09-17T21:53 (commit `c38c064` on that branch). PM independently at `7938f58`: `bash -n` clean on all scripts, `go vet` clean, `go test ./scripts/test -count=1` ok.
+
+**Claims:**
+1. Seven `docker run … copy` calls, in order SonyA6700, Backup, Multicam, Auditorium, GoPro, SonyZVE10, LeanTank, each `copy <disk> $SRC/<Folder> /volume1/media/<Folder> [flags] --dedupe-content --on-collision rename-mtime-year [--dry-run]`; disks `media-sonya6700`, `media-backup`, `media-multicam`, `media-auditorium`, `media-gopro`, `media-sonyzve10`, `media-leantank`; GoPro flags exactly `--prefix DCIM --rule MP4=Videos --rule LRV=Videos --rule THM=Videos --rule JPG=Photos --rule sav=Other`; every other folder has **no** routing flags.
+2. `KIPP_SRC` has no default; unset → the script exits non-zero before any docker call. `DRY_RUN=1` appends `--dry-run` to all seven. Image default `ghcr.io/eddyvarelae/media-vault:v0.2.1`, `VAULT_IMAGE` overrides. Mounts: `/volume1` rw, `/mnt/@usb` → `/usb` read-only, `VAULT_CONFIG=/volume1/docker/vault-nas-config`.
+3. A failing folder is logged `FAILED`, the pass continues, the final line reports the count, exit 1 if any failed. Log lines are written once under `nohup … >> $LOG 2>&1` (B27 helper).
+4. The stub test pins all of the above; dropping `--dedupe-content`, dropping `--dry-run` under `DRY_RUN=1`, or adding a routing flag to a flat folder fails it.
+
+**This is wrong if:** any call's source or destination path can differ from `$SRC/<Folder>` → `/volume1/media/<Folder>` (quoting, word splitting with `set -u`, a folder name with a space); `--dry-run` can be omitted or applied to only some calls; the script can write anything outside `$LOG` itself (it must not `mkdir`, `rm`, or touch `/volume1/media` directly - only the container does); `set -u` can abort mid-pass on an unset variable after the first docker call (leaving a partial pass silently); the exit status can be 0 with a `FAILED` folder; the test can pass with the GoPro flags on the wrong folder; or the usage comment's launch line (`sudo -E nohup …`) would run `docker` without root on the NAS (figmaboi needs `sudo docker`) - trace whether `sudo -E` on the script is sufficient.
+
+Verdict goes below this line.
+
+### #14 - numbers: `tars` + `case` gap reports (Tester #20, #21) - **resolved: APPROVE → delivered to Eddy**
 
 **PM (2026-09-17T20:49:59-07:00):** Not code. The Tester (2026-09-17T20:49, `team/channels/tester-feedback.md` item 20) reports for the SSD `tars` (`/Volumes/tars`, read-only): **needs archiving: YES - 5,040 files, 1,188,169,289,959 bytes (1.19 TB)**; archived already 2,719 files / 772,522,033,618 B; every file hashed (`--hash-all`). Recompute from `/Volumes/Scratch1/tester/` (read-only, write nothing there): `gap-tars.tsv` (7,759 rows), `gap-tars.summary.txt`, `gap-tars.log`, script `gap-report.py`, snapshot `manifest-2026-09-17.db` (`?mode=ro&immutable=1`).
 
@@ -22,9 +36,39 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 Verdict goes below this line.
 
-**PM (2026-09-17T21:41:52-07:00):** FINDINGS accepted, all three. #1 (P1): the certificate writer must `Lstat` the output leaf - a symlink there is refused, an existing regular file may be replaced (re-issue) - and the guard must check the path actually written. #2 (P2): the size heuristic is the wrong tool for a tree that may be damaged; `certify` gains an explicit `--root <dest-root>` (the scripts already know it - they pass it to `verify`), the refusal becomes physical containment of the output under that root, and the heuristic stays only as a documented best-effort fallback when `--root` is absent; README/CLAUDE claims narrowed accordingly. #3 (P2): the shell test's negation is broken - fix so the negative assertion can fail. Back to Dev on `certs-out`, new commits only (plus B37 tag bump there); re-review as **#16, fixes only**. The rule parsers (B34) are closed.
+**Reviewer (2026-09-17):** APPROVE — request #14. Independently recomputed from the existing TSVs, summaries/logs, and `manifest-2026-09-17.db` opened with `?mode=ro&immutable=1`; fresh read-only `find` and stat checks on both SSDs reproduce every recorded path and size. No hashing script was executed and no content was rehashed.
 
-### #13 - B9 F4 tests + B27 single logging + B20 skip `reports/` (branch `f4-tests`, code tip `dc36e5f`) - **resolved: APPROVE → merged**
+| Quantity | Claimed files / bytes | Recomputed files / bytes |
+| --- | --- | --- |
+| tars total | 7,759 / 1,960,691,323,577 | 7,759 / 1,960,691,323,577 |
+| tars HASH_ARCHIVED | 2,719 / 772,522,033,618 | 2,719 / 772,522,033,618 |
+| tars GAP | 5,040 / 1,188,169,289,959 | 5,040 / 1,188,169,289,959 |
+| kipp corrected gap (#8 input) | 9,872 / 1,921,695,784,449 | 9,872 / 1,921,695,784,449 |
+| kipp + tars gap | 14,912 / 3,109,865,074,408 | 14,912 / 3,109,865,074,408 |
+| case total / HASH_ARCHIVED | 5,141 / 1,297,894,093,853 | 5,141 / 1,297,894,093,853 |
+| case GAP | 0 / 0 | 0 / 0 |
+
+Arithmetic: 2,719 + 5,040 = 7,759; 772,522,033,618 + 1,188,169,289,959 = 1,960,691,323,577 B. The tars gap is 1.188169289959 decimal TB, rounding to the claimed **1.19 TB**. The kipp input recomputes from 9,859 original GAP rows / 1,921,420,981,751 B plus 13 distinct correction rows / 274,802,698 B; each correction path and size matches an original NS_VERIFIED row. Thus 9,872 + 5,040 = **14,912** and 1,921,695,784,449 + 1,188,169,289,959 = **3,109,865,074,408 B**. This is the sum of file instances across the two SSDs, not a distinct-content total; kipp's prior content-confirmation evidence is the accepted #8 input, not a new hashing run.
+
+| tars gap folder | Claimed files / decimal GB | Recomputed files / exact bytes / decimal GB |
+| --- | --- | --- |
+| SonyA6700 | 4,775 / 1,003.8 | 4,775 / 1,003,797,942,671 / 1,003.8 |
+| SonyZVE10 | 240 / 130.0 | 240 / 129,955,658,338 / 130.0 |
+| GoPro | 25 / 54.4 | 25 / 54,415,688,950 / 54.4 |
+| DJIFlip | Fully archived | 0 gap; 183 archived / 95,419,490,254 B |
+| Test | Fully archived | 0 gap; 5 archived / 1,001,763,415 B |
+
+Folder arithmetic: 4,775 + 240 + 25 = **5,040**; 1,003,797,942,671 + 129,955,658,338 + 54,415,688,950 = **1,188,169,289,959 B**. Independently rebuilding basename+size candidate sets from the snapshot gives **5,029 no match (claimed 5,029), 10 single-hash name+size collisions with different content (claimed 10), and 1 multiple-hash ambiguous match (claimed 1)**; these sum to 5,040 and every recorded GAP `via` agrees.
+
+Hash/status checks: snapshot indexes reproduce **67,735 rows / 64,317 distinct nonempty hashes / 66,807 basename+size keys**, matching the logs. **0 of 5,040 tars GAP rows** has a hash anywhere in the snapshot (claimed 0); **2,719 of 2,719 tars HASH_ARCHIVED rows** have a matching hash (claimed all), and all also have a verified match. For case, **5,141 of 5,141 rows** have a matching hash on at least one `verified` row (claimed all); **0 absent and 0 present only on non-verified rows**. Every archived row also has a same-size manifest match. All tars/case hashes are valid 64-character lowercase hexadecimal strings; neither TSV has duplicate paths or NS-only categories.
+
+Completeness and method: fresh `find` with dot-directories pruned and dotfiles/AppleDouble excluded exited 0 without traversal errors: **tars 7,759 files / 1,960,691,323,577 B (claimed the same); case 5,141 / 1,297,894,093,853 B (claimed the same)**. Both path sets match their TSV exactly, with zero missing/extra paths and zero changed sizes. The logs record zero name+size-only resolutions and completed hashing at **7,759/7,759** and **5,141/5,141**, respectively; their final totals and the summaries agree with the independent sums. Source trace of `gap-report.py` confirms `--hash-all` routes every file through hashing and classifies GAP only when its hash is absent from every snapshot row. That code alone does not require verified status for HASH_ARCHIVED; the independent status checks above establish the stronger case claim.
+
+**Needs archiving: tars YES; case NO**, relative to the supplied snapshot and recorded hashes. This approval verifies the requested artifact arithmetic, membership/status checks, and current path/size coverage; it does not independently remeasure content hashes or establish current NAS byte integrity. Only this channel file was modified.
+
+**PM (2026-09-17T21:46:56-07:00):** APPROVE accepted; every figure reproduced. Delivered to Eddy: `tars` needs archiving (5,040 files / 1.19 TB), `case` does not (all 5,141 on verified rows); `kipp` + `tars` = 14,912 files / 3.11 TB to archive.
+
+### #13 - B9 F4 tests + B27 single logging + B20 skip `reports/` (branch `f4-tests`, code tip `dc36e5f`) - **resolved: APPROVE → Dev merges `main` in (conflicts), PM merges after #17**
 
 **PM (2026-09-17T20:38:33-07:00):** Review `git diff 73c52ae..dc36e5f -- . ':!team'` (3 commits off `main` at `73c52ae`, code-identical to `e4a4aed`; 9 files, +453/-14: new `internal/verify/verify_test.go`, `cmd/vault/main_test.go`, `internal/scan/scan.go` + test, `scripts/nas-verify-certify-all.sh`, new `scripts/test/nas-verify-certify-all.sh`, `scripts/test/scripts_test.go`, `CLAUDE.md`, `README.md`). Dev's note: Dev 2026-09-17T20:38 (commit `5828145` on that branch). PM independently at `dc36e5f`: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all seven test packages (`internal/verify` now tested). Note: `certs-out` (#12) also creates `scripts/test/nas-verify-certify-all.sh` and edits the same script - a merge conflict Dev resolves when the second of the two lands; review each as it is.
 
@@ -90,6 +134,8 @@ Verdict goes below this line.
 3. **[P2] The shell test's negative camera-root assertion cannot fail the test.** `scripts/test/nas-verify-certify-all.sh:45-46` passes literal `!` to `check`; line 18 tries to execute it as a command, rather than negating `grep`. Moreover, `check` is on the left of a pipeline, so its `failures` increment is lost in a subshell; the pipeline status is ignored. A minimal, file-free Bash reproduction produced `!: command not found`, `FAIL`, and parent `failures=0`. Wrap the negated pipeline in a function invoked by `check`, or compute its result outside the pipeline and assert it. The separate six-output count at lines 43-44 does catch reverting `$CERTS` to `$root`, but does not make this broken assertion valid.
 
 Remaining requested checks: both rule parsers use the same absolute-path and exact-component checks; both reject `a/../b` before cleaning, and both accept `v..ideos`. Their CLI error paths exit 1 with `invalid rule`. The production script routes all six certificate outputs to `$CERTS`, creates that directory, retains camera-root verification, and honors `VAULT_LOG`; `nas-test.sh` now writes `/config/tars-test.cert.json`, mapped beside the manifest, not into media. Stdout certification skips the new guard as intended. The guard precedes `Build`, signing-key creation, signing, and certificate writing. It does **not** precede literally every write: existing `main` initialization creates the config directory and opens/initializes the manifest before dispatch (`cmd/vault/main.go:71-79`). Thus the narrower before-signing/key/output claim holds; a zero-write refusal claim would not. The new tests were inspected, not executed; PM's reported test results remain PM evidence.
+
+**PM (2026-09-17T21:41:52-07:00):** FINDINGS accepted, all three. #1 (P1): the certificate writer must `Lstat` the output leaf - a symlink there is refused, an existing regular file may be replaced (re-issue) - and the guard must check the path actually written. #2 (P2): the size heuristic is the wrong tool for a tree that may be damaged; `certify` gains an explicit `--root <dest-root>` (the scripts already know it - they pass it to `verify`), the refusal becomes physical containment of the output under that root, and the heuristic stays only as a documented best-effort fallback when `--root` is absent; README/CLAUDE claims narrowed accordingly. #3 (P2): the shell test's negation is broken - fix so the negative assertion can fail. Back to Dev on `certs-out`, new commits only (plus B37 tag bump there); re-review as **#16, fixes only**. The rule parsers (B34) are closed.
 
 
 ### #9 - re-review of #6's fix only (branch `overwrite-guard`, code tip `abc863e`) - **resolved: FINDINGS (1), accepted → Dev fixes → request #11**
