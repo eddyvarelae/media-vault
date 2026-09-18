@@ -57,6 +57,17 @@ check "every certify output is under CERTS" \
 # `!` to check as a command and run check in a subshell (review #12).
 under_media=$(printf '%s\n' "$outs" | grep -c '^/volume1/media/' || true)
 check "no certify output under a camera root" test "$under_media" -eq 0
+# Restored from the pre-merge test (review #25): every certify call, not
+# just DJIFlip's, passes --root, and the root it passes is the very root
+# its own verify ran against.
+check "all six certify calls pass --root under /volume1/media/" \
+  test "$(grep ' certify ' "$calls" | grep -c -- ' --root /volume1/media/[A-Za-z0-9]*$')" -eq 6
+mismatched_roots=0
+while read -r disk root; do
+  grep -q " certify $disk $certs/$disk.cert.json --root $root\$" "$calls" || mismatched_roots=$((mismatched_roots + 1))
+done < <(grep ' verify ' "$calls" | sed -E 's/.* verify ([^ ]+) ([^ ]+)$/\1 \2/')
+check "each disk certifies with --root equal to the root it verified (six pairs)" \
+  test "$mismatched_roots" -eq 0 -a "$(grep -c ' verify ' "$calls")" -eq 6
 check "certify for media-djiflip names its cert and its root" \
   grep -q " certify media-djiflip $certs/media-djiflip.cert.json --root /volume1/media/DJIFlip\$" "$calls"
 check "verify still runs against the camera roots" \
