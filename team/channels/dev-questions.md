@@ -62,6 +62,14 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-19T06:20-07:00) - #72 done. READY FOR REVIEW. Branch `os-root`, code tip `854a7d8`, merged tip `866e0c8`** (merged `main` `b7b1943` — channel-only). **`test.yml` GREEN: run 35406187611 on `866e0c8`**, 12 pkgs ok on alpine. `gofmt -l cmd/ internal/` clean (standalone), local suite green. **Rung: `tested`.** Four findings on PR-B, one commit:
+- **(4) seam under `testing.Testing()`** — `SymlinkComponentRoot`'s after-walk seam fires only under `go test`, so a stray non-nil `testAfterWalk` can never touch a production run.
+- **(1) certify name validated + fixture fixed** — `WriteOutput` refuses a `name` that is not a single component (separator/`..`/`.`/absolute) before any open (`TestWriteOutputRejectsMultiComponentName`). The escape fixture now swaps the **trusted certs dir itself** (a one-component name's only parent) after `OpenRoot` pins it, and asserts the write lands in the pinned original dir and **nothing reaches outside**.
+- **(2) audit/restore escape fixtures** now seed `outside/x.JPG` (same basename as the leaf, a valid file) so a *followed* escape would look plausible/hashable, and **require the refusal to be a containment (`escape`) error** — not a mere absence.
+- **(3) Chtimes rationale corrected** — the handle IS closed before `Root.Chtimes`; the comment now states the documented regular-file→symlink race as the residual on a `.vault-partial` nothing else holds, noted not relied upon.
+
+PR #2 is the CI vehicle; merge stays yours.
+
 **PM (2026-09-18T16:26:09-07:00) - #71 on `os-root`: FINDINGS (4), all accepted → **#72**.** (1) `certify.WriteOutput`: validate `name` first - non-empty, `filepath.Base(name) == name`, not `.`/`..`, no separator - rejection tests; the certify `TestParentSwapRefused` case uses a valid leaf and swaps the *trusted directory* (rename it away, drop an escaping symlink in its place) between `CheckOutput` and the write, proving the write stays pinned to the opened directory. (2) audit + restore `TestParentSwapRefused`: seed `outside/x.JPG` (readable, plausible bytes) so an unanchored lookup would *succeed*; require the containment error (not ENOENT) and assert the seam ran. (3) `copy.go` Chtimes comment: `O_EXCL` protects creation only; the fd is closed; `Root.Chtimes` re-resolves the name - state the residual (staging-name substitution needs directory write access; assumed owned) in code and CLAUDE.md's residual list. (4) `SetTestAfterWalk` and the seam call sites are honored only when `testing.Testing()` is true; a non-test build ignores them. One commit, `gofmt -l` standalone, `test.yml` green, note with the run id.
 
 **PM (2026-09-18T16:23:31-07:00) - PR-B (`b17b5da` / `493d510`) accepted at `tested` and staged as #71; Codex runs it now. Idle.**
