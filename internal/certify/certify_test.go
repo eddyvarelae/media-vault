@@ -236,3 +236,114 @@ func TestCheckOutputLayers(t *testing.T) {
 		t.Errorf("root \"/\": %q, %v; everything is inside /", got, err)
 	}
 }
+
+// Review #16: what CheckOutput approved is not what the write may find. A
+// symlink substituted at the leaf between check and write must be replaced
+// by the certificate, never followed - into a verified photo, or into the
+// tree. WriteOutput's temp-name O_EXCL|O_NOFOLLOW + rename is the mechanism;
+// this test performs the substitution in the window.
+func TestWriteOutputNeverFollowsASubstitutedLeaf(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "archive")
+	certs := filepath.Join(base, "certs")
+	for _, d := range []string{filepath.Join(root, "DCIM"), certs} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	photo := filepath.Join(root, "DCIM", "a.JPG")
+	if err := os.WriteFile(photo, []byte("a verified photo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rows := []manifest.Entry{{DestPath: "DCIM/a.JPG", Size: 16}}
+	out := filepath.Join(certs, "out.json")
+
+	t.Run("leaf becomes a link to a verified photo", func(t *testing.T) {
+		os.Remove(out)
+		if got, err := CheckOutput(out, root, rows); err != nil || got != "" {
+			t.Fatalf("check: %q, %v", got, err)
+		}
+		// The window: someone replaces the (absent or regular) leaf.
+		if err := os.Symlink(photo, out); err != nil {
+			t.Fatal(err)
+		}
+		if err := WriteOutput(out, []byte(`{"cert":1}`)); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		if got, _ := os.ReadFile(photo); string(got) != "a verified photo" {
+			t.Fatalf("verified photo overwritten through the substituted leaf: %q", got)
+		}
+		fi, err := os.Lstat(out)
+		if err != nil || fi.Mode()&os.ModeSymlink != 0 || !fi.Mode().IsRegular() {
+			t.Errorf("out should now be the certificate as a regular file (the link replaced), got %v, %v", fi, err)
+		}
+		if got, _ := os.ReadFile(out); string(got) != `{"cert":1}` {
+			t.Errorf("certificate content = %q", got)
+		}
+	})
+
+	t.Run("leaf becomes a dangling link into the tree", func(t *testing.T) {
+		os.Remove(out)
+		inside := filepath.Join(root, "new.cert.json")
+		if got, err := CheckOutput(out, root, rows); err != nil || got != "" {
+			t.Fatalf("check: %q, %v", got, err)
+		}
+		if err := os.Symlink(inside, out); err != nil {
+			t.Fatal(err)
+		}
+		if err := WriteOutput(out, []byte(`{"cert":2}`)); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		if _, err := os.Lstat(inside); err == nil {
+			t.Errorf("a certificate was created inside the tree through the substituted leaf")
+		}
+		if got, _ := os.ReadFile(out); string(got) != `{"cert":2}` {
+			t.Errorf("certificate content = %q", got)
+		}
+	})
+
+	t.Run("temp name already taken", func(t *testing.T) {
+		os.Remove(out)
+		if err := os.WriteFile(out+".vault-partial", []byte("stale"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := WriteOutput(out, []byte("x")); err == nil || !strings.Contains(err.Error(), "leftover") {
+			t.Errorf("stale temp: %v, want refusal that names the leftover", err)
+		}
+		if got, _ := os.ReadFile(out + ".vault-partial"); string(got) != "stale" {
+			t.Errorf("stale temp truncated: %q", got)
+		}
+		os.Remove(out + ".vault-partial")
+	})
+
+	t.Run("temp name is a link", func(t *testing.T) {
+		os.Remove(out)
+		if err := os.Symlink(photo, out+".vault-partial"); err != nil {
+			t.Fatal(err)
+		}
+		if err := WriteOutput(out, []byte("x")); err == nil {
+			t.Errorf("link at the temp name: want refusal")
+		}
+		if got, _ := os.ReadFile(photo); string(got) != "a verified photo" {
+			t.Fatalf("photo written through a link at the temp name: %q", got)
+		}
+		os.Remove(out + ".vault-partial")
+	})
+
+	t.Run("plain write is what it replaces: the same substitution would have followed", func(t *testing.T) {
+		// Not an assertion on production code - the demonstration that the
+		// window was real, kept so the mechanism's purpose stays visible.
+		victim := filepath.Join(base, "victim")
+		if err := os.WriteFile(victim, []byte("precious"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(certs, "plain.json")
+		if err := os.Symlink(victim, link); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.WriteFile(link, []byte("followed"), 0o644)
+		if got, _ := os.ReadFile(victim); string(got) != "followed" {
+			t.Skip("this filesystem does not follow symlinks on write; the demonstration does not apply")
+		}
+	})
+}

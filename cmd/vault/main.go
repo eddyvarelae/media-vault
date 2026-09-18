@@ -599,7 +599,9 @@ func runCertify(m *manifest.Manifest, configDir string, args []string) {
 	if out == "" {
 		fmt.Println(string(data))
 	} else {
-		if err := os.WriteFile(out, data, 0o644); err != nil {
+		// Never through the leaf: CheckOutput looked, but a symlink put
+		// there since would be followed by a plain write (review #16).
+		if err := certify.WriteOutput(out, data); err != nil {
 			die("write %s: %v", out, err)
 		}
 		fmt.Fprintf(os.Stderr, "Wrote signed certificate: %s\n", out)

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/eddyvarelae/media-vault/internal/manifest"
@@ -132,6 +133,44 @@ func describe(fi os.FileInfo) string {
 	default:
 		return fi.Mode().String()
 	}
+}
+
+// WriteOutput writes data to out without ever following what is at out.
+// os.WriteFile opens the leaf itself, so a symlink substituted there
+// between CheckOutput and the write would be followed - into a verified
+// photo, or into the tree. Instead the bytes go to a temporary name beside
+// out, created O_CREATE|O_EXCL|O_NOFOLLOW (nothing that exists is truncated
+// and no link at the temp name is followed), fsynced, and renamed over the
+// leaf: rename replaces whatever directory entry is at out, symlink or
+// file, and follows nothing. What this does not bind is the parent
+// directory itself between check and write; binding that needs openat
+// (os.Root, Go 1.25) and is noted in the backlog.
+func WriteOutput(out string, data []byte) error {
+	tmp := out + ".vault-partial"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
+	if err != nil {
+		return fmt.Errorf("create %s: %w (a leftover from an interrupted run? look, then remove it by hand)", tmp, err)
+	}
+	cleanup := func() { os.Remove(tmp) }
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		cleanup()
+		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		cleanup()
+		return fmt.Errorf("sync %s: %w", tmp, err)
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("close %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, out); err != nil {
+		cleanup()
+		return fmt.Errorf("rename %s: %w", out, err)
+	}
+	return nil
 }
 
 // InsideArchive reports the ancestor directory of out under which one of
