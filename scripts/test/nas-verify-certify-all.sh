@@ -62,12 +62,24 @@ check "no certify output under a camera root" test "$under_media" -eq 0
 # its own verify ran against.
 check "all six certify calls pass --root under /volume1/media/" \
   test "$(grep ' certify ' "$calls" | grep -c -- ' --root /volume1/media/[A-Za-z0-9]*$')" -eq 6
-mismatched_roots=0
+# The six (disk, root) pairs are the expected ones, spelled out - not read
+# back from the recording, which a script that verified and certified the
+# wrong root would have satisfied (review #29). Each pair must have exactly
+# one certify call, with its cert under CERTS and --root that very root.
+expected_pairs="media-djiflip /volume1/media/DJIFlip
+media-djimini2 /volume1/media/DJIMini2
+media-iphone /volume1/media/iPhone
+media-sonya6700 /volume1/media/SonyA6700
+media-sonyzve10 /volume1/media/SonyZVE10
+media-gopro /volume1/media/GoPro"
+pairs_ok=0; pairs_bad=0
 while read -r disk root; do
-  grep -q " certify $disk $certs/$disk.cert.json --root $root\$" "$calls" || mismatched_roots=$((mismatched_roots + 1))
-done < <(grep ' verify ' "$calls" | sed -E 's/.* verify ([^ ]+) ([^ ]+)$/\1 \2/')
-check "each disk certifies with --root equal to the root it verified (six pairs)" \
-  test "$mismatched_roots" -eq 0 -a "$(grep -c ' verify ' "$calls")" -eq 6
+  n=$(grep -c " certify $disk $certs/$disk.cert.json --root $root\$" "$calls" || true)
+  if [ "$n" -eq 1 ]; then pairs_ok=$((pairs_ok + 1)); else pairs_bad=$((pairs_bad + 1)); echo "       pair $disk $root: $n certify call(s), want 1"; fi
+done <<< "$expected_pairs"
+check "six distinct expected (disk, root) pairs, one certify call each" \
+  test "$pairs_ok" -eq 6 -a "$pairs_bad" -eq 0
+check "no certify call outside those six" test "$(grep -c ' certify ' "$calls")" -eq 6
 check "certify for media-djiflip names its cert and its root" \
   grep -q " certify media-djiflip $certs/media-djiflip.cert.json --root /volume1/media/DJIFlip\$" "$calls"
 check "verify still runs against the camera roots" \
