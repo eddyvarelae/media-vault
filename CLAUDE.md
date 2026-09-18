@@ -20,6 +20,9 @@ fixtures calls `testguard.Require()` from its `TestMain`
 (`internal/testguard`): it resolves the temp root (`Abs` + symlinks) and exits
 1 if it is under `/volume1` or `/mnt`. A new test package that writes files
 gets the same three-line `TestMain`. Never point a test at either root.
+`scripts/test/` holds bash tests of the NAS scripts (Docker shadowed by a
+stub on `PATH`, logs redirected via `VAULT_LOG`); `go test ./scripts/test/`
+runs them, so `go test ./...` is still the one command.
 
 ## Package map
 
