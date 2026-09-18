@@ -5,9 +5,7 @@
 set -e
 
 # Pinned release tag; override with VAULT_IMAGE=... for a one-off run.
-# v0.2.0 does not exist yet: the PM tags it on main after the B3/B4/B5 PR and
-# F4 (verify --only-unverified) merge. See docs/release.md.
-IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.0}"
+IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.1}"
 SRC=/mnt/@usb/sdc1/Test
 DST=/volume1/docker/vault-nas-test
 CFG=/volume1/docker/vault-nas-config
@@ -45,7 +43,7 @@ echo "=== CERTIFY ==="
 sudo docker run --rm \
   -v "$DST":/dest \
   -v "$CFG":/config \
-  "$IMG" certify tars /dest/tars-test.cert.json
+  "$IMG" certify tars /config/tars-test.cert.json --root /dest   # beside the manifest, never under /dest (B25)
 
 echo
-echo "Done. Certificate at $DST/tars-test.cert.json"
+echo "Done. Certificate at $CFG/tars-test.cert.json"

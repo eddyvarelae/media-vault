@@ -38,7 +38,9 @@ Usage:
                    [--dedupe-content]   (scan and copy: skip files whose CONTENT
                                          is already archived under any disk)
   vault verify     <source-disk-name> <dest-dir> [--only-unverified]
-  vault certify    <source-disk-name> [out.json]
+  vault certify    <source-disk-name> [out.json] [--root <dest-dir>]
+                   (--root: refuse an out.json anywhere under that tree;
+                    without it the tree is recognised by its files)
   vault repair-dest <source-disk-name> <dest-dir> [--dry-run]
                    (rows whose dest_path is missing: point them at the same
                     basename one directory down, only on a size+sha256 match)
@@ -553,14 +555,56 @@ func runVerify(ctx context.Context, m *manifest.Manifest, args []string) {
 }
 
 func runCertify(m *manifest.Manifest, configDir string, args []string) {
-	if len(args) < 1 || len(args) > 2 {
+	destRoot := ""
+	var pos []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--root":
+			if i+1 >= len(args) {
+				die("--root needs a value")
+			}
+			destRoot = args[i+1]
+			i++
+		default:
+			if strings.HasPrefix(args[i], "--") {
+				die("unknown flag: %s", args[i])
+			}
+			pos = append(pos, args[i])
+		}
+	}
+	if len(pos) < 1 || len(pos) > 2 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
-	disk := args[0]
+	disk := pos[0]
 	out := ""
-	if len(args) == 2 {
-		out = args[1]
+	if len(pos) == 2 {
+		out = pos[1]
+	}
+
+	if out != "" {
+		// Before signing anything: a certificate never lands in the tree it
+		// certifies (B25), and never through a symlink at its own name.
+		// With --root the check is containment; without, the tree is found
+		// by its contents, which a damaged tree can defeat - the scripts
+		// always pass --root.
+		rows, err := m.ListByDisk(disk)
+		if err != nil {
+			die("certify: %v", err)
+		}
+		root, err := certify.CheckOutput(out, destRoot, rows)
+		if err != nil {
+			if errors.Is(err, certify.ErrOutputNotAFile) {
+				fmt.Fprintf(os.Stderr, "Cannot certify: %v\n", err)
+				os.Exit(1)
+			}
+			die("certify: %v", err)
+		}
+		if root != "" {
+			fmt.Fprintf(os.Stderr, "Cannot certify: %v: %s is under %s.\n", certify.ErrInsideArchive, out, root)
+			fmt.Fprintln(os.Stderr, "Write certificates beside the manifest (e.g. $VAULT_CONFIG/../vault-certs/), never beside the footage.")
+			os.Exit(1)
+		}
 	}
 
 	cert, err := certify.Build(m, disk, configDir)
@@ -581,7 +625,9 @@ func runCertify(m *manifest.Manifest, configDir string, args []string) {
 	if out == "" {
 		fmt.Println(string(data))
 	} else {
-		if err := os.WriteFile(out, data, 0o644); err != nil {
+		// Never through the leaf: CheckOutput looked, but a symlink put
+		// there since would be followed by a plain write (review #16).
+		if err := certify.WriteOutput(out, data); err != nil {
 			die("write %s: %v", out, err)
 		}
 		fmt.Fprintf(os.Stderr, "Wrote signed certificate: %s\n", out)

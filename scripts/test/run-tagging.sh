@@ -108,6 +108,41 @@ mkfile "$src/SonyA6700/DCIM/unverified.MP4" 202604010000 800
 "$vault" copy media-sonya6700 "$src/SonyA6700" "$media/SonyA6700" > /dev/null
 # A B39-shaped row: verified, dest_path emptied - the file is at <folder>/source_path.
 sqlite3 "$cfg/manifest.db" "UPDATE files SET dest_path='' WHERE source_path='DCIM/mid.MP4'"
+# Review #26: verified rows whose spelling must never be pulled or written
+# through - climbing (would land in GoPro, or outside scratch), our own
+# reports/ output, hidden, the NAS trash, AppleDouble - as dest_path and as
+# the empty-dest_path fallback. Each names a real, newest file, so a
+# selection that admitted any of them would put it at the top of the batch.
+mkfile "$media/GoPro/Videos/escaped.MP4" 202609010000 100
+mkfile "$media/SonyA6700/DCIM/reports/rep.MP4" 202609010000 100
+mkfile "$media/SonyA6700/DCIM/.hidden.MP4" 202609010000 100
+mkfile "$media/SonyA6700/#recycle/trash.MP4" 202609010000 100
+now_ns=$(python3 -c "import time; print(int(time.time()*1e9)+10**12)")
+sqlite3 "$cfg/manifest.db" "INSERT INTO files (source_disk, source_path, dest_path, size, mtime_ns, sha256, copied_at, status) VALUES
+  ('media-sonya6700', 'DCIM/esc1.MP4', '../GoPro/Videos/escaped.MP4', 100, 1, 'x', $now_ns, 'verified'),
+  ('media-sonya6700', '../GoPro/Videos/escaped.MP4', '', 100, 1, 'x', $now_ns, 'verified'),
+  ('media-sonya6700', 'DCIM/esc2.MP4', '../../../../../../tmp/escaped.MP4', 100, 1, 'x', $now_ns, 'verified'),
+  ('media-sonya6700', 'DCIM/abs.MP4', '/etc/escaped.MP4', 100, 1, 'x', $now_ns, 'verified'),
+  ('media-sonya6700', 'DCIM/reports/rep.MP4', 'DCIM/reports/rep.MP4', 100, 1, 'x', $now_ns, 'verified'),
+  ('media-sonya6700', 'DCIM/.hidden.MP4', '', 100, 1, 'x', $now_ns, 'verified'),
+  ('media-sonya6700', '#recycle/trash.MP4', '#recycle/trash.MP4', 100, 1, 'x', $now_ns, 'verified'),
+  ('media-sonya6700', 'DCIM/._app.MP4', 'DCIM/._app.MP4', 100, 1, 'x', $now_ns, 'verified')"
+# Review #36: a row whose dest_path embeds a newline+tab tries to forge a
+# second batch record (id 999, cam '..', dest outside.MP4). safe_rel must
+# refuse the control chars; nothing must reach the forged camera.
+printf 'ok.MP4
+999	..	outside.MP4	1	1	manifest.MP4' > "$work/inject.name"
+python3 - "$cfg/manifest.db" "$work/inject.name" "$now_ns" <<'PY'
+import sqlite3, sys
+db, namef, now = sys.argv[1], sys.argv[2], int(sys.argv[3])
+name = open(namef).read()
+c = sqlite3.connect(db)
+c.execute("INSERT INTO files (source_disk, source_path, dest_path, size, mtime_ns, sha256, copied_at, status) VALUES (?,?,?,?,?,?,?,?)",
+          ("media-sonya6700", "DCIM/inject.MP4", name, 100, 1, "x", now, "verified"))
+c.commit(); c.close()
+PY
+mkfile "$media/outside.MP4" 202609010000 100     # the file a successful injection would reach
+sqlite3 "$cfg/manifest.db" "PRAGMA wal_checkpoint(TRUNCATE)"   # fold into the main db so the snapshot's rsync copies a consistent file
 # Public has files and no rows: walked, newest mtime first.
 mkfile "$media/Public/talk.mp4" 202508010000 700
 mkfile "$media/Public/older.mov" 202507010000 600
@@ -115,7 +150,7 @@ mkfile "$media/Public/reports/x.mp4" 202509010000 100        # our own output di
 mkfile "$media/Public/.hidden.mp4" 202509010000 100
 manifest="$cfg/manifest.db"
 check "fixture: the manifest has the expected rows" \
-  test "$(sqlite3 "$manifest" "SELECT COUNT(*) FROM files WHERE status='verified'")" -eq 6
+  test "$(sqlite3 "$manifest" "SELECT COUNT(*) FROM files WHERE status='verified'")" -eq 15
 
 # ── how the script is run ─────────────────────────────────────────────────
 env_file="$work/mini.env"
@@ -171,6 +206,12 @@ check "dry run: tier 1 newest copied_at first, across folders (GX01, new, mid, o
 check "dry run: the copied (unverified) row is not selected" test "$(count 'unverified' "$out")" -eq 0
 check "dry run: the still image is not selected" test "$(count 'still.JPG' "$out")" -eq 0
 check "dry run: the empty-dest_path row is selected by its source_path" grep -q "DCIM/mid.MP4" "$out"
+check "dry run: no climbing, absolute, reports/, hidden, #recycle or AppleDouble row is selected (review #26)" \
+  test "$(grep -v '^selected ' "$out" | grep -Ec 'escaped|/etc/|reports/|\.hidden|#recycle|\._app')" -eq 0
+check "dry run: the skipped candidates are announced with a count and an example" \
+  grep -q "skipped 9 candidate(s) with unsafe or junk paths (first: " "$out"
+check "dry run: the injected row forged no '..' camera record" test "$(grep -cE '^  [.][.] ' "$out")" -eq 0
+check "dry run: nothing reached the outside.MP4 the injection aimed at" test "$(grep -c 'outside.MP4' "$out")" -eq 0
 check "dry run: tier 2 is not touched while tier 1 has pending files" test "$(count 'Public' "$(echo "$out")")" -le 1 -a "$(grep -c '^\s\+Backup\s' "$out")" -eq 0
 check "dry run: summary says selected 4 files from tier 1" grep -q "selected 4 files, .* from tier 1; pending before this run: tier 1 4, tier 2 3" "$out"
 check "dry run: no POLICY OVERRIDE line with defaults" test "$(count 'POLICY OVERRIDE' "$out")" -eq 0
@@ -193,6 +234,18 @@ check "override: logged against the default with its source" \
 check "override: tier 2 override logged too" grep -q "POLICY OVERRIDE: TAG_SOURCES_TIER2=\[Backup\] (default \[Backup LeanTank Public\]" "$out"
 ( export MINI_ENV="$work/mini-override.env" TAG_BATCH_MAX_GB=7; run bash "$script" --dry-run ) > "$out" 2>&1
 check "override: environment still wins over mini.env" grep -q "cap: 7 GB" "$out"
+
+# ── 2b. a failed dry-run selection leaves nothing behind (review #26) ─────
+# A state db that opens but lacks the files table makes selection fail;
+# the dry run must exit non-zero, say so, and leave no temp file in TMPDIR.
+mkdir -p "$state"; sqlite3 "$state/tagging-state.db" "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+tmpbefore=$(ls -A "${TMPDIR:-/tmp}" | sort)
+run bash "$script" --dry-run > "$out" 2>&1
+rc=$?
+tmpafter=$(ls -A "${TMPDIR:-/tmp}" | sort)
+check "dry run with a broken state db: exit 2 and says selection failed" test "$rc" -eq 2 -a "$(count 'batch selection failed' "$out")" -eq 1
+check "dry run with a broken state db: no temp file left in TMPDIR" test "$tmpbefore" = "$tmpafter"
+rm -f "$state/tagging-state.db"
 
 # ── 3. torn snapshot: refused ─────────────────────────────────────────────
 head -c 4000 /dev/urandom > "$work/torn.db"
@@ -236,6 +289,23 @@ h = subprocess.run(["xattr", "-p", "-x", "com.apple.metadata:_kMDItemUserTags", 
 print(sorted(str(t).split("\n")[0] for t in plistlib.loads(bytes.fromhex(h.replace(" ", "").replace("\n", "")))))
 PY
 check "run 2: existing Finder tag kept alongside the new ones" grep -qF "['keeper', 'outdoors', 'person']" "$work/tags.out"
+
+# ── 4b. a symlinked directory on the NAS side: refused before the pull ───
+# The helper cannot see filesystem links in a row's path; the shell walks
+# the components and refuses, recording the file failed, writing nothing
+# through the link.
+elsewhere="$work/elsewhere"; mkfile "$elsewhere/linked.MP4" 202609010000 300
+ln -s "$elsewhere" "$media/SonyA6700/LINK"
+sqlite3 "$manifest" "INSERT INTO files (source_disk, source_path, dest_path, size, mtime_ns, sha256, copied_at, status) VALUES
+  ('media-sonya6700', 'LINK/linked.MP4', 'LINK/linked.MP4', 300, 1, 'x', $now_ns, 'verified')"
+sqlite3 "$manifest" "PRAGMA wal_checkpoint(TRUNCATE)"
+: > "$FAKE_TAGGER_CALLS"
+run bash "$script" --limit 1 > "$out" 2>&1
+check "symlinked dir: exits 1" test $? -eq 1
+check "symlinked dir: refused, naming the link, recorded failed" bash -c "grep -q 'FILE SonyA6700/LINK/linked.MP4 FAILED: refused, .*/LINK is a symlink' '$logf' && test \"\$(sqlite3 '$state/tagging-state.db' \"SELECT status FROM files WHERE dest_path='LINK/linked.MP4'\")\" = failed"
+check "symlinked dir: the tagger never ran, nothing written through the link" \
+  test ! -s "$FAKE_TAGGER_CALLS" -a -z "$(ls "$elsewhere/reports" 2>/dev/null)" -a "$(xattr "$elsewhere/linked.MP4" | wc -l | tr -d ' ')" -eq 0
+sqlite3 "$manifest" "DELETE FROM files WHERE source_path='LINK/linked.MP4'"; sqlite3 "$manifest" "PRAGMA wal_checkpoint(TRUNCATE)"; rm "$media/SonyA6700/LINK"; rm -rf "$scratch/tagging"
 
 # ── 5. a failing file: recorded, scratch kept, exit 1, re-selected ────────
 : > "$FAKE_TAGGER_CALLS"
@@ -289,6 +359,32 @@ check "tier 2 run: exits 0 and tags the walked file on the NAS" bash -c "test $?
 check "tier 2 run: walked rows recorded with source=walk" test "$(sqlite3 "$state/tagging-state.db" "SELECT COUNT(*) FROM files WHERE source='walk' AND status='done'")" -eq 2
 run bash "$script" > "$out" 2>&1
 check "everything done: 'nothing to do', exit 0" bash -c "test $? -eq 0 && grep -q 'nothing to do' '$logf'"
+
+# ── 9. lock edge cases (review #26), now that the batch is drained ────────
+mkfresh() { mkfile "$src/SonyA6700/DCIM/$1" 202612010000 111; "$vault" copy media-sonya6700 "$src/SonyA6700" "$media/SonyA6700" > /dev/null; "$vault" verify media-sonya6700 "$media/SonyA6700" > /dev/null; sqlite3 "$manifest" "PRAGMA wal_checkpoint(TRUNCATE)"; }
+
+# A lock dir with no info yet is one being acquired, not a dead one.
+mkdir -p "$state/tagging.lock"
+run bash "$script" --limit 1 > "$out" 2>&1
+check "info-less lock: exit 1, not taken over, dir kept" bash -c "test $? -eq 1 && test -d '$state/tagging.lock' && test ! -e '$state/tagging.lock/info'"
+rm -rf "$state/tagging.lock"
+
+# Review #36: a dead lock is NOT taken over automatically - reported STALE
+# and left for a human; the run does not proceed.
+mkfresh takeover.MP4; : > "$FAKE_TAGGER_CALLS"
+mkdir -p "$state/tagging.lock"; echo "999999 started earlier run=dead" > "$state/tagging.lock/info"; touch -t "$(date -v-2H +%Y%m%d%H%M)" "$state/tagging.lock"
+run bash "$script" --limit 1 > "$out" 2>&1
+check "dead lock: exit 1, STALE LOCK, dir kept, tagger never ran" \
+  bash -c "test $? -eq 1 && grep -q 'STALE LOCK' '$logf' && test -d '$state/tagging.lock' && test ! -s '$FAKE_TAGGER_CALLS'"
+rm -rf "$state/tagging.lock"
+
+# A failure right after acquiring the lock (corrupt state db) still releases it.
+mkfresh corrupt.MP4
+cp "$state/tagging-state.db" "$work/state.bak"; head -c 2000 /dev/urandom > "$state/tagging-state.db"
+run bash "$script" --limit 1 > "$out" 2>&1
+check "corrupt state db right after the lock: exit non-zero, lock released, no summary claimed" \
+  bash -c "test $? -ne 0 && test ! -e '$state/tagging.lock'"
+cp "$work/state.bak" "$state/tagging-state.db"
 
 echo
 if [ "$failures" -ne 0 ]; then echo "$failures check(s) failed"; exit 1; fi

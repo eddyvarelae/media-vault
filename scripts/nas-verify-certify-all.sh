@@ -6,10 +6,12 @@
 set -u
 
 # Pinned release tag; override with VAULT_IMAGE=... for a one-off run.
-# v0.2.0 does not exist yet: the PM tags it on main after the B3/B4/B5 PR and
-# F4 (verify --only-unverified) merge. See docs/release.md.
-IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.0}"
+IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.1}"
 LOG="${VAULT_LOG:-/volume1/docker/verify-certify.log}"
+# Certificates live beside the manifest, never inside the tree they certify:
+# `vault certify` refuses an output path under the archive root (B25), and a
+# cert inside the tree is a file the next scan finds with no row.
+CERTS="${VAULT_CERTS:-/volume1/docker/vault-certs}"
 
 # One line to $LOG, and to the terminal only when there is one. Launched as
 # `sudo nohup ./nas-verify-certify-all.sh >> $LOG 2>&1 &`, a `tee -a $LOG`
@@ -33,6 +35,7 @@ disks=(
   "media-gopro:/volume1/media/GoPro"
 )
 
+mkdir -p "$CERTS"
 log "[$(date)] starting verify+certify pass"
 
 failures=0
@@ -51,12 +54,12 @@ for entry in "${disks[@]}"; do
 
   log "[$(date)] === CERTIFY $disk ==="
   if ! docker run --rm -v /volume1:/volume1 -e VAULT_CONFIG=/volume1/docker/vault-nas-config "$IMG" \
-      certify "$disk" "$root/$disk.cert.json" >> "$LOG" 2>&1; then
+      certify "$disk" "$CERTS/$disk.cert.json" --root "$root" >> "$LOG" 2>&1; then
     log "[$(date)] CERTIFY FAILED for $disk"
     failures=$((failures+1))
     continue
   fi
-  log "[$(date)] $disk done — cert at $root/$disk.cert.json"
+  log "[$(date)] $disk done — cert at $CERTS/$disk.cert.json"
 done
 
 log ""

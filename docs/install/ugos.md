@@ -20,7 +20,7 @@ In the **Docker** app:
 1. Open **Image** in the left sidebar
 2. Click **Pull** (or "Add" / "+", depending on the firmware)
 3. Image name: `ghcr.io/eddyvarelae/media-vault`
-4. Tag: `v0.2.0` — always a release tag, never `latest` (the image is only
+4. Tag: `v0.2.1` — always a release tag, never `latest` (the image is only
    published on tags). The current one is whatever `scripts/*.sh` default
    `IMG` to on `main`; the full list is under Releases/Tags on GitHub.
 5. Wait for the pull to finish (~30 s on home internet)
@@ -35,7 +35,7 @@ In the **Docker** app, **Container** → **Create** (or "+"):
 
 | Field           | Value                                                            |
 | --------------- | ---------------------------------------------------------------- |
-| Image           | `ghcr.io/eddyvarelae/media-vault:v0.2.0` (the tag you pulled)    |
+| Image           | `ghcr.io/eddyvarelae/media-vault:v0.2.1` (the tag you pulled)    |
 | Container name  | `media-vault`                                                    |
 | Restart policy  | `No` (v0.1 is one-shot CLI, not a long-running service)          |
 
@@ -71,8 +71,10 @@ copy tars /sources /dest
 # Verify: re-hash everything at /dest, compare to manifest
 verify tars /dest
 
-# Certify: emit a signed JSON proving the disk is fully archived
-certify tars /dest/tars-cert.json
+# Certify: emit a signed JSON proving the disk is fully archived.
+# Write it beside the manifest, never under /dest: certify refuses an
+# output path inside the tree it certifies.
+certify tars /config/tars-cert.json --root /dest
 ```
 
 Set the container's **Command** field to one of those (without the leading
@@ -91,9 +93,10 @@ Set the container's **Command** field to one of those (without the leading
 5. When it exits, start `media-vault-verify` — log shows verify status
 6. When that's clean, start `media-vault-certify` — emits the signed JSON
 
-The certificate ends up at `/volume1/personal_folder/archive/tars-cert.json`
-(or wherever you point the certify command). Open it in a text editor, or
-copy it off the NAS for safekeeping.
+The certificate ends up beside the manifest, at
+`/volume1/docker/vault-nas-config/tars-cert.json` (or wherever you point
+the certify command — anywhere outside `/dest`). Open it in a text editor,
+or copy it off the NAS for safekeeping.
 
 ## Speed expectations
 
