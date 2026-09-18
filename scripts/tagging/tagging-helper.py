@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Helper for scripts/run-tagging.sh — the parts that are unpleasant in bash.
+"""Helper for scripts/tagging/run-tagging.sh — the parts that are unpleasant in bash.
 
 Five concerns, one file, so the shell script stays a readable orchestrator:
 
@@ -200,9 +200,12 @@ def manifest_rows(man, folders, exts):
     if not folders:
         return []
     by_disk = {disk_of(f): f for f in folders}
-    ext_clauses = " OR ".join("lower(dest_path) LIKE ?" for _ in exts)
+    # A row with an empty dest_path locates its file at <folder>/source_path
+    # - media-vault's own rule (verify, repair-dest, restore) - so the same
+    # expression names the file here. 605 media-sonya6700 rows are like that.
+    ext_clauses = " OR ".join("lower(COALESCE(NULLIF(dest_path,''), source_path)) LIKE ?" for _ in exts)
     sql = (
-        "SELECT id, source_disk, dest_path, size, copied_at FROM files "
+        "SELECT id, source_disk, COALESCE(NULLIF(dest_path,''), source_path), size, copied_at FROM files "
         f"WHERE status=? AND source_disk IN ({','.join('?' for _ in by_disk)}) "
         f"AND ({ext_clauses})"
     )

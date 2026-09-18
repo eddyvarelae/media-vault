@@ -30,22 +30,42 @@
 # night that did less than it claims is the failure mode we refuse to add.
 set -euo pipefail
 
-# Keys in mini.env can be overridden from the environment (tests fake a
-# missing scratch volume with SCRATCH_DIR=/nonexistent, for instance).
-overridable="SCRATCH_DIR TAG_SOURCES TAG_SOURCES_TIER2 TAG_BATCH_MAX_GB TAG_VIDEO_EXTS TAG_STATE_DIR MEDIA_ROOT MANIFEST_DB OLLAMA_URL TAGGER_DIR LOG_FILE"
+# Two kinds of setting, from two owners (B17). The MACHINE is mini-server's:
+# where scratch, the mounts, Ollama, the tagger venv and the log live come
+# from its config/mini.env (path overridable with TAGGING_ENV). The JOB is
+# ours: which folders, in what order, how much per night, which extensions -
+# Eddy's decisions of 2026-09-17 (team/DECISIONS.md), defaulted right here.
+# mini.env may still override a policy key (it is Eddy's file), but every
+# such override is logged against the default so a night that tagged the
+# wrong folders says why. The environment overrides both (tests use it).
+POLICY_DEFAULT_TAG_SOURCES="SonyA6700 SonyZVE10 GoPro DJIFlip DJIMini2 iPhone"
+POLICY_DEFAULT_TAG_SOURCES_TIER2="Backup LeanTank Public"
+POLICY_DEFAULT_TAG_BATCH_MAX_GB="200"
+POLICY_DEFAULT_TAG_VIDEO_EXTS=".mp4 .mov"    # .lrv proxies, .arw .jpg .xml .srt .thm stay out
+policy_keys="TAG_SOURCES TAG_SOURCES_TIER2 TAG_BATCH_MAX_GB TAG_VIDEO_EXTS"
+machine_keys="SCRATCH_DIR TAG_STATE_DIR MEDIA_ROOT MANIFEST_DB OLLAMA_URL TAGGER_DIR LOG_FILE"
+overridable="$policy_keys $machine_keys"
 for v in $overridable; do eval "_pre_$v=\${$v-}"; done
-cd "$(dirname "$0")/.."
-source config/mini.env
+TAGGING_ENV="${TAGGING_ENV:-$HOME/Projects/mini-server/config/mini.env}"
+if [[ -f "$TAGGING_ENV" ]]; then
+  source "$TAGGING_ENV"
+fi
+policy_overrides=()
+for v in $policy_keys; do
+  eval "_env_$v=\${$v-}"
+  eval "_def_$v=\$POLICY_DEFAULT_$v"
+  eval "_e=\$_env_$v; _d=\$_def_$v"
+  if [[ -n "$_e" && "$_e" != "$_d" ]]; then
+    policy_overrides+=("$v=[$_e] (default [$_d], from $TAGGING_ENV)")
+  fi
+  eval "[[ -n \$_env_$v ]] || $v=\$_def_$v"
+done
 for v in $overridable; do eval "[[ -n \${_pre_$v} ]] && $v=\${_pre_$v}" || true; done
 
 # launchd starts with a bare PATH; ffmpeg/exiftool/whisper-cli are Homebrew's.
 export PATH="/opt/homebrew/bin:$PATH"
 
-SCRATCH_DIR="${SCRATCH_DIR:?SCRATCH_DIR must be set in config/mini.env}"
-TAG_SOURCES="${TAG_SOURCES:-}"
-TAG_SOURCES_TIER2="${TAG_SOURCES_TIER2:-}"      # empty = no tier 2
-TAG_BATCH_MAX_GB="${TAG_BATCH_MAX_GB:-200}"
-TAG_VIDEO_EXTS="${TAG_VIDEO_EXTS:-.mp4 .mov}"    # .lrv proxies, .arw .jpg .xml .srt .thm stay out
+SCRATCH_DIR="${SCRATCH_DIR:?SCRATCH_DIR must be set in $TAGGING_ENV (mini-server config/mini.env)}"
 TAG_STATE_DIR="${TAG_STATE_DIR:-$HOME/Library/Application Support/mini-server}"
 MEDIA_ROOT="${MEDIA_ROOT:-$HOME/mounts/media}"
 MANIFEST_DB="${MANIFEST_DB:-$HOME/mounts/docker/vault-nas-config/manifest.db}"
@@ -54,7 +74,7 @@ TAGGER_DIR="${TAGGER_DIR:-$HOME/Projects/video-tagger}"
 LOG_FILE="${LOG_FILE:-$HOME/Library/Logs/mini-server/video-tagger.log}"
 
 TAGGER_PY="$TAGGER_DIR/.venv/bin/python"
-HELPER="$PWD/scripts/tagging-helper.py"
+HELPER="$(cd "$(dirname "$0")" && pwd)/tagging-helper.py"
 STATE_DB="$TAG_STATE_DIR/tagging-state.db"
 SNAPSHOT="$TAG_STATE_DIR/manifest.snapshot.db"
 LOCK_DIR="$TAG_STATE_DIR/tagging.lock"
@@ -86,7 +106,7 @@ mounted_elsewhere() {   # $1 exists and is not on the boot disk (its device diff
   local dev; dev=$(df -P "$1" | awk 'NR==2 {print $1}')
   [[ "$dev" != "$(df -P / | awk 'NR==2 {print $1}')" && "$dev" != "$(df -P /System/Volumes/Data | awk 'NR==2 {print $1}')" ]]
 }
-[[ -n "${TAG_SOURCES// /}" ]] || die "TAG_SOURCES is empty — set it in config/mini.env"
+[[ -n "${TAG_SOURCES// /}" ]] || die "TAG_SOURCES is empty — the default is [$POLICY_DEFAULT_TAG_SOURCES]; something set it to nothing"
 for f in $TAG_SOURCES $TAG_SOURCES_TIER2; do   # the NAS trash is never a source
   [[ "$f" != "#recycle" ]] || die "#recycle is listed as a source — remove it from TAG_SOURCES/TAG_SOURCES_TIER2"
 done
@@ -99,10 +119,10 @@ mount | grep -q " on $MEDIA_ROOT " || die "$MEDIA_ROOT is not mounted (run scrip
 for cam in $TAG_SOURCES $TAG_SOURCES_TIER2; do
   [[ -d "$MEDIA_ROOT/$cam" ]] || die "$MEDIA_ROOT/$cam does not exist — check TAG_SOURCES / TAG_SOURCES_TIER2"
 done
-[[ -f "$MANIFEST_DB" ]] || die "manifest not found at $MANIFEST_DB (is the NAS docker share mounted? NAS_SHARES in config/mini.env, scripts/mount-nas.sh)"
+[[ -f "$MANIFEST_DB" ]] || die "manifest not found at $MANIFEST_DB (is the NAS docker share mounted? NAS_SHARES in mini-server config/mini.env, its scripts/mount-nas.sh)"
 models=$(curl -sf --max-time 5 "$OLLAMA_URL/api/tags") || die "Ollama is not answering at $OLLAMA_URL"
 grep -q '"name":"llava' <<< "$models" || die "Ollama is up but the llava model is not pulled (ollama pull llava)"
-[[ -x "$TAGGER_PY" ]] || die "video-tagger venv missing at $TAGGER_PY (see SETUP.md Phase 5)"
+[[ -x "$TAGGER_PY" ]] || die "video-tagger venv missing at $TAGGER_PY (mini-server SETUP.md Phase 5)"
 # The lesson in lessons.md: YOLO failing silently produced a fully "tagged"
 # library with every object tag missing. Prove the detector imports first.
 "$TAGGER_PY" -c "import ultralytics" 2>/dev/null || die "ultralytics does not import in $TAGGER_PY — object detection would be silently skipped"
@@ -111,10 +131,17 @@ grep -q '"name":"llava' <<< "$models" || die "Ollama is up but the llava model i
 # rsynced, checkpointed, quick_checked). Prints "ok <rows> <newest> <mtime>"
 # and maybe a WARN line if the NAS file has not changed since the last run.
 take_snapshot() { helper snapshot --state "$STATE_DB" --manifest "$MANIFEST_DB" --snapshot "$SNAPSHOT"; }
-sel_args=(--snapshot "$SNAPSHOT" --state "$STATE_DB" --tier1 "$TAG_SOURCES" --tier2 "$TAG_SOURCES_TIER2"
-          --exts "$TAG_VIDEO_EXTS" --media-root "$MEDIA_ROOT")
+# Built at call time, not up front: a dry run points SNAPSHOT at a temp dir
+# after this point, and a list captured earlier would name a snapshot the
+# dry run never wrote (found by the harness on the first dry run).
+sel_args() { printf '%s\n' --snapshot "$SNAPSHOT" --state "$STATE_DB" --tier1 "$TAG_SOURCES" --tier2 "$TAG_SOURCES_TIER2" --exts "$TAG_VIDEO_EXTS" --media-root "$MEDIA_ROOT"; }
+with_sel() {  # with_sel <helper subcommand> [more args]: the subcommand with the selection args
+  local sub=$1; shift
+  local args=(); while IFS= read -r a; do args+=("$a"); done < <(sel_args)
+  helper "$sub" "${args[@]}" "$@"
+}
 select_batch() {   # TSV on stdout: id, folder, rel_path, size, ts_ns, source
-  helper select "${sel_args[@]}" --max-bytes "$(( TAG_BATCH_MAX_GB * 1000000000 ))" --limit "$limit" $tier2_only
+  with_sel select --max-bytes "$(( TAG_BATCH_MAX_GB * 1000000000 ))" --limit "$limit" $tier2_only
 }
 iso() { "$TAGGER_PY" -c "import datetime,sys;print(datetime.datetime.fromtimestamp(int(sys.argv[1])/1e9).astimezone().isoformat(timespec='seconds'))" "$1"; }
 leftover_dirs() { ls -d "$SCRATCH_DIR"/tagging/*/ 2>/dev/null || true; }
@@ -131,6 +158,7 @@ if (( dry_run )); then
   echo "  tier 1:    $TAG_SOURCES"
   echo "  tier 2:    ${TAG_SOURCES_TIER2:-(none)}"
   echo "  exts: $TAG_VIDEO_EXTS   cap: ${TAG_BATCH_MAX_GB} GB$limit_note"
+  for o in "${policy_overrides[@]+"${policy_overrides[@]}"}"; do echo "  POLICY OVERRIDE: $o"; done
   [[ -d "$LOCK_DIR" ]] && echo "  NOTE: lock held at $LOCK_DIR ($(cat "$LOCK_DIR/info" 2>/dev/null))"
   leftover_dirs | while read -r d; do echo "  NOTE: leftover run dir on scratch (kept after a failed run): $(du -sh "$d" | tr '\t' ' ')"; done
   echo
@@ -178,7 +206,7 @@ finish() {
     pkill -TERM -P "$child" 2>/dev/null || true   # by parent pid, never by pattern (lessons.md)
     kill "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true
   fi
-  pend=$(helper pending "${sel_args[@]}" 2>/dev/null || echo "? (pending count failed)")
+  pend=$(with_sel pending 2>/dev/null || echo "? (pending count failed)")
   log "SUMMARY run=$RUN_ID selected $selected, pulled $pulled, tagged $tagged, wrote back $wroteback, failed $failed, still pending → $pend"
   if (( rc == 0 && failed == 0 )); then
     rm -rf "$RUN_DIR"; log "scratch cleaned: $RUN_DIR"
@@ -197,6 +225,7 @@ trap '[[ -n "$finishing" ]] || { log "UNEXPECTED EXIT (rc=$?) — a command fail
 run_child() { "$@" </dev/null & child=$!; wait "$child"; local rc=$?; child=""; return $rc; }
 
 log "run $RUN_ID starting: tier1=[$TAG_SOURCES] tier2=[$TAG_SOURCES_TIER2] exts=[$TAG_VIDEO_EXTS] cap=${TAG_BATCH_MAX_GB}GB$limit_note scratch=$RUN_DIR"
+for o in "${policy_overrides[@]+"${policy_overrides[@]}"}"; do log "POLICY OVERRIDE: $o"; done
 leftover_dirs | while read -r d; do log "NOTE: leftover run dir on scratch from an earlier failed run: $(du -sh "$d" | tr '\t' ' ')"; done
 
 # ── 3. snapshot the manifest, select the batch ────────────────────────────
