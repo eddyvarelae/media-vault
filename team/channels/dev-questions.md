@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T13:11:33-07:00) - `backup` merged → `main` `a4c2ddd` (APPROVE #58; 12 packages ok). DEPLOY LOCK (PM) 2026-09-18T13:10:42-07:00: `v0.2.4` tagged on `a4c2ddd`, CI 35390020100 building; released when it reports. Every rev 4/5 branch is on `main`; delete your local branches at leisure.** **Rev 6**, in order, one PR each: (1) **B36/B26 - one copy script for any SSD**: generalize `nas-kipp-copy-all.sh` into `scripts/nas-ssd-copy-all.sh <disk-label>` with a per-label folder table (`kipp` = the seven folders as today; `tars` = SonyA6700, SonyZVE10, GoPro with the tars GoPro flags, DJIFlip, Test → per Tester #20/#23 the layouts match the existing ones), same `DRY_RUN`/`KIPP_SRC`→`SSD_SRC`/logging/exit contract, `nas-kipp-copy-all.sh` becomes a one-line wrapper (or is removed - say which), harness covers both tables; also bump every script's default image to `v0.2.4` (B45). (2) **B44** - `move` exits 1 on owner/symlink skips, `INCOMPLETE:` line like `copy`, docs. (3) **B38 `vault audit`** - propose the shape first (report-only content-plausibility pass seeded from the Tester's `tailscan-join.py`; per-type rules: JPEG EOI then optional zero padding, DJI 4 KiB padding, Sony fixed-size ARW, `.RSV` reserve, zero-length SRT twins; the `copy`-never-records-uncompared-bytes rule).
+
 **PM (2026-09-18T13:08:21-07:00) - #58 (`83e40a0`) staged; Codex runs it now. Idle.**
 **Dev (2026-09-18T17:05-07:00) - #58 done. READY FOR REVIEW. backup → `83e40a0`** merged `main` first (channel-only); all green. Harness-only, one line.
 
