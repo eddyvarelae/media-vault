@@ -55,14 +55,17 @@ Scripts branch on exit status; a silent 0 is a data-loss path. This table is
 `cmd/vault/main.go` as it is — three codes, and the same rules for every
 command:
 
-- **2** — wrong positional arity (`len(args)`/`len(pos)` checks), no command,
-  or an unknown command. Prints usage. Nothing else exits 2.
+- **2** — no command, an unknown command, or wrong positional arity
+  (`len(args)`/`len(pos)` checks). Prints usage. Nothing else exits 2.
 - **1** — everything fatal: every `die(...)` (bad flag value or a flag missing
   its value, config dir or manifest open failure, scan/plan error, manifest
   write error, signing/marshal/output-file error, empty manifest), an
   interrupt (`interrupted` on stderr), and the per-command conditions below.
-  Flags are parsed **before** arity for `scan`/`copy`/`move`, so a bad flag
-  value with wrong arity is 1, not 2.
+  Ordering, where it differs: `scan` and `copy` validate every flag value
+  before arity, so a bad `--rule`/`--on-collision` with wrong arity is 1.
+  `move` validates a missing flag value and `--on-collision` before arity
+  but `--rule` values only after it, so `move --rule <malformed>` with wrong
+  arity is 2. `TestExitCodeOrdering` in `cmd/vault` pins this.
 - **0** — the command ran to the end. For several commands that is *not* the
   same as "nothing went wrong" — see the last column.
 

@@ -581,3 +581,35 @@ func TestCollisionRowsAndExitThroughMain(t *testing.T) {
 		t.Errorf("no-command exit = %d, want 2", code)
 	}
 }
+
+// TestExitCodeOrdering pins the flag-vs-arity precedence CLAUDE.md documents
+// (review #3, finding 4): scan/copy validate every flag value before arity,
+// move validates --on-collision and missing values before arity but --rule
+// values only after it. Wrong arity, so no scan or plan ever runs.
+func TestExitCodeOrdering(t *testing.T) {
+	cfg := t.TempDir()
+	cases := []struct {
+		name string
+		args []string
+		want int
+	}{
+		{"unknown command", []string{"frobnicate"}, 2},
+		{"copy wrong arity", []string{"copy", "diskA", "src"}, 2},
+		{"copy bad --rule, wrong arity", []string{"copy", "--rule", "bad", "diskA", "src"}, 1},
+		{"copy bad --on-collision, wrong arity", []string{"copy", "--on-collision", "bad", "diskA", "src"}, 1},
+		{"scan bad --rule, wrong arity", []string{"scan", "--rule", "bad", "diskA", "src"}, 1},
+		{"scan --prefix without value", []string{"scan", "diskA", "src", "--prefix"}, 1},
+		{"move wrong arity", []string{"move", "a", "b", "c"}, 2},
+		{"move bad --on-collision, wrong arity", []string{"move", "--on-collision", "bad", "a", "b", "c"}, 1},
+		{"move --rule without value, wrong arity", []string{"move", "a", "b", "c", "--rule"}, 1},
+		{"move bad --rule, wrong arity", []string{"move", "--rule", "bad", "a", "b", "c"}, 2},
+		{"move bad --rule, right arity", []string{"move", "--rule", "bad", "a", "b", t.TempDir(), t.TempDir()}, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if _, _, code := vault(t, cfg, c.args...); code != c.want {
+				t.Errorf("vault %v: exit %d, want %d", c.args, code, c.want)
+			}
+		})
+	}
+}
