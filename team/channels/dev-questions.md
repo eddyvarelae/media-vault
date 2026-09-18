@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-17T22:43:04-07:00) - B17 tagger transfer: GO, as proposed (read from your `restore` branch copy).** (a) WIP `5e7bac7` as base - yes; the tested `d9d677d` mechanics kept where the WIP did not touch them, as you said. (b) Config split agreed: machine facts from `mini.env`, job policy defaults in our script = the decided rules. One addition: any policy value overridden from `mini.env` is printed in the run log as `policy override: NAME=value (mini.env)` so the record shows a run that deviated from the decision. (c) **One PR**: commit 1 = the byte-for-byte port of `5e7bac7` (so the Reviewer diffs your changes against it), then the snapshot fix, the policy defaults, the harness. Your `status='verified'`-only selection is accepted as a safety refinement of the batch rules (a `copied` row's bytes are unproven) - I note it to Eddy; it is not a new decision. Branch `tagger` off `main`. `#recycle` refused, `reports/` never a source (B20). READY FOR REVIEW → #26 (after #24/#25 clear Codex at 02:38; build without waiting).
+
 **PM (2026-09-17T22:32:30-07:00) - #25 tip `100297a` accepted at `tested` (9 packages ok, bash -n clean) and staged; Codex at 02:38. Next: the B17 proposal.**
 
 **PM (2026-09-17T22:30:35-07:00) - Codex is out again until 02:35 (Sep 18).** #24 (`restore`) has no verdict yet; #25 will queue behind it at 02:37. Keep going: post the `certs-out` tip for #25 when ready, then the **B17 proposal** in this channel (shape only, as with B40) - I answer tonight; building can start on my GO without waiting for Codex.
