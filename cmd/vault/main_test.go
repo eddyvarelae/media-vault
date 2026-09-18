@@ -1598,7 +1598,10 @@ func TestMoveNeverLandsOnAVerifiedDestination(t *testing.T) {
 	}
 	aBefore := rowsOf(t, cfg, "A")
 
-	out, _, _ := vault(t, cfg, "move", "B", "A", srcB, dst)
+	out, _, code := vault(t, cfg, "move", "B", "A", srcB, dst)
+	if code != 1 || !strings.Contains(out, "INCOMPLETE:") { // B44: a skip makes the move exit non-zero
+		t.Errorf("move that skipped an owned dst: exit %d, want 1 with INCOMPLETE\n%s", code, out)
+	}
 	if !strings.Contains(out, "dst-owned by verified row A:x.mov") {
 		t.Errorf("x.mov should be refused as owned:\n%s", out)
 	}
@@ -1617,12 +1620,38 @@ func TestMoveNeverLandsOnAVerifiedDestination(t *testing.T) {
 
 	// Through a symlinked directory: refused.
 	writeFile(t, filepath.Join(srcB, "z.mov"), "via link", t0)
-	out, _, _ = vault(t, cfg, "move", "B", "A", srcB, dst, "--rule", "MOV=alias")
+	out, _, code = vault(t, cfg, "move", "B", "A", srcB, dst, "--rule", "MOV=alias")
+	if code != 1 || !strings.Contains(out, "INCOMPLETE:") { // B44
+		t.Errorf("move that skipped a symlinked dst: exit %d, want 1 with INCOMPLETE\n%s", code, out)
+	}
 	if !strings.Contains(out, "dst through a symlink (alias)") {
 		t.Errorf("z.mov should be refused through the link:\n%s", out)
 	}
 	if got := readFile(t, filepath.Join(srcB, "z.mov")); got != "via link" {
 		t.Errorf("z.mov moved through the link: %q", got)
+	}
+}
+
+// TestMoveCleanExitsZero pins the other side of B44: a move that skips nothing
+// and errors on nothing exits 0 (only an incomplete move is non-zero).
+func TestMoveCleanExitsZero(t *testing.T) {
+	cfg, srcB, dst := t.TempDir(), t.TempDir(), t.TempDir()
+	m, err := manifest.Open(filepath.Join(cfg, "manifest.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(srcB, "y.mov"), "free bytes", t0)
+	if err := m.Upsert(manifest.Entry{SourceDisk: "B", SourcePath: "y.mov", DestPath: "y.mov", Size: 10,
+		MtimeNs: t0.UnixNano(), SHA256: sha("free bytes"), CopiedAt: 1, Status: "copied"}); err != nil {
+		t.Fatal(err)
+	}
+	m.Close()
+	out, _, code := vault(t, cfg, "move", "B", "A", srcB, dst)
+	if code != 0 || strings.Contains(out, "INCOMPLETE:") {
+		t.Fatalf("clean move: exit %d, want 0 with no INCOMPLETE\n%s", code, out)
+	}
+	if got := readFile(t, filepath.Join(dst, "y.mov")); got != "free bytes" {
+		t.Errorf("y.mov should have moved: %q", got)
 	}
 }
 
