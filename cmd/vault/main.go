@@ -20,6 +20,7 @@ import (
 	"github.com/eddyvarelae/media-vault/internal/inventory"
 	"github.com/eddyvarelae/media-vault/internal/manifest"
 	mvpkg "github.com/eddyvarelae/media-vault/internal/move"
+	"github.com/eddyvarelae/media-vault/internal/restore"
 	"github.com/eddyvarelae/media-vault/internal/scan"
 	"github.com/eddyvarelae/media-vault/internal/verify"
 )
@@ -37,6 +38,11 @@ Usage:
                                          is already archived under any disk)
   vault verify     <source-disk-name> <dest-dir> [--only-unverified]
   vault certify    <source-disk-name> [out.json]
+  vault restore    <source-disk-name> <source-path> <replacement-file> <dest-dir>
+                   --expect-sha <sha256> [--dry-run]
+                   (replace ONE row's destination file on purpose, with the
+                    replacement's sha256 stated up front; the row goes back
+                    to status copied, for verify to promote)
   vault inventory  <source-disk-name> <dir>
   vault dedup      [--min-size <bytes>]
   vault unique     <source-disk-name>
@@ -94,6 +100,10 @@ func main() {
 		runVerify(ctx, m, args)
 	case "certify":
 		runCertify(m, configDir, args)
+	case "restore":
+		if code := runRestore(ctx, m, args); code != 0 {
+			os.Exit(code)
+		}
 	case "inventory":
 		runInventory(ctx, m, args)
 	case "dedup":
@@ -553,6 +563,100 @@ func runCertify(m *manifest.Manifest, configDir string, args []string) {
 		fmt.Fprintf(os.Stderr, "Wrote signed certificate: %s\n", out)
 		fmt.Fprintf(os.Stderr, "Files: %d   Bytes: %s   Disk: %s\n",
 			cert.FileCount, human(cert.TotalBytes), cert.SourceDisk)
+	}
+}
+
+// runRestore is B40: the deliberate replacement of one verified destination.
+// Returns its status like runCopy: 0 on success, on --dry-run, or when the
+// destination already holds the expected bytes; 1 on any refusal, with
+// nothing written.
+func runRestore(ctx context.Context, m *manifest.Manifest, args []string) int {
+	expect, dryRun := "", false
+	var pos []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--dry-run":
+			dryRun = true
+		case "--expect-sha":
+			if i+1 >= len(args) {
+				die("--expect-sha needs a value")
+			}
+			expect = args[i+1]
+			i++
+		default:
+			if strings.HasPrefix(args[i], "--") {
+				die("unknown flag: %s", args[i])
+			}
+			pos = append(pos, args[i])
+		}
+	}
+	if len(pos) != 4 {
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	if expect == "" {
+		die("--expect-sha is required: state the sha256 of the replacement as you verified it")
+	}
+	disk, sourcePath, replacement, destRoot := pos[0], pos[1], pos[2], pos[3]
+
+	p, err := restore.Build(ctx, m, disk, sourcePath, replacement, destRoot, expect)
+	if p != nil {
+		printRestorePlan(p)
+	}
+	if err != nil {
+		if errors.Is(err, restore.ErrRefused) {
+			fmt.Fprintf(os.Stderr, "Cannot restore: %v\n", err)
+			return 1
+		}
+		die("restore: %v", err)
+	}
+	if p.AlreadyThere {
+		fmt.Println("Destination already holds the expected bytes; nothing to do.")
+		return 0
+	}
+	if dryRun {
+		fmt.Println("(dry-run; no archive file, no manifest row)")
+		return 0
+	}
+
+	after, err := restore.Apply(ctx, m, p, destRoot)
+	if err != nil {
+		die("restore: %v", err)
+	}
+	fmt.Printf("\nRow after:  sha %s  size %d  status %s  verified_at 0  copied_at %s\n",
+		after.SHA256, after.Size, after.Status, time.Unix(0, after.CopiedAt).UTC().Format(time.RFC3339))
+	// One machine-parseable line: what was replaced, by what, and what the
+	// row attested before - the record the log keeps.
+	fmt.Printf("RESTORED %s %s old=%s:%d new=%s:%d expect=%s prior_status=%s prior_verified_at=%d from=%s\n",
+		disk, sourcePath, p.CurrentSHA, p.CurrentSize, after.SHA256, after.Size, p.ExpectSHA, p.Row.Status, p.Row.VerifiedAt, replacement)
+	fmt.Printf("next: vault verify %s %s --only-unverified\n", disk, destRoot)
+	return 0
+}
+
+func printRestorePlan(p *restore.Plan) {
+	fmt.Printf("Row:        %s:%s  dest_path %q → %s\n", p.Row.SourceDisk, p.Row.SourcePath, p.Row.DestPath, p.DestRel)
+	fmt.Printf("            sha %s  size %d  status %s  verified_at %d  copied_at %d\n",
+		p.Row.SHA256, p.Row.Size, p.Row.Status, p.Row.VerifiedAt, p.Row.CopiedAt)
+	if p.CurrentSHA != "" {
+		attests := "no"
+		if p.RowAttests {
+			attests = "yes"
+		}
+		fmt.Printf("Current:    %s  sha %s  size %d  (row attests these bytes: %s)\n", p.DestFull, p.CurrentSHA, p.CurrentSize, attests)
+	}
+	if len(p.Claimants) == 0 {
+		if p.CurrentSHA != "" {
+			fmt.Println("Claimants:  none (no other row resolves to this file)")
+		}
+	} else {
+		fmt.Printf("Claimants:  %d\n", len(p.Claimants))
+		for _, c := range p.Claimants {
+			fmt.Printf("            %s:%s  status %s  sha %s\n", c.SourceDisk, c.SourcePath, c.Status, c.SHA256)
+		}
+	}
+	if p.ReplaceSHA != "" {
+		fmt.Printf("Replacement: %s  sha %s  size %d  (--expect-sha %s: %s)\n", p.Replacement, p.ReplaceSHA, p.ReplaceSize, p.ExpectSHA,
+			map[bool]string{true: "match", false: "MISMATCH"}[p.ReplaceSHA == p.ExpectSHA])
 	}
 }
 

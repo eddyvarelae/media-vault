@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -1010,5 +1011,172 @@ func TestDestinationThroughSymlink(t *testing.T) {
 		if len(rowsOf(t, cfg, "B")) != 0 {
 			t.Errorf("row written for a refused file")
 		}
+	})
+}
+
+// TestRestore is B40 through main(): a verified, certified file whose tail
+// became zeros; restore --dry-run reports everything and writes nothing;
+// restore replaces the bytes with the stated original and sets the row back
+// to copied; verify --only-unverified promotes only it; certify passes with
+// the new hash. Then every refusal, each with nothing written.
+func TestRestore(t *testing.T) {
+	const good = "3 MiB of image, then the rest of the image"
+	const torn = "3 MiB of image, then 000000000000000000000"
+	if len(good) != len(torn) {
+		t.Fatal("fixture: torn and good must have the same size, as in B40")
+	}
+	setup := func(t *testing.T) (cfg, dst, emv string) {
+		cfg, src, dst, emv := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(src, "DCIM", "DSC04868_2025.JPG"), torn, t0)
+		writeFile(t, filepath.Join(src, "DCIM", "DSC04869_2025.JPG"), "fine", t0)
+		if _, _, code := vault(t, cfg, "copy", "sony", src, dst); code != 0 {
+			t.Fatalf("copy: exit %d", code)
+		}
+		if _, _, code := vault(t, cfg, "verify", "sony", dst); code != 0 {
+			t.Fatalf("verify: exit %d", code)
+		}
+		if _, _, code := vault(t, cfg, "certify", "sony"); code != 0 {
+			t.Fatalf("certify: exit %d", code)
+		}
+		writeFile(t, filepath.Join(emv, "Backups", "SonyA6700", "DCIM", "DSC04868.JPG"), good, t0.Add(time.Hour))
+		return cfg, dst, emv
+	}
+	replacement := func(emv string) string { return filepath.Join(emv, "Backups", "SonyA6700", "DCIM", "DSC04868.JPG") }
+
+	t.Run("the B40 path", func(t *testing.T) {
+		cfg, dst, emv := setup(t)
+		before := rowsOf(t, cfg, "sony")
+		row := wantRow(t, before, "DCIM/DSC04868_2025.JPG", "DCIM/DSC04868_2025.JPG", torn, "verified")
+
+		out, _, code := vault(t, cfg, "restore", "sony", "DCIM/DSC04868_2025.JPG", replacement(emv), dst, "--expect-sha", sha(good), "--dry-run")
+		if code != 0 {
+			t.Fatalf("dry-run: exit %d\n%s", code, out)
+		}
+		for _, want := range []string{
+			"Row:        sony:DCIM/DSC04868_2025.JPG",
+			"status verified",
+			"sha " + sha(torn) + "  size " + fmt.Sprint(len(torn)) + "  (row attests these bytes: yes)",
+			"Claimants:  none",
+			"Replacement: " + replacement(emv) + "  sha " + sha(good) + "  size " + fmt.Sprint(len(good)) + "  (--expect-sha " + sha(good) + ": match)",
+			"(dry-run; no archive file, no manifest row)",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("dry-run output missing %q:\n%s", want, out)
+			}
+		}
+		if got := readFile(t, filepath.Join(dst, "DCIM", "DSC04868_2025.JPG")); got != torn {
+			t.Errorf("dry-run changed the file: %q", got)
+		}
+		if got := rowsOf(t, cfg, "sony"); !reflect.DeepEqual(got, before) {
+			t.Errorf("dry-run changed rows")
+		}
+
+		out, _, code = vault(t, cfg, "restore", "sony", "DCIM/DSC04868_2025.JPG", replacement(emv), dst, "--expect-sha", sha(good))
+		if code != 0 {
+			t.Fatalf("restore: exit %d\n%s", code, out)
+		}
+		logLine := fmt.Sprintf("RESTORED sony DCIM/DSC04868_2025.JPG old=%s:%d new=%s:%d expect=%s prior_status=verified prior_verified_at=%d from=%s",
+			sha(torn), len(torn), sha(good), len(good), sha(good), row.VerifiedAt, replacement(emv))
+		if !strings.Contains(out, logLine) {
+			t.Errorf("log line missing or different; want\n%s\ngot\n%s", logLine, out)
+		}
+		if !strings.Contains(out, "next: vault verify sony "+dst+" --only-unverified") {
+			t.Errorf("no next step printed:\n%s", out)
+		}
+		if got := readFile(t, filepath.Join(dst, "DCIM", "DSC04868_2025.JPG")); got != good {
+			t.Errorf("file after restore = %q", got)
+		}
+		noPartials(t, dst)
+		after := rowsOf(t, cfg, "sony")
+		e := wantRow(t, after, "DCIM/DSC04868_2025.JPG", "DCIM/DSC04868_2025.JPG", good, "copied")
+		if e.MtimeNs != t0.Add(time.Hour).UnixNano() || e.CopiedAt <= row.CopiedAt {
+			t.Errorf("row after = %+v: mtime should be the replacement's, copied_at advanced", e)
+		}
+		if !reflect.DeepEqual(after["DCIM/DSC04869_2025.JPG"], before["DCIM/DSC04869_2025.JPG"]) {
+			t.Errorf("the other row moved")
+		}
+		if _, _, code := vault(t, cfg, "certify", "sony"); code != 1 {
+			t.Errorf("certify right after restore: exit %d, want 1 (row is copied)", code)
+		}
+		out, _, code = vault(t, cfg, "verify", "sony", dst, "--only-unverified")
+		if code != 0 || !strings.Contains(out, "skipping 1 already-verified row(s)") || !strings.Contains(out, "Verified: 1   Mismatch: 0") {
+			t.Fatalf("incremental verify: exit %d\n%s", code, out)
+		}
+		wantRow(t, rowsOf(t, cfg, "sony"), "DCIM/DSC04868_2025.JPG", "DCIM/DSC04868_2025.JPG", good, "verified")
+		if _, _, code := vault(t, cfg, "certify", "sony"); code != 0 {
+			t.Errorf("certify after verify: exit %d", code)
+		}
+		// Running it again: nothing to do, nothing written.
+		out, _, code = vault(t, cfg, "restore", "sony", "DCIM/DSC04868_2025.JPG", replacement(emv), dst, "--expect-sha", sha(good))
+		if code != 0 || !strings.Contains(out, "already holds the expected bytes") || strings.Contains(out, "RESTORED") {
+			t.Errorf("second restore: exit %d\n%s", code, out)
+		}
+	})
+
+	t.Run("refusals write nothing", func(t *testing.T) {
+		cfg, dst, emv := setup(t)
+		before := rowsOf(t, cfg, "sony")
+		other := t.TempDir()
+		writeFile(t, filepath.Join(other, "wrong.JPG"), "not the original", t0)
+		writeFile(t, filepath.Join(dst, "DCIM", "orphan.JPG"), "no row", t0)
+		// A deduped row of another disk resolving to the same file.
+		m, err := manifest.Open(filepath.Join(cfg, "manifest.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Upsert(manifest.Entry{SourceDisk: "kipp", SourcePath: "x/DSC04868_2025.JPG", DestPath: "dcim/DSC04868_2025.JPG",
+			Size: int64(len(torn)), MtimeNs: 1, SHA256: sha(torn), CopiedAt: 1, Status: "deduped"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Upsert(manifest.Entry{SourceDisk: "sony", SourcePath: "DCIM/gone.JPG", DestPath: "DCIM/gone.JPG",
+			Size: 4, MtimeNs: 1, SHA256: sha("gone"), CopiedAt: 1, Status: "copied"}); err != nil {
+			t.Fatal(err)
+		}
+		m.Close()
+		before = rowsOf(t, cfg, "sony")
+		snap := readFile(t, filepath.Join(dst, "DCIM", "DSC04868_2025.JPG"))
+
+		cases := []struct {
+			name string
+			args []string
+			want string
+			code int
+		}{
+			{"claimant", []string{"sony", "DCIM/DSC04868_2025.JPG", replacement(emv), dst, "--expect-sha", sha(good)}, "1 other row(s) resolve to", 1},
+			{"unknown row", []string{"sony", "DCIM/nope.JPG", replacement(emv), dst, "--expect-sha", sha(good)}, "no row for sony:DCIM/nope.JPG", 1},
+			{"destination missing", []string{"sony", "DCIM/gone.JPG", replacement(emv), dst, "--expect-sha", sha(good)}, "does not exist - a missing destination is `vault copy`'s case", 1},
+			{"wrong expect-sha", []string{"sony", "DCIM/DSC04869_2025.JPG", replacement(emv), dst, "--expect-sha", sha("something else")}, "not the file you verified", 1},
+			{"replacement is not the stated file", []string{"sony", "DCIM/DSC04869_2025.JPG", filepath.Join(other, "wrong.JPG"), dst, "--expect-sha", sha(good)}, "not the file you verified", 1},
+			{"replacement missing", []string{"sony", "DCIM/DSC04869_2025.JPG", filepath.Join(other, "absent.JPG"), dst, "--expect-sha", sha(good)}, "replacement", 1},
+			{"short expect-sha", []string{"sony", "DCIM/DSC04869_2025.JPG", replacement(emv), dst, "--expect-sha", "b7ecf808"}, "full 64-hex sha256", 1},
+			{"no expect-sha", []string{"sony", "DCIM/DSC04869_2025.JPG", replacement(emv), dst}, "--expect-sha is required", 1},
+			{"expect-sha without value", []string{"sony", "DCIM/DSC04869_2025.JPG", replacement(emv), dst, "--expect-sha"}, "needs a value", 1},
+			{"unknown flag", []string{"sony", "DCIM/DSC04869_2025.JPG", replacement(emv), dst, "--expect-sha", sha(good), "--force"}, "unknown flag", 1},
+			{"wrong arity", []string{"sony", "DCIM/DSC04869_2025.JPG", replacement(emv), "--expect-sha", sha(good)}, "", 2},
+			// Symlinked directory / symlink leaf / directory at the
+			// destination are covered at package level, where the row's
+			// dest_path can be pointed at them directly.
+		}
+		for _, c := range cases {
+			t.Run(c.name, func(t *testing.T) {
+				out, errOut, code := vault(t, cfg, append([]string{"restore"}, c.args...)...)
+				if code != c.code || (c.want != "" && !strings.Contains(errOut+out, c.want)) {
+					t.Errorf("exit %d (want %d), stderr %q", code, c.code, errOut)
+				}
+				if strings.Contains(out, "RESTORED") {
+					t.Errorf("a refusal printed RESTORED")
+				}
+			})
+		}
+		if got := readFile(t, filepath.Join(dst, "DCIM", "DSC04868_2025.JPG")); got != snap {
+			t.Errorf("a refusal changed the destination")
+		}
+		if got := readFile(t, filepath.Join(dst, "DCIM", "DSC04869_2025.JPG")); got != "fine" {
+			t.Errorf("a refusal changed the other file")
+		}
+		if got := rowsOf(t, cfg, "sony"); !reflect.DeepEqual(got, before) {
+			t.Errorf("a refusal changed rows")
+		}
+		noPartials(t, dst)
 	})
 }

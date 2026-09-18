@@ -35,6 +35,7 @@ runs them, so `go test ./...` is still the one command.
 | `internal/verify` | Re-hash destination rows → `verified` / `mismatch`; missing rows counted, not touched |
 | `internal/certify` | Refuses unless every row is `verified`; signs with `$VAULT_CONFIG/key.pem` (created on first use, mode 600) |
 | `internal/inventory` | NAS-side rows with no `dest_path` (`inventoried`) |
+| `internal/restore` | `restore`: the deliberate replacement of **one** row's destination (B40 — a torn write hashed after the fact). `Build` gathers and checks every fact (row exists; destination reached through real dirs, a regular file, its current bytes hashed; no other row of any disk resolves to the same physical file — no override; replacement is a regular file hashing to the mandatory `--expect-sha`); `Apply` writes through `copy.File` with `Replace`, re-checks the landed hash, and sets the row to `copied` with the new sha/size/mtime, `verified_at` 0, `dest_path` untouched. Never promotes: `verify` does |
 | `internal/dedup`, `internal/move`, `internal/importer` | Duplicate reports, manifest-aware moves, video-tagger imports |
 | `scripts/*.sh` | How work runs on the NAS: `docker run --rm … ghcr.io/eddyvarelae/media-vault:<tag> <command>`, sequential, as root via `sudo nohup` |
 
@@ -124,6 +125,7 @@ command:
 | `copy` | run finished `INCOMPLETE:` — any file failed, any unresolved destination collision, any file whose verified archive copy holds different content (kept, never overwritten), any file whose destination or staging path a verified row owns, any file whose destination path passes through a symlinked directory, any intra-run duplicate left unarchived (stderr names which); interrupted between files; `die` on scan or manifest-write error | no-op (including only retouched files), `--dry-run` (even with predicted collisions, verified-changed or owned files). `--dry-run` writes **no archive file and no manifest row**; it does still create the config dir and open/initialize `manifest.db` (pre-existing, every command does — B31) |
 | `verify` | any mismatch, missing, or read error; `die` on cancel | — |
 | `certify` | any row not `verified` (`Cannot certify: …`); no rows for the disk; key/sign/marshal/write error | — |
+| `restore` | any refusal (`Cannot restore: …`): unknown row, destination missing / not a regular file / through a symlinked directory, another row resolving to the same file, replacement missing / not a regular file / hashing to something other than `--expect-sha`, malformed or missing `--expect-sha`, unknown flag; I/O or manifest error (`die`); landed hash ≠ `--expect-sha` after the rename (`die`, names the file as in doubt) | `--dry-run` (prints everything incl. `Claimants: none`); destination already holds the expected bytes (nothing written). Success prints one `RESTORED <disk> <path> old=<sha>:<size> new=<sha>:<size> expect=<sha> prior_status=… prior_verified_at=… from=<file>` line |
 | `inventory` | `die` on walk error | per-file hash errors — counted in `Errors:`, exit 0 |
 | `dedup` | unknown arg or bad `--min-size` (`die`, not usage); query error | — |
 | `unique`, `tag`, `untag`, `tagged`, `tags` | query error | no matches (`No files tagged …`) |
@@ -156,9 +158,11 @@ number nobody can recompute is a finding, not a fact.
 - Never write to a source disk. Containers mount `/sources` read-only.
 - Atomic destination writes only (`.vault-partial` created `O_EXCL` → fsync
   → rename). The staging path must be empty; the writer never truncates.
-- A `verified` destination is never overwritten. Not by recopy, not by any
-  collision policy, not through another row's route, not as a staging file,
-  not through a symlinked directory.
+- A `verified` destination is never overwritten by `copy`. Not by recopy,
+  not by any collision policy, not through another row's route, not as a
+  staging file, not through a symlinked directory. The one deliberate path
+  is `vault restore`: one named row, the replacement's sha stated up front,
+  and the row drops back to `copied`.
   Both checks — by source row and by destination path — live in
   `scan.Build`, so `scan` and `copy` agree and every write `copy.File`
   makes was admitted there.
