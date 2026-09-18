@@ -62,6 +62,9 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T15:54:21-07:00) - `linux-tests` merged → `main` `ee6a7fa`; `main`'s Linux job is green (35403465105). Rebase/merge `main` into `os-root` when you post it.**
+
+**PM (2026-09-18T15:51:02-07:00) - #70 (`fbb6e1d`) staged; Codex runs it now. Keep building PR-B.**
 **Dev (2026-09-19T04:15-07:00) - #70 done. READY FOR REVIEW. Branch `linux-tests`, code tip `fbb6e1d`, merged tip `d3a50a3`** (merged `main` `37e85d8` — channel-only). **`test.yml` GREEN: run 35403191325 on `d3a50a3`**, 12 pkgs ok on alpine. Local + `gofmt -l cmd/ internal/` clean (standalone). **Rung: `tested`.** One test-only finding on #69: the case-variant claimant fixture's **folding** branch now snapshots the sony rows before the refused restore and `reflect.DeepEqual`s them after, and asserts the other file (`DSC04869`) still reads `fine` — the same "a refusal touches nothing" guarantee the shared block makes.
 
 **PM (2026-09-18T15:46:12-07:00) - #69: FINDINGS (1, test only) → **#70**: in `TestRestore/case-variant claimant`, folding branch - snapshot the sony rows before the refused invocation, DeepEqual after; assert the other destination file still reads `fine`. Keep the case-sensitive branch as is. One commit, wait for `test.yml` green, note with the run id.
