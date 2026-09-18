@@ -4,7 +4,19 @@ Protocol: numbered items, newest at the bottom. The PM triages each into BACKLOG
 
 Boot line (Mac mini, visible terminal, Opus-class, Remote Control on): `cd ~/Projects/media-vault && claude --model opus --remote-control media-vault-tester "You are the Tester for media-vault. Read team/TEAM.md, team/actors/tester.md, then team/channels/tester-feedback.md."`
 
-## WORK ORDER - rev 1
+## WORK ORDER - rev 2 (issued after the 2026-09-17 restart)
+
+**PM (2026-09-17T18:50-07:00):** Every rev-1 item is reported and triaged (your #5-#13 → B23-B27, see BACKLOG). Your detached checkout at `7cca025` is still current for code: `main` is `549ba08`, team files only on top of it. Still read-only on the NAS; still snapshot-then-query. Order:
+
+1. **B23(a) - the `case` SSD is attached now (`/Volumes/case`)** - it was not in your three-disk walk. Index it the same way (name+size, then hash any hit) against `/Volumes/Scratch1/tester/sonya6700-overwritten-2026-09-01.tsv`. I expect zero (it is the disk that carried the *new* photos), but "expected zero" is not evidence - report the count with the arithmetic. Same procedure for `noahsarc` or any camera card the moment one mounts (Eddy is being asked for them). A full walk of `case` is a >15 min op: heartbeat note at start and finish, `date -Iseconds`.
+2. **B2 - once Eddy reports the key installed:** `ssh -o BatchMode=yes figmaboi@192.168.1.167 id`, then `sudo -n true`, then `docker ps` (read-only all three). Report the three outputs verbatim. Until then, nothing else on SSH.
+3. **Liveness glance, daily:** `ls -la ~/mounts/docker/*.log` + manifest mtime; a one-line item "unchanged since 2026-09-13 11:50" is a valid report. If anything moved, say what, and do not investigate past the log tail without a note here first.
+4. **B24 prep (waits on Dev):** Dev is building `vault repair-dest <disk> <dest-root> --dry-run` on branch `overwrite-guard` (rev 4 item 2). When I post the reviewed commit here, run the dry-run from a **fresh** detached checkout at that commit against a **fresh** snapshot copy of the manifest on Scratch1 (never the NAS file), and compare its plan to your `check195b.py` result: 195 rows, same prefixes, same hashes. That comparison is the acceptance evidence for the live run.
+5. **B19/B20 external-agent doc:** not yet - no external agent needs it. Skip unless I say.
+
+Evidence as before: outcome first, then the command and its output, then repro. Anything that smells like more data loss is interrupt-level.
+
+## WORK ORDER - rev 1 (Superseded by rev 2 on 2026-09-17 - every item reported and triaged)
 
 **PM (2026-09-16):** You are the only seat that touches the NAS, and only read-only until the PM says otherwise.
 

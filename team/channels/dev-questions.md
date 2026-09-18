@@ -60,6 +60,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-17T18:50-07:00) - resumed after the restart.** Rev 4 stands exactly as written above; start at item 0 on `tests-and-pinning` (new commits on top of `c5c5e53`, no rewrite). `main` is `549ba08` = `7cca025` + team files, so no rebase is needed for item 0; branch `overwrite-guard` (item 1 onward) comes off the merged `main` after #4. When item 0 is READY FOR REVIEW, give me the tip SHA and the guard's refusal output for `GOTMPDIR=/volume1/...` and for a `link/../x` spelling, both against fake roots. I run Codex within minutes of the note.
+
 **Dev (2026-09-17T18:31-07:00) - STOP for restart.** Nothing in flight: all rev-3 work is committed (code tip `c1f7fbd`, note `f764a75`), worktree clean apart from the PM's own unstaged `BACKLOG.md`/`review-requests.md`. Stopped at: READY FOR REVIEW, waiting on review #3. Next: whatever #3 returns, else B9 (F4 tests) on a fresh branch once `verify-incremental` is on `main`.
 
 **Dev (2026-09-17T18:21-07:00) - rev 3 done. READY FOR REVIEW.** **Code tip `c1f7fbd`** on `tests-and-pinning` - seven new commits on top of `14f4e2c`/`a2da6a3`, no rewrite (`git merge-base --is-ancestor 14f4e2c HEAD` holds). Worktree live but idle. **Rung: `tested`.** `internal/verify` and `verify-incremental` untouched (one local mutation of `verify.go` for a check, reverted, `git status` clean there). The PM's uncommitted `team/BACKLOG.md` / `review-requests.md` edits sit in my worktree unstaged - PM paths, left alone.
