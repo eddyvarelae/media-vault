@@ -62,6 +62,15 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-18T19:40-07:00) - #61 B38 `vault audit` done. READY FOR REVIEW. Branch `audit`, tip `0412551`** (one commit off `main` `85d20fc`; #59/#60 merged in). All green (`go build`/`go vet`/`gofmt`/`go test ./... -count=1`). Built as GO'd — per-disk, exit 0 + `--strict`, the PLAUSIBLE/SUSPECT/REVIEW/SKIPPED vocabulary, v1 types, copy invariant as assertion + test.
+
+- **`vault audit <disk> <dest-dir> [--tsv f] [--strict]`** (`internal/audit`): report-only, opens the manifest **read-only** (like `gap`). For each row of the disk it reads the last **64 KiB + size** (the Tester's tail-scan signal) and `Classify`s by type — JPEG needs an `FF D9` EOI in the tail or it is **SUSPECT** (the one torn file); Sony ARW a whole-MiB size else **REVIEW**; `.RSV` and `DATABASE.BIN` uniform padding **PLAUSIBLE** by design; empty `.SRT` twin **PLAUSIBLE**; other types **SKIPPED** (counted + announced). Rows resolved with `restore`'s containment + no-symlink walk; a missing/unreadable file is an ERROR finding. `--strict` exits 1 on any SUSPECT or read error; default exit 0 with the `AUDIT <disk>: …` summary line and an optional `--tsv` (O_EXCL|O_NOFOLLOW) of the findings. Changes nothing.
+- **Copy invariant (B38 part 2):** `copy.File` — the only path that mints a row — now asserts the row's sha is the tee's hash of the streamed source bytes and refuses to return a row otherwise; never a post-hoc stat/scan of the destination (the B39 empty-`dest_path` / B40 torn-write shape). CLAUDE.md's invariant line says so.
+
+Tests: `internal/audit` `Classify` table + a `Run` over temp files (torn JPEG SUSPECT, whole PLAUSIBLE, MiB/off-MiB ARW, RSV, DATABASE.BIN, empty/text SRT, unknown, missing→ERROR, report-only); `cmd/vault` `TestAudit` through `main()` (SUSPECT + summary, exit 0 default / 1 `--strict`, `--tsv`, manifest byte-identical, clean archive exits 0); `internal/copy` `TestFileRowHashIsAlwaysTheSourceContent` across contents incl. all-zeros. Mutation: a no-EOI-plausible JPEG rule fails the classify/run/audit tests. CLAUDE.md package map + exit table + invariant updated.
+
+Idle until review.
+
 **PM (2026-09-18T13:33:42-07:00) - #60 APPROVE and #59 traced clean: both merged (`main` `07c32f9`, 12 packages ok). The #59 finding was my runbook line; fixed. Carry on with `audit` (#61).**
 
 **PM (2026-09-18T13:29:29-07:00) - rev 6 #1 (`965fe6d`) and #2 (`bd0c85e`) accepted at `tested`, staged as #59 and #60; Codex runs them now. B38 `vault audit`: GO as proposed.** (a) per-disk - yes. (b) exit 0 report-only by default, plus `--strict` → exit 1 if any SUSPECT (so B6's runbook can gate on it). (c) vocabulary PLAUSIBLE / SUSPECT / REVIEW / SKIPPED - yes. (d) v1 types as listed; SKIPPED types counted and named on the summary line. The copy invariant as an assertion + test, not a mechanism - agreed. Branch `audit` off `main`; harness on temp dirs with a real manifest (a torn JPEG, a padded JPEG, a 1-MiB-multiple ARW, an off-size ARW → REVIEW, a `.RSV`, a zero-length SRT with and without a twin, an unknown type). READY FOR REVIEW → #61.
