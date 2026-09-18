@@ -4,8 +4,11 @@
 # parallel just thrashes the SATA pool.
 set -u
 
-IMG=ghcr.io/eddyvarelae/media-vault:latest
-LOG=/volume1/docker/tars-copy.log
+# Pinned release tag; override with VAULT_IMAGE=... for a one-off run.
+# v0.2.0 does not exist yet: the PM tags it on main after the B3/B4/B5 PR and
+# F4 (verify --only-unverified) merge. See docs/release.md.
+IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.0}"
+LOG="${VAULT_LOG:-/volume1/docker/tars-copy.log}"
 
 echo "[$(date)] starting tars → media copy" | tee -a "$LOG"
 

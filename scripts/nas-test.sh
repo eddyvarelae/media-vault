@@ -4,7 +4,10 @@
 # with destination at /volume1/docker/vault-nas-test.
 set -e
 
-IMG=ghcr.io/eddyvarelae/media-vault:latest
+# Pinned release tag; override with VAULT_IMAGE=... for a one-off run.
+# v0.2.0 does not exist yet: the PM tags it on main after the B3/B4/B5 PR and
+# F4 (verify --only-unverified) merge. See docs/release.md.
+IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.0}"
 SRC=/mnt/@usb/sdc1/Test
 DST=/volume1/docker/vault-nas-test
 CFG=/volume1/docker/vault-nas-config

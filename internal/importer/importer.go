@@ -16,10 +16,10 @@ import (
 
 // VideoTaggerReport mirrors the JSON shape video-tagger writes.
 type VideoTaggerReport struct {
-	File     string         `json:"file"`
-	AITags   []string       `json:"ai_tags"`
-	UserTags []string       `json:"user_tags"`
-	Metadata map[string]any `json:"metadata"`
+	File       string         `json:"file"`
+	AITags     []string       `json:"ai_tags"`
+	UserTags   []string       `json:"user_tags"`
+	Metadata   map[string]any `json:"metadata"`
 	Transcript struct {
 		Language string `json:"language"`
 		FullText string `json:"full_text"`
@@ -38,10 +38,10 @@ type Result struct {
 
 // Run walks reportsDir for `report.json` files and ingests each into `disk`.
 // For each report:
-//   1. Look up the file by basename within `disk`. Skip if 0 or >1 matches.
-//   2. Apply each ai_tag via the manifest tag system.
-//   3. Store transcript, language, scene description, EXIF metadata as
-//      structured key/value rows in the metadata table.
+//  1. Look up the file by basename within `disk`. Skip if 0 or >1 matches.
+//  2. Apply each ai_tag via the manifest tag system.
+//  3. Store transcript, language, scene description, EXIF metadata as
+//     structured key/value rows in the metadata table.
 func Run(ctx context.Context, m *manifest.Manifest, disk, reportsDir string, onFile func(report, status string)) (*Result, error) {
 	res := &Result{}
 

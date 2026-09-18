@@ -85,7 +85,11 @@ func main() {
 	case "scan":
 		runScan(ctx, m, args)
 	case "copy":
-		runCopy(ctx, m, args)
+		// runCopy returns its status rather than exiting so the F3 exit
+		// decision is testable in-process. Same exit codes as before.
+		if code := runCopy(ctx, m, args); code != 0 {
+			os.Exit(code)
+		}
 	case "verify":
 		runVerify(ctx, m, args)
 	case "certify":
@@ -209,7 +213,10 @@ func reportDedupe(plan *scan.Plan, on bool) {
 	}
 }
 
-func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
+// runCopy returns the process exit status: 0 when every planned file is
+// archived (or nothing needed doing, or --dry-run), 1 when the run finished
+// INCOMPLETE. Usage and fatal errors still exit directly via die/usage.
+func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 	pos, prefix, rules, collision, dryRun, dedupeContent := parseScanFlags(args)
 	if len(pos) != 3 {
 		fmt.Fprint(os.Stderr, usage)
@@ -226,7 +233,7 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
 	todo := append(plan.ToCopy, plan.ToRecopy...)
 	if len(todo) == 0 && len(plan.DstCollisions) == 0 && len(plan.Deduped) == 0 {
 		fmt.Println("Nothing to copy. Manifest is up to date.")
-		return
+		return 0
 	}
 
 	totalBytes := plan.BytesToCopy + plan.BytesToRecopy
@@ -256,7 +263,7 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
 		}
 		fmt.Printf("\n(dry-run; %d files would be copied, %d recorded as deduped, %d collisions skipped)\n",
 			len(todo), len(plan.Deduped), len(plan.DstCollisions))
-		return
+		return 0
 	}
 
 	// Record the content-dupes before copying anything. Without a row this
@@ -300,7 +307,7 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
 	for i, f := range todo {
 		if ctx.Err() != nil {
 			fmt.Fprintln(os.Stderr, "interrupted")
-			os.Exit(1)
+			return 1
 		}
 		fmt.Printf("  [%d/%d] %s ... ", i+1, len(todo), f.RelPath)
 		entry, err := copy.File(ctx, src, dst, f, disk)
@@ -387,8 +394,9 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) {
 			reasons = append(reasons, fmt.Sprintf("%d duplicate(s) left unarchived", orphaned))
 		}
 		fmt.Fprintf(os.Stderr, "\nINCOMPLETE: %s.\n", strings.Join(reasons, "; "))
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
 
 func runVerify(ctx context.Context, m *manifest.Manifest, args []string) {

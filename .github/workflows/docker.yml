@@ -1,8 +1,10 @@
 name: docker
 
+# Publishes on release tags only. A merge to main is not a deploy: the NAS
+# scripts pin a semver tag (docs/release.md), and nothing here ever produces
+# :latest, so a stale "latest" cannot be pulled by accident.
 on:
   push:
-    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -28,10 +30,11 @@ jobs:
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}
+          # latest=auto (the default) adds :latest to every stable semver tag
+          # on its own, whether or not a raw latest line is listed here.
+          flavor: latest=false
           tags: |
-            type=ref,event=branch
             type=sha,prefix=sha-
-            type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern=v{{version}}
 
       - uses: docker/build-push-action@v6

@@ -60,6 +60,50 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-17T18:52-07:00) - rev 4 item 0 done. READY FOR REVIEW.** **Code tip `52d30b0`** on `tests-and-pinning`: `git merge main` (`2eb2195`, one trivial conflict in this channel file - took `main`'s headings, both note sets kept) as `0510072`, then three fix commits. No rewrite (`c1f7fbd` and `main` are both ancestors). Worktree clean, live but idle. **Rung: `tested`.** Nothing under `internal/verify` touched; the merged F4 code is `main`'s, byte for byte.
+
+Finding → commit:
+1. **#3-1 + #3-2 → `840c957`** - `testguard.resolve` no longer calls `filepath.Abs`/`Clean` at all. It walks the path one component at a time against an already-resolved base (cwd for a relative path, itself walked the same way), `Lstat`s each component, follows a symlink *where it occurs* (target walked recursively, absolute targets restart at `/`), and applies `..` to the directory actually reached. A component that does not exist, a dangling link, or a link loop (40 hops, the kernel's limit) is **refused as unresolvable** - per the order; the old "re-append the missing tail" is gone. `Require()` → `CheckEnv(Roots)`: checks `os.TempDir()` and, when set, `GOTMPDIR` (which `testing.T.TempDir` uses directly - confirmed at `$(go env GOROOT)/src/testing/testing.go:1613`); each refusal names the variable. **Reproduced first, then fixed:** with the new tests against the old resolver, `link/../x into root` was allowed (finding 1) and `GOTMPDIR bad` / `GOTMPDIR bad, TMPDIR unset` were allowed (finding 2) - 6 subtests failed; all pass now. Test paths are built by string concatenation, not `filepath.Join`, so the `..` reaches the guard (the Reviewer's point about the old test). New cases, all against a fake `volume1` under `t.TempDir()`: `link/../../tmp` where lexically it is the harmless `base/tmp` (exists) but the kernel lands in `volume1/tmp`; a symlink whose *target* is `../volume1/docker/tmp`; `base/tmp/../volume1/docker`; and the mirror image - `volume1/escape-link/../x` where the link leaves the root, which lexically looks forbidden and the kernel-order guard correctly **allows** (the old guard refused it). Unresolvable: dangling link, missing tail inside and outside the root, `nope/../volume1`, a two-link loop. `CheckEnv`: both safe / `GOTMPDIR` unset / `TMPDIR` bad / `GOTMPDIR` bad / `GOTMPDIR` bad with `TMPDIR` unset / both bad, via `t.Setenv` with fixtures taken before either variable moves. Refusal text is `t.Logf`'d so `-v` shows it.
+2. **#3-3 → `20550c0`** - `flavor: latest=false` on the metadata step with a two-line comment; `docs/release.md` step 1 and the CLAUDE.md deploy line say why (`latest=auto` adds `:latest` to every stable semver tag on its own). Parsed the YAML: `with` = `{images, flavor: "latest=false", tags: "type=sha,prefix=sha-\ntype=semver,pattern=v{{version}}"}`. `on:` block unchanged from rev 3.
+3. **#3-4 → `52d30b0`** - CLAUDE.md: "**2** — no command, an unknown command, or wrong positional arity"; ordering stated only where it differs: `scan`/`copy` validate every flag value before arity (bad `--rule`/`--on-collision` + wrong arity → 1); `move` validates missing values and `--on-collision` before arity but `--rule` values after it (`move --rule <malformed>` + wrong arity → 2). Pinned by `TestExitCodeOrdering` in `cmd/vault`: 11 cases through `main()` including the Reviewer's exact one (`move --rule bad a b c` → 2) and its control (`move --rule bad` with four positionals → 1).
+
+Evidence (Mac mini, `2026-09-17T18:50:06-07:00`, go1.27.0 darwin/arm64, at `52d30b0`):
+```
+$ gofmt -l .                     → (empty)
+$ go vet ./...                   → clean
+$ bash -n scripts/*.sh scripts/test/*.sh   → clean
+$ go test ./... -count=1
+ok  	github.com/eddyvarelae/media-vault/cmd/vault	0.641s
+ok  	github.com/eddyvarelae/media-vault/internal/certify	0.236s
+ok  	github.com/eddyvarelae/media-vault/internal/copy	0.699s
+ok  	github.com/eddyvarelae/media-vault/internal/scan	0.555s
+ok  	github.com/eddyvarelae/media-vault/internal/testguard	0.830s
+ok  	github.com/eddyvarelae/media-vault/scripts/test	1.297s
+$ CGO_ENABLED=0 go test ./... -count=1    → same 6 ok
+71 PASS lines (tests + subtests; was 44)
+```
+
+Guard refusals **against fake roots** (`go test ./internal/testguard -v`, `$T` = the host temp dir, fake root = `$T/…/001/volume1`):
+```
+link/../x into root:       refused: temp dir "$T/…/001/innocent-link/../../tmp" resolves to "/private$T/…/001/volume1/tmp", under forbidden root $T/…/001/volume1
+symlink with .. in target: refused: temp dir "$T/…/001/sub/rel-link" resolves to "/private$T/…/001/volume1/docker/tmp", under forbidden root $T/…/001/volume1
+GOTMPDIR bad:              refused: GOTMPDIR: temp dir "$T/…/001/volume1/review-tmp" resolves to "/private$T/…/001/volume1/review-tmp", under forbidden root $T/…/001/volume1
+missing then ..:           refused: cannot resolve temp dir "$T/…/001/nope/../volume1": lstat /private$T/…/001/nope: no such file or directory
+```
+Compiled binaries (`go test -c`) against the **real** roots, run by hand; `/volume1` and `/mnt` absent on this host before and after, nothing created:
+```
+$ GOTMPDIR=/volume1/review-tmp TMPDIR=$SCRATCH/ok ./copy.test
+testguard: refusing to run: GOTMPDIR: cannot resolve temp dir "/volume1/review-tmp": lstat /volume1: no such file or directory
+exit 1
+$ TMPDIR=/volume1/review-tmp ./vault.test   → refusing to run: TMPDIR: cannot resolve … lstat /volume1 …   exit 1
+$ TMPDIR=/mnt/@usb/x ./copy.test            → refusing to run: TMPDIR: cannot resolve … lstat /mnt …       exit 1
+$ TMPDIR=$SCRATCH/ok ./copy.test; GOTMPDIR=$SCRATCH/ok TMPDIR=$SCRATCH/ok ./copy.test   → PASS, exit 0
+```
+On this host the real-root message is "cannot resolve" because `/volume1` does not exist here; on the NAS, where it does, the same input takes the "under forbidden root" branch shown in the fake-root output. Both are exit 1 before any fixture is created.
+
+Noticed, not acted on:
+- A non-existent temp root is now refused where rev 3 allowed it (with the tail re-appended). Behavior change inside the guard only, per item 0(1) "reject a path that cannot be fully resolved"; `os.MkdirTemp` would have failed there anyway, so no passing configuration became a failing one except a misconfigured host - which now gets a reason on stderr instead of a `TempDir: mkdir … no such file` per test.
+
 **PM (2026-09-17T18:50-07:00) - resumed after the restart.** Rev 4 stands exactly as written above; start at item 0 on `tests-and-pinning` (new commits on top of `c5c5e53`, no rewrite). `main` is `549ba08` = `7cca025` + team files, so no rebase is needed for item 0; branch `overwrite-guard` (item 1 onward) comes off the merged `main` after #4. When item 0 is READY FOR REVIEW, give me the tip SHA and the guard's refusal output for `GOTMPDIR=/volume1/...` and for a `link/../x` spelling, both against fake roots. I run Codex within minutes of the note.
 
 **Dev (2026-09-17T18:31-07:00) - STOP for restart.** Nothing in flight: all rev-3 work is committed (code tip `c1f7fbd`, note `f764a75`), worktree clean apart from the PM's own unstaged `BACKLOG.md`/`review-requests.md`. Stopped at: READY FOR REVIEW, waiting on review #3. Next: whatever #3 returns, else B9 (F4 tests) on a fresh branch once `verify-incremental` is on `main`.

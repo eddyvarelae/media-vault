@@ -12,7 +12,7 @@ footage made it across before you reformat the source.
 
 `rsync` is great. But when you're about to wipe a 4 TB SSD full of footage,
 "rsync exited 0" is not the same as "every byte of every file is on the NAS,
-and I can prove it." Media Vault keeps a per-file sha256 manifest and (soon)
+and I can prove it." Media Vault keeps a per-file sha256 manifest and
 generates a signed certificate attesting that a given source disk is fully
 present at the destination — so you can wipe with confidence.
 
@@ -62,6 +62,10 @@ go build -o vault ./cmd/vault
 # 3. Verify: re-hash every file at the destination, compare to manifest
 ./vault verify tars /Volumes/nas-share/archive
 
+#    Incremental: hash only rows not yet verified. NOT an integrity sweep —
+#    already-verified rows are skipped (it prints how many).
+./vault verify tars /Volumes/nas-share/archive --only-unverified
+
 # 4. Certify: emit a signed JSON proving the disk is fully archived
 ./vault certify tars ./tars-cert.json
 ```
@@ -89,15 +93,19 @@ unless every file is in `verified` status.
    half-written file claiming to be the real thing. The mtime is preserved so
    future scans skip cleanly. The manifest gets a new row with the hash.
 
-3. **Verify** *(coming next)* re-reads the destination file, hashes it,
-   compares to the manifest. Catches bit-rot, partial writes, silent disk
-   errors. Updates `verified_at` on success, flips status to `mismatch` on
-   failure.
+3. **Verify** re-reads every destination file listed for the disk, hashes
+   it, and compares to the manifest. A match sets `verified_at` and status
+   `verified`; a different hash flips the row to `mismatch`; a missing file
+   is counted and the row left alone so a later copy can fix it. Exits 1 on
+   any mismatch, missing, or read error. `--only-unverified` hashes only
+   rows not yet `verified` — it prints how many verified rows it skipped
+   and the newest single-row `verified_at`, and it is **not** an integrity
+   sweep of the disk.
 
-4. **Wipe certificate** *(coming next)* takes a `source_disk` name and emits
-   a signed report listing every file with its destination path and last
-   verification timestamp. Refuses to certify if anything is unverified or
-   mismatched.
+4. **Wipe certificate** takes a `source_disk` name, refuses (exit 1) if any
+   row for it is not `verified`, and otherwise emits an Ed25519-signed JSON
+   listing every file with its destination path, sha256, and verification
+   timestamp. The signing key lives under `$VAULT_CONFIG/key.pem`.
 
 ## License
 
