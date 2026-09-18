@@ -20,6 +20,7 @@ import (
 	"github.com/eddyvarelae/media-vault/internal/inventory"
 	"github.com/eddyvarelae/media-vault/internal/manifest"
 	mvpkg "github.com/eddyvarelae/media-vault/internal/move"
+	"github.com/eddyvarelae/media-vault/internal/repair"
 	"github.com/eddyvarelae/media-vault/internal/restore"
 	"github.com/eddyvarelae/media-vault/internal/scan"
 	"github.com/eddyvarelae/media-vault/internal/verify"
@@ -38,6 +39,9 @@ Usage:
                                          is already archived under any disk)
   vault verify     <source-disk-name> <dest-dir> [--only-unverified]
   vault certify    <source-disk-name> [out.json]
+  vault repair-dest <source-disk-name> <dest-dir> [--dry-run]
+                   (rows whose dest_path is missing: point them at the same
+                    basename one directory down, only on a size+sha256 match)
   vault restore    <source-disk-name> <source-path> <replacement-file> <dest-dir>
                    --expect-sha <sha256> [--dry-run]
                    (replace ONE row's destination file on purpose, with the
@@ -100,6 +104,10 @@ func main() {
 		runVerify(ctx, m, args)
 	case "certify":
 		runCertify(m, configDir, args)
+	case "repair-dest":
+		if code := runRepairDest(ctx, m, args); code != 0 {
+			os.Exit(code)
+		}
 	case "restore":
 		if code := runRestore(ctx, m, args); code != 0 {
 			os.Exit(code)
@@ -564,6 +572,81 @@ func runCertify(m *manifest.Manifest, configDir string, args []string) {
 		fmt.Fprintf(os.Stderr, "Files: %d   Bytes: %s   Disk: %s\n",
 			cert.FileCount, human(cert.TotalBytes), cert.SourceDisk)
 	}
+}
+
+// runRepairDest is B24. It returns its status like runCopy: 0 when every
+// missing-dest row was repaired (or --dry-run, or nothing was missing), 1
+// when rows are left that this tool could not back with a hash. Those rows
+// are still `missing` to verify, which is the honest state.
+func runRepairDest(ctx context.Context, m *manifest.Manifest, args []string) int {
+	dryRun := false
+	var pos []string
+	for _, a := range args {
+		switch a {
+		case "--dry-run":
+			dryRun = true
+		default:
+			if strings.HasPrefix(a, "--") {
+				die("unknown flag: %s", a)
+			}
+			pos = append(pos, a)
+		}
+	}
+	if len(pos) != 2 {
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	disk, root := pos[0], pos[1]
+
+	plan, err := repair.Build(ctx, m, disk, root)
+	if err != nil {
+		die("repair-dest: %v", err)
+	}
+	repairable, unresolved, by := plan.Counts()
+
+	fmt.Printf("Disk %s at %s: %d rows with a dest_path, %d intact, %d unresolved (%d inventoried rows have no dest_path and were not examined)\n",
+		disk, root, plan.Checked, plan.Intact, len(plan.Changes), plan.NoDest)
+	for _, c := range plan.Changes {
+		switch c.Outcome {
+		case repair.Repairable:
+			fmt.Printf("  %-10s %s : %s → %s\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath, c.NewDest)
+		case repair.Ambiguous:
+			fmt.Printf("  %-10s %s : %s → %s\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath, strings.Join(c.Candidates, " | "))
+		case repair.Owned:
+			fmt.Printf("  %-10s %s : %s → %s (already the dest_path of %s)\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath, strings.Join(c.Candidates, " | "), c.Owner)
+		case repair.NotAFile:
+			fmt.Printf("  %-10s %s : %s is %s\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath, c.Detail)
+		case repair.Unsafe, repair.Conflict:
+			fmt.Printf("  %-10s %s : %s (%s)\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath, c.Detail)
+		default:
+			fmt.Printf("  %-10s %s : %s\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath)
+		}
+	}
+	fmt.Printf("\nRepairable: %d   Not found: %d   Ambiguous: %d   Owned: %d   Not a file: %d   Unsafe: %d   Conflict: %d   Bytes hashed: %s\n",
+		repairable, by[repair.NotFound], by[repair.Ambiguous], by[repair.Owned], by[repair.NotAFile], by[repair.Unsafe], by[repair.Conflict], human(plan.BytesHashed))
+
+	if dryRun {
+		// repair-dest never writes archive files; the only thing it can
+		// write is dest_path, and dry-run does not. (Opening the manifest
+		// initializes it when absent - every command does; B31.)
+		fmt.Println("(dry-run; no manifest row written, and repair-dest never writes archive files)")
+		return 0
+	}
+	n, err := repair.Apply(m, plan, func(c repair.Change) {
+		fmt.Printf("  repaired  %s : %s → %s\n", c.Row.SourcePath, c.Row.DestPath, c.NewDest)
+	})
+	if err != nil {
+		// Rows already rewritten stay rewritten: each was backed by its
+		// hash before the write, so a partial run leaves nothing wrong.
+		die("repair-dest: after %d row(s) written: %v", n, err)
+	}
+	fmt.Printf("\nRepaired %d row(s). Status untouched — run `vault verify %s %s` to promote them.\n", n, disk, root)
+	if unresolved > 0 {
+		fmt.Fprintf(os.Stderr, "\nINCOMPLETE: %d row(s) still without a destination this tool can back with a hash (%d not found, %d ambiguous, %d owned by another row, %d not a file, %d unsafe, %d in conflict).\n",
+			unresolved, by[repair.NotFound], by[repair.Ambiguous], by[repair.Owned], by[repair.NotAFile], by[repair.Unsafe], by[repair.Conflict])
+		return 1
+	}
+	return 0
 }
 
 // runRestore is B40: the deliberate replacement of one verified destination.
