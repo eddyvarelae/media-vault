@@ -17,18 +17,8 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestTarsCopyAllLogsFailedCards(t *testing.T) {
-	cmd := exec.Command("bash", "./nas-tars-copy-all.sh")
-	cmd.Env = append(os.Environ(), "TMPDIR="+t.TempDir())
-	out, err := cmd.CombinedOutput()
-	t.Logf("\n%s", out)
-	if err != nil {
-		t.Fatalf("shell test failed: %v", err)
-	}
-}
-
-func TestKippCopyAllShape(t *testing.T) {
-	cmd := exec.Command("bash", "./nas-kipp-copy-all.sh")
+func TestSsdCopyAllShape(t *testing.T) {
+	cmd := exec.Command("bash", "./nas-ssd-copy-all.sh")
 	cmd.Env = append(os.Environ(), "TMPDIR="+t.TempDir())
 	out, err := cmd.CombinedOutput()
 	t.Logf("\n%s", out)

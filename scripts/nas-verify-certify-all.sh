@@ -6,7 +6,7 @@
 set -u
 
 # Pinned release tag; override with VAULT_IMAGE=... for a one-off run.
-IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.1}"
+IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.4}"
 LOG="${VAULT_LOG:-/volume1/docker/verify-certify.log}"
 # Certificates live beside the manifest, never inside the tree they certify:
 # `vault certify` refuses an output path under the archive root (B25), and a

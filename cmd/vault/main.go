@@ -462,8 +462,8 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 
 	fmt.Printf("\nDone. Copied %d/%d files, %s.\n", copied, len(todo), human(copiedBytes))
 	if failed > 0 || orphaned > 0 || len(plan.DstCollisions) > 0 || len(plan.VerifiedChanged) > 0 || len(plan.DstOwned) > 0 || len(plan.DstThroughLink) > 0 {
-		// Exit non-zero so callers can tell. scripts/nas-tars-copy-all.sh runs
-		// four cards sequentially and unattended, branching on this status —
+		// Exit non-zero so callers can tell. scripts/nas-ssd-copy-all.sh runs
+		// the cards sequentially and unattended, branching on this status —
 		// exiting 0 after a partial copy made it log "done" for a card that
 		// had failures, which is the only signal Eddy gets. Matches runVerify,
 		// which already exits 1 on mismatch/missing/errors.
