@@ -4,7 +4,23 @@ Protocol: the PM's current WORK ORDER lives at the top (newest supersedes; work 
 
 Boot line (Mac mini, visible terminal, Opus-class, Remote Control on): `cd ~/Projects/media-vault-dev && claude --model opus --remote-control media-vault-dev "You are the Dev for media-vault. Read team/TEAM.md, team/actors/dev.md, then team/channels/dev-questions.md."`
 
-## WORK ORDER - rev 3
+## WORK ORDER - rev 4 (issued for after the 2026-09-17 restart; starts when review #3 resolves)
+
+**PM (2026-09-17, 18:40):** **Review #3 came back FINDINGS (four) - read them in `review-requests.md` #3.** So item 0 first, on `tests-and-pinning`, new commits only:
+
+0. **#3 findings.** (1) `testguard`: `EvalSymlinks` before any lexical cleaning - resolve the path as given (component by component if needed), then compare; reject a path that cannot be fully resolved; add the `link/../x` case to the guard test without touching real roots. (2) Also check `GOTMPDIR` (that is what `t.TempDir()` actually uses in this toolchain) - both env vars must resolve outside `/volume1` and `/mnt`; test it. (3) `docker.yml`: add `flavor: latest=false` to the metadata step; `docs/release.md` + CLAUDE.md say why. (4) CLAUDE.md exit table: `move --rule <malformed>` with wrong arity exits 2 (arity is checked first at `main.go:697`); say "no/unknown command or wrong arity → 2" and list the ordering only where it differs. READY FOR REVIEW → PM stages #4 (fixes only) → merge → `v0.2.0`.
+
+Then: new branch `overwrite-guard` off the merged `main`. The Tester found data loss (its item #5, read it and #7, #9 in full first). Priority order, one PR per numbered item unless told otherwise:
+
+1. **B23(b) - `copy` must never overwrite a `verified` destination with different content.** Today a row with the same `(source_disk, source_path)` but changed size/mtime is "recopy": the destination is replaced in place, no collision policy consulted, and the previous verified bytes are gone. That is how 2,668 photos died on 2026-09-01. First commit: a test that reproduces it (verified row → same path, different bytes → destination replaced, old hash unrecoverable). Second commit: the fix. **Default policy, pending Eddy's decision in DECISIONS.md (PM recommendation): treat it as a destination collision** - the existing destination is never touched; with `--on-collision rename-mtime-year` the *new* file lands under the renamed path and gets its own row; without it the file is skipped, counted in `INCOMPLETE:`, exit 1. The old row keeps its hash and `verified` status. If DECISIONS.md says otherwise by the time you get here, follow that.
+2. **B24 - manifest dest_path repair.** A `vault repair-dest <disk> <dest-root> --dry-run` subcommand: for each row whose `dest_path` does not exist under the root, look for the same basename at one directory level down (here `CLIP/`, `DCIM/`), and only if that file's size **and sha256** match the row, rewrite `dest_path`. `--dry-run` prints the plan; without it, it writes, one row at a time, and prints each change. Tests on temp dirs. This is run on a **snapshot** first by the Tester, then on the live manifest by the PM as a logged operational act.
+3. **B25 - `certify` refuses an output path inside the destination root** (it already blocked 39,219 files once). Tests.
+4. **B9 - F4 tests** for `--only-unverified` (the F4 "done when" list in `team/archive/2026-09-15-handoff-f3-f4.md`).
+5. **B27** - `nas-verify-certify-all.sh` double-logs; drop the inner `tee` or the outer redirect, whichever keeps the log readable when run by hand.
+
+Evidence as usual (`go test ./... -count=1`, rung `tested`). READY FOR REVIEW per item; the PM stages one review per PR. B17 (tagger) comes after these.
+
+## WORK ORDER - rev 3 (under review #3 - frozen)
 
 **PM (2026-09-17):** Review #2 came back **FINDINGS** (five, read them in full in `team/channels/review-requests.md`). `tests-and-pinning` is unfrozen **for fixes only** - new commits on top of `14f4e2c`, never a rewrite. Do this before rev 2's `ci-and-docs` items; rev 2 is superseded below and its items 1-3 fold in here as item 6 so the CLAUDE.md edits land once.
 
@@ -43,6 +59,8 @@ Boot line (Mac mini, visible terminal, Opus-class, Remote Control on): `cd ~/Pro
 Flag in-progress local work at the top of your first note so the Tester knows your worktree is live.
 
 ## Dev notes
+
+**PM (2026-09-17T18:50-07:00) - resumed after the restart.** Rev 4 stands exactly as written above; start at item 0 on `tests-and-pinning` (new commits on top of `c5c5e53`, no rewrite). `main` is `549ba08` = `7cca025` + team files, so no rebase is needed for item 0; branch `overwrite-guard` (item 1 onward) comes off the merged `main` after #4. When item 0 is READY FOR REVIEW, give me the tip SHA and the guard's refusal output for `GOTMPDIR=/volume1/...` and for a `link/../x` spelling, both against fake roots. I run Codex within minutes of the note.
 
 **Dev (2026-09-17T18:31-07:00) - STOP for restart.** Nothing in flight: all rev-3 work is committed (code tip `c1f7fbd`, note `f764a75`), worktree clean apart from the PM's own unstaged `BACKLOG.md`/`review-requests.md`. Stopped at: READY FOR REVIEW, waiting on review #3. Next: whatever #3 returns, else B9 (F4 tests) on a fresh branch once `verify-incremental` is on `main`.
 

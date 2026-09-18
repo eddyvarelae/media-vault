@@ -30,7 +30,7 @@ On the NAS (UGREEN DXP, UGOS):
 
 In the repo: `vault-config/` (gitignored local config), `.github/workflows/docker.yml` publishes to production on push to `main` - a merge is a deploy until B4 (tag pinning) lands.
 
-Where the system has live side effects: exactly one running instance, ever - the manifest is single-writer. Test artifacts are tagged and cleaned up same-day.
+Where the system has live side effects: exactly one running instance, ever - the manifest is single-writer. Test artifacts are tagged and cleaned up same-day. **Seats share files only through git - never `cp` into another seat's worktree** (PM did, 2026-09-17; Tester #13).
 
 ## Isolation, deploys, and claims (learned the hard way - not optional)
 
@@ -71,11 +71,15 @@ Branch policy: Dev works in its own worktree (`~/Projects/media-vault-dev`) on a
 4. Skim `BACKLOG.md` and the `DECISIONS.md` tail.
 5. Memory: trust only entries namespaced to your role; others' entries are background, not your identity.
 
-## Current state (2026-09-16 - PM-verified, don't re-derive)
+## Current state (2026-09-17 18:50 - PM-verified, don't re-derive)
 
-- `main` = `9518230` (F3, collision exit status) - pushed, builds and vets clean, **zero test files**.
-- `verify-incremental` = `f964b60` (F4, `--only-unverified`) - pushed, **under Reviewer review, not merged**. Nobody touches it.
-- Production: 6 camera disks in the NAS manifest (`media-djiflip`, `media-djimini2`, `media-iphone`, `media-sonya6700`, `media-sonyzve10`, `media-gopro`), 3.3 TiB, 195 `copied` rows awaiting verification (per handoff), 831 collision-renames. Full verify ≈ 11 h; F4 is what makes an incremental pass possible.
-- Source SSDs: 4 remain in play (names TBD - Tester to enumerate from the manifest); a 5th was repurposed as "Scratch1" on the Mac mini.
-- NAS access from the Mac mini: **unknown - open ACTION (human)** in `channels/tester-feedback.md`.
-- Seats booted: PM. Dev and Tester: boot lines in `dev-questions.md` / `tester-feedback.md`.
+**Resumed 2026-09-17 18:47 after the restart:** PM, Dev (Terminal window 406) and Tester (407) rebooted; worktrees and both NAS mounts survived. Boot lines + in-flight table: `team/archive/2026-09-17-pm-handoff.md`. SSDs attached now: `tars`, `kipp`, `case`, `Eddy's Media Vault`, `Scratch1` - `noahsarc` is not.
+
+- `main` tip = see `git log -1`; last code merge = `7cca025` (**F4 merged**, Reviewer APPROVE #1). Builds and vets clean. Zero test files on `main` until review #3 lands.
+- `tests-and-pinning` (Dev's worktree `~/Projects/media-vault-dev`): review #2 = FINDINGS (5); Dev rev 3 in progress - its last channel note says where it stopped.
+- Tester (`~/Projects/media-vault-tester`, detached): B2/B7 in progress from a manifest snapshot; last item says where it stopped.
+- NAS: DXP2800 `192.168.1.167`, SMB `figmaboi`; `~/mounts/media` and `~/mounts/docker` mount via `com.varela.mount-nas`. SSH enabled 2026-09-17, details unconfirmed.
+- Scope since 2026-09-17: every scheduled batch against the archive is ours (nightly tagger = B17, after rev 3).
+- **P0 (Tester, 2026-09-17): 2,668 SonyA6700 photos overwritten on Sep 1, not found on any attached SSD - B23. Nothing gets wiped.** 195 rows need a dest_path fix before verify can pass - B24. Archive is 8.20 TiB (not 3.3).
+- Source SSDs mapped (B7 done): `tars`, `noahsarc`, `case`, `Eddy's Media Vault`; `kipp` never copied (B26). A 5th is now "Scratch1".
+- Reviewer = `codex exec`, run by the PM. Seats boot in visible Terminal windows with `--remote-control`; nudges need a trailing empty `do script`.
