@@ -6,6 +6,19 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #13 - B9 F4 tests + B27 single logging + B20 skip `reports/` (branch `f4-tests`, code tip `dc36e5f`)
+
+**PM (2026-09-17T20:38:33-07:00):** Review `git diff 73c52ae..dc36e5f -- . ':!team'` (3 commits off `main` at `73c52ae`, code-identical to `e4a4aed`; 9 files, +453/-14: new `internal/verify/verify_test.go`, `cmd/vault/main_test.go`, `internal/scan/scan.go` + test, `scripts/nas-verify-certify-all.sh`, new `scripts/test/nas-verify-certify-all.sh`, `scripts/test/scripts_test.go`, `CLAUDE.md`, `README.md`). Dev's note: Dev 2026-09-17T20:38 (commit `5828145` on that branch). PM independently at `dc36e5f`: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all seven test packages (`internal/verify` now tested). Note: `certs-out` (#12) also creates `scripts/test/nas-verify-certify-all.sh` and edits the same script - a merge conflict Dev resolves when the second of the two lands; review each as it is.
+
+**Claims:**
+1. (B9) `verify --only-unverified` touches exactly the non-`verified` rows of the disk (a whole-map comparison), promotes those that hash clean, re-stamps a still-bad `mismatch`, leaves a missing-file row untouched, and never reads or lists a `verified` row - proven by `BytesRead` equal to the byte total of exactly the files it should read; a `verified` row with rot on disk stays `verified` under the flag (documented cost) and is caught by a bare pass. `CountVerifiedInDisk` counts only that disk's verified rows and reports the newest single `verified_at`. CLI: the two warning lines and the "no verified rows to skip" line print as documented; flag position independent.
+2. (B27) `nas-verify-certify-all.sh` logs each line once under `nohup … >> $LOG 2>&1 &`, under a plain redirect, and by hand in a terminal (`tee` only when `[ -t 1 ]`); docker-stub test covers the first two; `LOG="${VAULT_LOG:-…}"` added.
+3. (B20) `scan` skips directories named exactly `reports` at any depth; `reports.txt`, `reportsX/` still scanned.
+
+**This is wrong if:** the F4 test's `BytesRead` assertion can pass while the verified-with-rot file was read (is `BytesRead` incremented on every read path, including the dedupe-by-reference path?); the `onFile` whole-map comparison excludes any row it should include; the shell test can pass with `tee` restored or with the `[ -t 1 ]` branch inverted; `isJunkDir` matches on a substring or case-folds where the archive FS would not; or `README`/`CLAUDE.md` describe a behavior the code does not have.
+
+Verdict goes below this line.
+
 ### #11 - re-review of #9's fix only (branch `overwrite-guard`, code tip `ba4c185`)
 
 **PM (2026-09-17T20:30:50-07:00):** Check that #9's one finding is closed, nothing else. Diff `git diff 151b20a..ba4c185 -- . ':!team'` (1 commit after Dev's merge of `main` at `151b20a`; 7 files, +223/-10). Dev's note: `team/channels/dev-questions.md`, Dev 2026-09-17T20:26 (commit `d73e71c` on that branch). PM independently at `ba4c185`: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all six test packages.
