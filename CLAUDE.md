@@ -23,8 +23,10 @@ gets the same three-line `TestMain`. Never point a test at either root.
 `internal/verify` has package-level F4 tests (incremental pass over every
 non-verified status, verified rows untouched, bytes read as proof) and
 `cmd/vault` the CLI ones. `scripts/test/` holds bash tests of the NAS scripts (Docker shadowed by a
-stub on `PATH`, logs redirected via `VAULT_LOG`); `go test ./scripts/test/`
-runs them, so `go test ./...` is still the one command.
+stub on `PATH`, logs redirected via `VAULT_LOG`) and of the tagging job
+(a real manifest built by the freshly built `vault`, real xattrs, stubs for
+the machine); `go test ./scripts/test/` runs them, so `go test ./...` is
+still the one command.
 
 ## Package map
 
@@ -39,6 +41,7 @@ runs them, so `go test ./...` is still the one command.
 | `internal/inventory` | NAS-side rows with no `dest_path` (`inventoried`) |
 | `internal/repair` | `repair-dest`: rows whose `dest_path` is not a regular file under the root → same basename one directory down, `Lstat` only (no symlink as leaf, subdirectory or ancestor; containment proven under the resolved root), kept only on size **and** sha256 match and only if no other row's `dest_path` is that file (physical compare, as in `scan`); the row's own directory walked the same way *before* a leaf counts as intact; a chosen file is reserved so two rows of one run cannot repair to it (`CONFLICT`, both unresolved), and `Apply` re-checks claims at write time; outcomes `REPAIR` / `NOT FOUND` / `AMBIGUOUS` / `OWNED` / `NOT A FILE` / `UNSAFE` / `CONFLICT`; `Apply` rewrites `dest_path` alone (`UpdateDestPath`), status untouched so `verify` still promotes |
 | `internal/dedup`, `internal/move`, `internal/importer` | Duplicate reports, manifest-aware moves, video-tagger imports |
+| `scripts/tagging/` | The nightly video tagger (B17): `run-tagging.sh` + `tagging-helper.py`, `README.md` is the contract. Machine settings from mini-server's `mini.env`, job policy defaulted in the script (tiers, 200 GB, `verified` rows only, newest first), every policy override logged; the NAS manifest is read only through a per-run snapshot. Tested by `scripts/test/run-tagging.sh` against a manifest built by `vault` itself |
 | `scripts/*.sh` | How work runs on the NAS: `docker run --rm … ghcr.io/eddyvarelae/media-vault:<tag> <command>`, sequential, as root via `sudo nohup`. `nas-kipp-copy-all.sh` (B26): `KIPP_SRC` required (container path of the disk), `DRY_RUN=1` plans only, `--dedupe-content --on-collision rename-mtime-year` on every folder, per-folder flags per `team/context/runbook-kipp.md` step 2 |
 
 ## Manifest status vocabulary
