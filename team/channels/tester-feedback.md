@@ -147,3 +147,39 @@ Report each as a numbered item below: outcome first, then evidence (the query an
     - **The Apr 26 source is a separate, still-unidentified disk.** The Sep 1 `.bak` snapshot shows 21,986 `media-sonya6700` rows / 1,537,866,933,480 B copied on 2026-04-26 16:06-17:47 MDT (the 2,668 at 17:32-17:37), with **no log on the NAS for that run** (`inventory.log` starts 16:47 and is inventory-only; `tars-copy.log` is Apr 27). It was not `noahsarc` (21,986 + 12,991 > 15,526). Of the five attached disks none holds the 2,668 now (#5, #14), and both Samsungs have been reformatted since April (`case` ~Jul 23, `Scratch1` Sep 2). `ACTION (human):` what was plugged into the NAS on the afternoon of 2026-04-26? Remaining candidates are that disk if it still exists, camera SD cards from before Apr 26, and any other machine's copy.
     Not my call, but stated plainly: with `noahsarc` erased and the Apr 26 source unknown, B23 recovery now depends entirely on Eddy remembering the Apr 26 disk or having unformatted cards.
     **PM (2026-09-17T19:15-07:00):** Accepted, load-bearing; PM re-read `~/Projects/mini-server/SETUP.md:129-135` myself - it says exactly that. Facts recorded in BACKLOG B23, TEAM.md Current state and `context/production.md`: `noahsarc` = `Scratch1`, device-erased 2026-09-02 17:58; the 2026-04-26 SonyA6700 source (21,986 rows) is unidentified and unlogged. Your `ACTION (human)` (what was plugged into the NAS on the afternoon of 2026-04-26; any unformatted A6700 cards) goes to Eddy now in DECISIONS NEEDED. Nothing further for you on B23(a) until a new disk or card mounts. Closed as an item; B23 stays open.
+
+18. **[2026-09-17T19:06:42-07:00] B2 done (rev-2 item 2): SSH as `figmaboi` works with the key; no password-less `sudo` in general, but `sudo docker` is NOPASSWD; nothing is running on the NAS.** Permission rule `Bash(ssh *)` added by Eddy at 19:10. Verbatim, all read-only:
+    ```
+    $ ssh -o BatchMode=yes figmaboi@192.168.1.167 id
+    uid=1000(figmaboi) gid=10(admin) groups=10(admin),100(users),133(ughomeusers)
+    $ ssh ... 'sudo -n true'
+    sudo: a password is required                                   (exit 1)
+    $ ssh ... 'docker ps'
+    permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock ... (exit 1)
+    $ ssh ... 'sudo -n docker ps'
+    CONTAINER ID   IMAGE     COMMAND   CREATED   STATUS    PORTS     NAMES     (exit 0 - zero containers)
+    $ ssh ... 'sudo -n -l'   (tail)
+    User figmaboi may run the following commands on DXP2800-43F8:
+        (ALL : ALL) ALL
+        (root) NOPASSWD: /usr/bin/docker, /usr/bin/nohup, /usr/bin/bash
+    $ ssh ... 'ls -la /volume1/docker/vault-nas-config/'
+    drwxrwxrwx+ 2 root     root      4096 Sep 13 12:50 .
+    -rwxrwxrwx+ 1 root     root       160 Apr 26 11:50 key.pem
+    -rwxrwxrwx+ 1 root     root  77832192 Sep 13 12:50 manifest.db
+    -rwxrwxrwx+ 1 figmaboi admin 77832192 Sep  1 07:05 manifest.db.bak-20260901-012727
+    -rwxrwxrwx+ 1 figmaboi admin 77832192 Sep  3 00:46 manifest.db.bak-20260902-234646
+    -rwxrwxrwx+ 1 figmaboi admin 77832192 Sep  2 19:12 manifest.db.certified-20260902-181205
+    -rwxrwxrwx+ 1 figmaboi admin 77832192 Sep  2 12:03 manifest.db.verified-20260901-152746
+    $ ssh ... 'ls -la /volume1/docker/vault-certs/'
+    drwxrwxrwx+ 2 figmaboi admin     4096 Sep  2 19:12 .
+    -rwxrwxrwx+ 1 figmaboi admin     8952 Sep  2 19:12 media-backup.cert.json
+    -rwxrwxrwx+ 1 figmaboi admin   221815 Sep  2 19:12 media-djiflip.cert.json
+    -rwxrwxrwx+ 1 figmaboi admin   145612 Sep  2 19:12 media-leantank.cert.json
+    -rwxrwxrwx+ 1 figmaboi admin 10098068 Sep  2 19:12 media-sonya6700.cert.json
+    -rwxrwxrwx+ 1 figmaboi admin  6744914 Sep  2 19:12 media-sonyzve10.cert.json
+    $ ssh ... 'date -Iseconds; uname -a; which sqlite3'
+    2026-09-17T20:06:10-06:00
+    Linux DXP2800-43F8 6.12.30+ #1 SMP PREEMPT_DYNAMIC Thu Apr 30 14:07:57 UTC 2026 x86_64 GNU/Linux
+    /usr/bin/sqlite3
+    ```
+    Facts for the PM's B6 runbook: (1) the NAS scripts' `docker run` must be `sudo docker run` from `figmaboi` (no password needed); `nohup` and `bash` are also NOPASSWD as root - **`sudo bash` is a password-less root shell, so "read-only" on this seat is discipline, not enforcement** - the PM may want that on Eddy's radar (UGOS default for admin-group users, I assume). (2) NAS clock is UTC-6 vs the Mini's UTC-7: NAS "Sep 13 12:50" = the SMB listing's "Sep 13 11:50", same instant - all my earlier NAS mtimes are Mini-local. (3) `/usr/bin/sqlite3` exists on the NAS, so `?mode=ro` queries could run there directly - I'll keep snapshotting to Scratch1 unless told otherwise. (4) `manifest.db` and `key.pem` are root-owned, mode 777 (`+` ACL); the four `.bak` files and `vault-certs/` are `figmaboi`-owned, i.e. written over SMB from the Mini on Sep 1-3 - consistent with mini-server's account. (5) Also noticed, not investigated: the Mini has its own `~/vault-config/key.pem` (160 B, mtime Sep 1 06:05) next to the NAS one (Apr 26 11:50); whether it is a copy or a second signing key I did not check - I did not read either file. The PM decides whether that needs a hash comparison. Manifest unchanged since Sep 13 12:50 NAS-time; no `-wal`/`-shm`; zero containers → nothing running (liveness #16 confirmed from the NAS side).
