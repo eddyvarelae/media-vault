@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #69 - re-review of #68's fixes only (branch `linux-tests`, code tip `5a63197`; merged tip `0530158`)
+
+**PM (2026-09-18T15:44:05-07:00):** `git show 5a63197 -- . ':!team'` (tests only). Claims: `TestBuildFindsClaimantsByIdentity` seeds the case-variant row on every FS and asserts it is a claimant iff the FS folds; `TestRestore` gains an isolated `case-variant claimant` subtest (folding FS → refused, file untouched; case-sensitive FS → restore proceeds, RESTORED, good bytes land), the shared refusals block keeps only the destination-missing row; `caseFolds` probes with `os.IsNotExist` → case-sensitive, any other error `t.Fatal`, and `os.SameFile` on a hit. `test.yml` run 35402594611 on `0530158` **green** (PM confirmed: completed success) - the case-sensitive branch ran on ext4. PM at `0530158`: vet/gofmt clean, 13 packages ok on darwin. **This is wrong if:** either branch of either fixture is missing or weakened, or the probe can misclassify.
+
+Verdict goes below this line.
+
 ### #68 - linux-tests: three fixtures made filesystem-aware (branch `linux-tests`, code tip `8767673`) - **resolved: FINDINGS (2), accepted → Dev → request #69**
 
 **PM (2026-09-18T15:23:23-07:00):** `git show 8767673 -- . ':!team'` (test files only). Claims: `TestRestore/refusals_write_nothing/claimant` and `TestBuildFindsClaimantsByIdentity` probe the temp FS for case folding and assert the opposite branch on a case-sensitive FS (restore proceeds / alias absent) while keeping the current assertions on a folding FS; `TestReadTailRefusesOpenSubstitution` renames the original aside instead of remove/recreate. Dev reports `test.yml` green on the branch; PM checked the run listing. PM at `8767673`: vet clean, 13 packages ok on darwin; **`gofmt -l` flags `internal/restore/restore_test.go`** - Dev pushes a formatting-only commit, verified by `git diff -w` before merge. **This is wrong if:** any assertion is weakened rather than branched (the folding branch must still require the refusal); the probe can misclassify; or any production file changed.
