@@ -22,6 +22,7 @@ import (
 	"github.com/eddyvarelae/media-vault/internal/manifest"
 	mvpkg "github.com/eddyvarelae/media-vault/internal/move"
 	"github.com/eddyvarelae/media-vault/internal/repair"
+	"github.com/eddyvarelae/media-vault/internal/restore"
 	"github.com/eddyvarelae/media-vault/internal/scan"
 	"github.com/eddyvarelae/media-vault/internal/verify"
 )
@@ -47,6 +48,11 @@ Usage:
   vault gap        <source-dir> [--tsv <file>]
                    (report-only: what on the dir is NOT archived, by content -
                     size index over verified rows, sha256 only on a size match)
+  vault restore    <source-disk-name> <source-path> <replacement-file> <dest-dir>
+                   --expect-sha <sha256> [--dry-run]
+                   (replace ONE row's destination file on purpose, with the
+                    replacement's sha256 stated up front; the row goes back
+                    to status copied, for verify to promote)
   vault inventory  <source-disk-name> <dir>
   vault dedup      [--min-size <bytes>]
   vault unique     <source-disk-name>
@@ -81,7 +87,7 @@ func main() {
 	dbPath := filepath.Join(configDir, "manifest.db")
 	var m *manifest.Manifest
 	var err error
-	if hasDryRun(args) || cmd == "gap" {
+	if dryRunRequested(cmd, args) || cmd == "gap" {
 		// A dry run writes nothing - not an archive file, not a row, and
 		// (B31) not the config dir or the manifest file either: the
 		// manifest is opened read-only, or planned against an empty
@@ -128,6 +134,10 @@ func main() {
 		}
 	case "gap":
 		if code := runGap(ctx, m, args); code != 0 {
+			os.Exit(code)
+		}
+	case "restore":
+		if code := runRestore(ctx, m, args); code != 0 {
 			os.Exit(code)
 		}
 	case "inventory":
@@ -781,6 +791,100 @@ func runGap(ctx context.Context, m *manifest.Manifest, args []string) int {
 	return 0
 }
 
+// runRestore is B40: the deliberate replacement of one verified destination.
+// Returns its status like runCopy: 0 on success, on --dry-run, or when the
+// destination already holds the expected bytes; 1 on any refusal, with
+// nothing written.
+func runRestore(ctx context.Context, m *manifest.Manifest, args []string) int {
+	expect, dryRun := "", false
+	var pos []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--dry-run":
+			dryRun = true
+		case "--expect-sha":
+			if i+1 >= len(args) {
+				die("--expect-sha needs a value")
+			}
+			expect = args[i+1]
+			i++
+		default:
+			if strings.HasPrefix(args[i], "--") {
+				die("unknown flag: %s", args[i])
+			}
+			pos = append(pos, args[i])
+		}
+	}
+	if len(pos) != 4 {
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	if expect == "" {
+		die("--expect-sha is required: state the sha256 of the replacement as you verified it")
+	}
+	disk, sourcePath, replacement, destRoot := pos[0], pos[1], pos[2], pos[3]
+
+	p, err := restore.Build(ctx, m, disk, sourcePath, replacement, destRoot, expect)
+	if p != nil {
+		printRestorePlan(p)
+	}
+	if err != nil {
+		if errors.Is(err, restore.ErrRefused) {
+			fmt.Fprintf(os.Stderr, "Cannot restore: %v\n", err)
+			return 1
+		}
+		die("restore: %v", err)
+	}
+	if p.AlreadyThere {
+		fmt.Println("Destination already holds the expected bytes; nothing to do.")
+		return 0
+	}
+	if dryRun {
+		fmt.Println("(dry-run; no archive file, no manifest row)")
+		return 0
+	}
+
+	after, err := restore.Apply(ctx, m, p, destRoot)
+	if err != nil {
+		die("restore: %v", err)
+	}
+	fmt.Printf("\nRow after:  sha %s  size %d  status %s  verified_at 0  copied_at %s\n",
+		after.SHA256, after.Size, after.Status, time.Unix(0, after.CopiedAt).UTC().Format(time.RFC3339))
+	// One machine-parseable line: what was replaced, by what, and what the
+	// row attested before - the record the log keeps.
+	fmt.Printf("RESTORED %s %s old=%s:%d new=%s:%d expect=%s prior_status=%s prior_verified_at=%d from=%s\n",
+		disk, sourcePath, p.CurrentSHA, p.CurrentSize, after.SHA256, after.Size, p.ExpectSHA, p.Row.Status, p.Row.VerifiedAt, replacement)
+	fmt.Printf("next: vault verify %s %s --only-unverified\n", disk, destRoot)
+	return 0
+}
+
+func printRestorePlan(p *restore.Plan) {
+	fmt.Printf("Row:        %s:%s  dest_path %q → %s\n", p.Row.SourceDisk, p.Row.SourcePath, p.Row.DestPath, p.DestRel)
+	fmt.Printf("            sha %s  size %d  status %s  verified_at %d  copied_at %d\n",
+		p.Row.SHA256, p.Row.Size, p.Row.Status, p.Row.VerifiedAt, p.Row.CopiedAt)
+	if p.CurrentSHA != "" {
+		attests := "no"
+		if p.RowAttests {
+			attests = "yes"
+		}
+		fmt.Printf("Current:    %s  sha %s  size %d  (row attests these bytes: %s)\n", p.DestFull, p.CurrentSHA, p.CurrentSize, attests)
+	}
+	if len(p.Claimants) == 0 {
+		if p.CurrentSHA != "" {
+			fmt.Println("Claimants:  none (no other row resolves to this file)")
+		}
+	} else {
+		fmt.Printf("Claimants:  %d\n", len(p.Claimants))
+		for _, c := range p.Claimants {
+			fmt.Printf("            %s:%s  status %s  sha %s\n", c.SourceDisk, c.SourcePath, c.Status, c.SHA256)
+		}
+	}
+	if p.ReplaceSHA != "" {
+		fmt.Printf("Replacement: %s  sha %s  size %d  (--expect-sha %s: %s)\n", p.Replacement, p.ReplaceSHA, p.ReplaceSize, p.ExpectSHA,
+			map[bool]string{true: "match", false: "MISMATCH"}[p.ReplaceSHA == p.ExpectSHA])
+	}
+}
+
 func runInventory(ctx context.Context, m *manifest.Manifest, args []string) {
 	if len(args) != 2 {
 		fmt.Fprint(os.Stderr, usage)
@@ -1104,12 +1208,32 @@ func human(n int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
-// hasDryRun reports whether --dry-run is among the arguments. It is only
-// used to pick how the manifest is opened; each command still parses its
-// own flags and rejects the flag where it means nothing.
-func hasDryRun(args []string) bool {
-	for _, a := range args {
-		if a == "--dry-run" {
+// dryRunRequested reports whether the command will run as a dry run - the
+// single interpretation main opens the manifest by and the command executes
+// by, so a literal --dry-run sitting where a flag VALUE is expected (e.g.
+// --prefix --dry-run) is a prefix, not a mode switch (review #27). The
+// per-command sets below are exactly the value-taking flags each parser
+// consumes (scan/copy/move: --prefix/--rule/--on-collision; dedup:
+// --min-size; certify: --root; the rest none); keep them in step with the
+// parsers, or a value that happens to read --dry-run (e.g. certify --root
+// --dry-run) is misread as the mode switch and the manifest opens
+// read-only (review #46).
+func dryRunRequested(cmd string, args []string) bool {
+	var valueFlags map[string]bool
+	switch cmd {
+	case "scan", "copy", "move":
+		valueFlags = map[string]bool{"--prefix": true, "--rule": true, "--on-collision": true}
+	case "dedup":
+		valueFlags = map[string]bool{"--min-size": true}
+	case "certify":
+		valueFlags = map[string]bool{"--root": true}
+	}
+	for i := 0; i < len(args); i++ {
+		if valueFlags[args[i]] {
+			i++
+			continue
+		}
+		if args[i] == "--dry-run" {
 			return true
 		}
 	}

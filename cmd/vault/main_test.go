@@ -892,9 +892,9 @@ func TestVerifiedDestinationAliases(t *testing.T) {
 	// A row stored as ../archive/x.mov.vault-partial relative to
 	// base/archive is base/archive/x.mov.vault-partial on disk - exactly
 	// B's staging path. Such a row used to come from
-	// `--rule vault-partial=../archive`; B34 refuses that rule now, so the
-	// row is seeded directly: what this case tests is the ownership key,
-	// and rows written before B34 still exist.
+	// `--rule vault-partial=../archive`; the writer refuses a climbing
+	// route now (review #24 / B34), so the row is seeded directly: what
+	// this case tests is the ownership key, and rows written before exist.
 	t.Run("dot-dot in a stored dest_path", func(t *testing.T) {
 		cfg, srcB, base := t.TempDir(), t.TempDir(), t.TempDir()
 		dst := filepath.Join(base, "archive")
@@ -1141,6 +1141,244 @@ func TestRepairDest(t *testing.T) {
 	if out, _, code := vault(t, cfg, "repair-dest", "nobody", dst); code != 0 || !strings.Contains(out, "0 rows with a dest_path") {
 		t.Errorf("unknown disk: exit %d\n%s", code, out)
 	}
+}
+
+// TestRestore is B40 through main(): a verified, certified file whose tail
+// became zeros; restore --dry-run reports everything and writes nothing;
+// restore replaces the bytes with the stated original and sets the row back
+// to copied; verify --only-unverified promotes only it; certify passes with
+// the new hash. Then every refusal, each with nothing written.
+func TestRestore(t *testing.T) {
+	const good = "3 MiB of image, then the rest of the image"
+	const torn = "3 MiB of image, then 000000000000000000000"
+	if len(good) != len(torn) {
+		t.Fatal("fixture: torn and good must have the same size, as in B40")
+	}
+	setup := func(t *testing.T) (cfg, dst, emv string) {
+		cfg, src, dst, emv := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(src, "DCIM", "DSC04868_2025.JPG"), torn, t0)
+		writeFile(t, filepath.Join(src, "DCIM", "DSC04869_2025.JPG"), "fine", t0)
+		if _, _, code := vault(t, cfg, "copy", "sony", src, dst); code != 0 {
+			t.Fatalf("copy: exit %d", code)
+		}
+		if _, _, code := vault(t, cfg, "verify", "sony", dst); code != 0 {
+			t.Fatalf("verify: exit %d", code)
+		}
+		if _, _, code := vault(t, cfg, "certify", "sony"); code != 0 {
+			t.Fatalf("certify: exit %d", code)
+		}
+		writeFile(t, filepath.Join(emv, "Backups", "SonyA6700", "DCIM", "DSC04868.JPG"), good, t0.Add(time.Hour))
+		return cfg, dst, emv
+	}
+	replacement := func(emv string) string { return filepath.Join(emv, "Backups", "SonyA6700", "DCIM", "DSC04868.JPG") }
+
+	t.Run("the B40 path", func(t *testing.T) {
+		cfg, dst, emv := setup(t)
+		before := rowsOf(t, cfg, "sony")
+		row := wantRow(t, before, "DCIM/DSC04868_2025.JPG", "DCIM/DSC04868_2025.JPG", torn, "verified")
+
+		out, _, code := vault(t, cfg, "restore", "sony", "DCIM/DSC04868_2025.JPG", replacement(emv), dst, "--expect-sha", sha(good), "--dry-run")
+		if code != 0 {
+			t.Fatalf("dry-run: exit %d\n%s", code, out)
+		}
+		for _, want := range []string{
+			"Row:        sony:DCIM/DSC04868_2025.JPG",
+			"status verified",
+			"sha " + sha(torn) + "  size " + fmt.Sprint(len(torn)) + "  (row attests these bytes: yes)",
+			"Claimants:  none",
+			"Replacement: " + replacement(emv) + "  sha " + sha(good) + "  size " + fmt.Sprint(len(good)) + "  (--expect-sha " + sha(good) + ": match)",
+			"(dry-run; no archive file, no manifest row)",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("dry-run output missing %q:\n%s", want, out)
+			}
+		}
+		if got := readFile(t, filepath.Join(dst, "DCIM", "DSC04868_2025.JPG")); got != torn {
+			t.Errorf("dry-run changed the file: %q", got)
+		}
+		if got := rowsOf(t, cfg, "sony"); !reflect.DeepEqual(got, before) {
+			t.Errorf("dry-run changed rows")
+		}
+
+		out, _, code = vault(t, cfg, "restore", "sony", "DCIM/DSC04868_2025.JPG", replacement(emv), dst, "--expect-sha", sha(good))
+		if code != 0 {
+			t.Fatalf("restore: exit %d\n%s", code, out)
+		}
+		logLine := fmt.Sprintf("RESTORED sony DCIM/DSC04868_2025.JPG old=%s:%d new=%s:%d expect=%s prior_status=verified prior_verified_at=%d from=%s",
+			sha(torn), len(torn), sha(good), len(good), sha(good), row.VerifiedAt, replacement(emv))
+		if !strings.Contains(out, logLine) {
+			t.Errorf("log line missing or different; want\n%s\ngot\n%s", logLine, out)
+		}
+		if !strings.Contains(out, "next: vault verify sony "+dst+" --only-unverified") {
+			t.Errorf("no next step printed:\n%s", out)
+		}
+		if got := readFile(t, filepath.Join(dst, "DCIM", "DSC04868_2025.JPG")); got != good {
+			t.Errorf("file after restore = %q", got)
+		}
+		noPartials(t, dst)
+		after := rowsOf(t, cfg, "sony")
+		e := wantRow(t, after, "DCIM/DSC04868_2025.JPG", "DCIM/DSC04868_2025.JPG", good, "copied")
+		if e.MtimeNs != t0.Add(time.Hour).UnixNano() || e.CopiedAt <= row.CopiedAt {
+			t.Errorf("row after = %+v: mtime should be the replacement's, copied_at advanced", e)
+		}
+		if !reflect.DeepEqual(after["DCIM/DSC04869_2025.JPG"], before["DCIM/DSC04869_2025.JPG"]) {
+			t.Errorf("the other row moved")
+		}
+		if _, _, code := vault(t, cfg, "certify", "sony"); code != 1 {
+			t.Errorf("certify right after restore: exit %d, want 1 (row is copied)", code)
+		}
+		out, _, code = vault(t, cfg, "verify", "sony", dst, "--only-unverified")
+		if code != 0 || !strings.Contains(out, "skipping 1 already-verified row(s)") || !strings.Contains(out, "Verified: 1   Mismatch: 0") {
+			t.Fatalf("incremental verify: exit %d\n%s", code, out)
+		}
+		wantRow(t, rowsOf(t, cfg, "sony"), "DCIM/DSC04868_2025.JPG", "DCIM/DSC04868_2025.JPG", good, "verified")
+		if _, _, code := vault(t, cfg, "certify", "sony"); code != 0 {
+			t.Errorf("certify after verify: exit %d", code)
+		}
+		// Running it again: nothing to do, nothing written.
+		out, _, code = vault(t, cfg, "restore", "sony", "DCIM/DSC04868_2025.JPG", replacement(emv), dst, "--expect-sha", sha(good))
+		if code != 0 || !strings.Contains(out, "already holds the expected bytes") || strings.Contains(out, "RESTORED") {
+			t.Errorf("second restore: exit %d\n%s", code, out)
+		}
+	})
+
+	t.Run("refusals write nothing", func(t *testing.T) {
+		cfg, dst, emv := setup(t)
+		before := rowsOf(t, cfg, "sony")
+		other := t.TempDir()
+		writeFile(t, filepath.Join(other, "wrong.JPG"), "not the original", t0)
+		writeFile(t, filepath.Join(dst, "DCIM", "orphan.JPG"), "no row", t0)
+		// A deduped row of another disk resolving to the same file.
+		m, err := manifest.Open(filepath.Join(cfg, "manifest.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Upsert(manifest.Entry{SourceDisk: "kipp", SourcePath: "x/DSC04868_2025.JPG", DestPath: "dcim/DSC04868_2025.JPG",
+			Size: int64(len(torn)), MtimeNs: 1, SHA256: sha(torn), CopiedAt: 1, Status: "deduped"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Upsert(manifest.Entry{SourceDisk: "sony", SourcePath: "DCIM/gone.JPG", DestPath: "DCIM/gone.JPG",
+			Size: 4, MtimeNs: 1, SHA256: sha("gone"), CopiedAt: 1, Status: "copied"}); err != nil {
+			t.Fatal(err)
+		}
+		m.Close()
+		before = rowsOf(t, cfg, "sony")
+		snap := readFile(t, filepath.Join(dst, "DCIM", "DSC04868_2025.JPG"))
+
+		cases := []struct {
+			name string
+			args []string
+			want string
+			code int
+		}{
+			{"claimant", []string{"sony", "DCIM/DSC04868_2025.JPG", replacement(emv), dst, "--expect-sha", sha(good)}, "1 other row(s) resolve to", 1},
+			{"unknown row", []string{"sony", "DCIM/nope.JPG", replacement(emv), dst, "--expect-sha", sha(good)}, "no row for sony:DCIM/nope.JPG", 1},
+			{"destination missing", []string{"sony", "DCIM/gone.JPG", replacement(emv), dst, "--expect-sha", sha(good)}, "does not exist - a missing destination is `vault copy`'s case", 1},
+			{"wrong expect-sha", []string{"sony", "DCIM/DSC04869_2025.JPG", replacement(emv), dst, "--expect-sha", sha("something else")}, "not the file you verified", 1},
+			{"replacement is not the stated file", []string{"sony", "DCIM/DSC04869_2025.JPG", filepath.Join(other, "wrong.JPG"), dst, "--expect-sha", sha(good)}, "not the file you verified", 1},
+			{"replacement missing", []string{"sony", "DCIM/DSC04869_2025.JPG", filepath.Join(other, "absent.JPG"), dst, "--expect-sha", sha(good)}, "replacement", 1},
+			{"short expect-sha", []string{"sony", "DCIM/DSC04869_2025.JPG", replacement(emv), dst, "--expect-sha", "b7ecf808"}, "full 64-hex sha256", 1},
+			{"no expect-sha", []string{"sony", "DCIM/DSC04869_2025.JPG", replacement(emv), dst}, "--expect-sha is required", 1},
+			{"expect-sha without value", []string{"sony", "DCIM/DSC04869_2025.JPG", replacement(emv), dst, "--expect-sha"}, "needs a value", 1},
+			{"unknown flag", []string{"sony", "DCIM/DSC04869_2025.JPG", replacement(emv), dst, "--expect-sha", sha(good), "--force"}, "unknown flag", 1},
+			{"wrong arity", []string{"sony", "DCIM/DSC04869_2025.JPG", replacement(emv), "--expect-sha", sha(good)}, "", 2},
+			// Symlinked directory / symlink leaf / directory at the
+			// destination are covered at package level, where the row's
+			// dest_path can be pointed at them directly.
+		}
+		for _, c := range cases {
+			t.Run(c.name, func(t *testing.T) {
+				out, errOut, code := vault(t, cfg, append([]string{"restore"}, c.args...)...)
+				if code != c.code || (c.want != "" && !strings.Contains(errOut+out, c.want)) {
+					t.Errorf("exit %d (want %d), stderr %q", code, c.code, errOut)
+				}
+				if strings.Contains(out, "RESTORED") {
+					t.Errorf("a refusal printed RESTORED")
+				}
+			})
+		}
+		if got := readFile(t, filepath.Join(dst, "DCIM", "DSC04868_2025.JPG")); got != snap {
+			t.Errorf("a refusal changed the destination")
+		}
+		if got := readFile(t, filepath.Join(dst, "DCIM", "DSC04869_2025.JPG")); got != "fine" {
+			t.Errorf("a refusal changed the other file")
+		}
+		if got := rowsOf(t, cfg, "sony"); !reflect.DeepEqual(got, before) {
+			t.Errorf("a refusal changed rows")
+		}
+		noPartials(t, dst)
+	})
+}
+
+// TestRestoreContainmentAndAliases is review #24 through main(): a row path
+// that climbs out of dest-root is refused with the outside file untouched
+// (both row-path forms), and a row of another disk reaching the target
+// through a directory symlink is a claimant.
+func TestRestoreContainmentAndAliases(t *testing.T) {
+	t.Run("row path outside the root", func(t *testing.T) {
+		cfg, base := t.TempDir(), t.TempDir()
+		dst := filepath.Join(base, "archive")
+		if err := os.MkdirAll(dst, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(base, "outside.JPG"), "outside bytes", t0)
+		writeFile(t, filepath.Join(base, "good.JPG"), "good bytes!!!", t0)
+		m, err := manifest.Open(filepath.Join(cfg, "manifest.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for src, dest := range map[string]string{"../outside.JPG": "", "escape.JPG": "../outside.JPG"} {
+			if err := m.Upsert(manifest.Entry{SourceDisk: "sony", SourcePath: src, DestPath: dest, Size: 13, MtimeNs: 1,
+				SHA256: sha("outside bytes"), CopiedAt: 1, VerifiedAt: 2, Status: "verified"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		m.Close()
+		for _, src := range []string{"../outside.JPG", "escape.JPG"} {
+			_, errOut, code := vault(t, cfg, "restore", "sony", src, filepath.Join(base, "good.JPG"), dst, "--expect-sha", sha("good bytes!!!"))
+			if code != 1 || !strings.Contains(errOut, "Cannot restore") || !strings.Contains(errOut, "climbs out of") {
+				t.Errorf("%s: exit %d, stderr %q", src, code, errOut)
+			}
+		}
+		if got := readFile(t, filepath.Join(base, "outside.JPG")); got != "outside bytes" {
+			t.Fatalf("the file outside the root was replaced: %q", got)
+		}
+		noPartials(t, base)
+	})
+
+	t.Run("claimant through a directory symlink alias", func(t *testing.T) {
+		cfg, srcA, dst, emv := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(srcA, "real", "x.JPG"), "torn bytes", t0)
+		if _, _, code := vault(t, cfg, "copy", "A", srcA, dst); code != 0 {
+			t.Fatalf("copy A: exit %d", code)
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
+			t.Fatalf("verify A: exit %d", code)
+		}
+		if err := os.Symlink(filepath.Join(dst, "real"), filepath.Join(dst, "alias")); err != nil {
+			t.Fatal(err)
+		}
+		m, err := manifest.Open(filepath.Join(cfg, "manifest.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Upsert(manifest.Entry{SourceDisk: "B", SourcePath: "b/x.JPG", DestPath: "alias/x.JPG", Size: 10, MtimeNs: 1,
+			SHA256: sha("torn bytes"), CopiedAt: 1, Status: "deduped"}); err != nil {
+			t.Fatal(err)
+		}
+		m.Close()
+		writeFile(t, filepath.Join(emv, "x.JPG"), "good bytes", t0)
+		out, errOut, code := vault(t, cfg, "restore", "A", "real/x.JPG", filepath.Join(emv, "x.JPG"), dst, "--expect-sha", sha("good bytes"))
+		if code != 1 || !strings.Contains(errOut, "1 other row(s) resolve to") || !strings.Contains(errOut, "B:b/x.JPG (deduped)") {
+			t.Errorf("exit %d, stderr %q", code, errOut)
+		}
+		if !strings.Contains(out, "Claimants:  1") {
+			t.Errorf("claimant not listed:\n%s", out)
+		}
+		if got := readFile(t, filepath.Join(dst, "real", "x.JPG")); got != "torn bytes" {
+			t.Fatalf("target replaced under B's alias: %q", got)
+		}
+	})
 }
 
 // TestVerifyOnlyUnverified is the F4 "done when" list through main(): the
@@ -1478,6 +1716,150 @@ func TestGap(t *testing.T) {
 	if readFile(t, victim) != "keep me" {
 		t.Errorf("--tsv followed a symlink and truncated its target")
 	}
+}
+
+// TestDryRunFlagAfterAValueFlag is review #27-1: a literal --dry-run where a
+// flag value is expected is that value, not a mode switch. main must open
+// read-write and the command must run for real, recording the copy.
+// TestDedupMinSizeNotADryRun is review #33/#37: `dedup --min-size --dry-run`
+// reads --dry-run as --min-size's value (dedup has no dry-run and is never
+// opened read-only), so the manifest open and the command agree. It fails
+// on the bad number, not by opening read-only behind the command's back.
+func TestDryRunRequested(t *testing.T) {
+	// The detector directly, so removing any command's value-flag case is
+	// caught here regardless of what the command then does (review #37/#40).
+	cases := []struct {
+		cmd  string
+		args []string
+		want bool
+	}{
+		{"copy", []string{"cam", "s", "d", "--dry-run"}, true},
+		{"copy", []string{"cam", "s", "d", "--prefix", "--dry-run"}, false}, // value of --prefix
+		{"copy", []string{"cam", "s", "d", "--rule", "--dry-run"}, false},   // value of --rule
+		{"scan", []string{"cam", "s", "d", "--on-collision", "--dry-run"}, false},
+		{"move", []string{"a", "b", "s", "d", "--prefix", "--dry-run"}, false},
+		{"dedup", []string{"--min-size", "--dry-run"}, false},      // value of --min-size (the #37 fix)
+		{"dedup", []string{"--min-size", "10", "--dry-run"}, true}, // a real (nonsense) dry-run
+		{"repair-dest", []string{"cam", "d", "--dry-run"}, true},
+		{"certify", []string{"sony", "--root", "--dry-run"}, false}, // value of --root, not a mode switch (review #46)
+		{"certify", []string{"sony", "out.json", "--root", "/x"}, false},
+	}
+	for _, c := range cases {
+		if got := dryRunRequested(c.cmd, c.args); got != c.want {
+			t.Errorf("dryRunRequested(%q, %v) = %v, want %v", c.cmd, c.args, got, c.want)
+		}
+	}
+}
+
+// End to end on an UNSEEDED config: with the fix, dedup --min-size --dry-run
+// is not a dry run, so main creates the config and manifest (a dry run would
+// not) and dedup fails on the bad size. Removing the dedup case makes main
+// open dry (no config created) - which this catches.
+func TestDedupMinSizeNotADryRun(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "fresh")
+	_, errOut, code := vault(t, cfg, "dedup", "--min-size", "--dry-run")
+	if code != 1 || !strings.Contains(errOut, "invalid --min-size") {
+		t.Errorf("dedup --min-size --dry-run: exit %d, stderr %q; want 1 invalid --min-size", code, errOut)
+	}
+	if strings.Contains(errOut, "planning against an empty one") {
+		t.Errorf("dedup was wrongly treated as a dry run:\n%s", errOut)
+	}
+	if _, err := os.Stat(filepath.Join(cfg, "manifest.db")); err != nil {
+		t.Errorf("a non-dry-run dedup should have created the manifest: %v", err)
+	}
+}
+
+func TestDryRunFlagAfterAValueFlag(t *testing.T) {
+	cfg, src, dst := t.TempDir(), t.TempDir(), t.TempDir()
+	// --prefix --dry-run means prefix="--dry-run": the file lives under that.
+	writeFile(t, filepath.Join(src, "--dry-run", "a.mov"), "clip", t0)
+	out, errOut, code := vault(t, cfg, "copy", "cam", src, dst, "--prefix", "--dry-run")
+	if code != 0 {
+		t.Fatalf("copy: exit %d\n%s%s", code, out, errOut)
+	}
+	if strings.Contains(errOut, "planning against an empty one") || strings.Contains(out, "(dry-run;") {
+		t.Errorf("the command was treated as a dry run:\n%s%s", out, errOut)
+	}
+	// The real copy happened and was recorded - not left unrecorded (the
+	// read-only-open failure the finding describes) nor lost to an in-memory db.
+	if got := readFile(t, filepath.Join(dst, "a.mov")); got != "clip" {
+		t.Errorf("file not copied for real: %q", got)
+	}
+	rows := rowsOf(t, cfg, "cam")
+	if len(rows) != 1 || rows["--dry-run/a.mov"].Status != "copied" {
+		t.Errorf("copy not recorded: %v", rows)
+	}
+	// And a real --dry-run (standalone) still is one.
+	writeFile(t, filepath.Join(src, "b.mov"), "two", t0)
+	out, _, code = vault(t, cfg, "copy", "cam", src, dst, "--dry-run")
+	if code != 0 || !strings.Contains(out, "(dry-run;") {
+		t.Fatalf("standalone --dry-run: exit %d\n%s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "b.mov")); err == nil {
+		t.Errorf("standalone dry-run copied b.mov")
+	}
+}
+
+// TestMoveGuardsBeforeAnyMutation is review #27-2: the owner/symlink guard
+// runs before MkdirAll and before the duplicate delete. move A A over a
+// verified row whose source and dest are the same path must not delete the
+// verified file, and a rule routing through a symlinked dir must not create
+// the file before refusing.
+func TestMoveGuardsBeforeAnyMutation(t *testing.T) {
+	t.Run("same-path move over a verified row does not delete it", func(t *testing.T) {
+		cfg, src, arch := t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(src, "x.mov"), "the clip", t0)
+		if _, _, code := vault(t, cfg, "copy", "A", src, arch); code != 0 {
+			t.Fatalf("copy: exit %d", code)
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", arch); code != 0 {
+			t.Fatalf("verify: exit %d", code)
+		}
+		before := rowsOf(t, cfg, "A")
+		// move A A arch arch: src rel == dst rel == x.mov, the file exists,
+		// its hash matches the row - the old code's dedup branch would
+		// os.Remove it and DeleteEntry before the owner guard ran.
+		out, _, _ := vault(t, cfg, "move", "A", "A", arch, arch)
+		if !strings.Contains(out, "dst-owned by verified row A:x.mov") {
+			t.Errorf("not guarded as owned:\n%s", out)
+		}
+		if got := readFile(t, filepath.Join(arch, "x.mov")); got != "the clip" {
+			t.Fatalf("the verified file was deleted/replaced: %q", got)
+		}
+		if got := rowsOf(t, cfg, "A"); !reflect.DeepEqual(got, before) {
+			t.Errorf("the verified row changed: %v", got)
+		}
+	})
+
+	t.Run("rule through a symlinked dir creates nothing", func(t *testing.T) {
+		cfg, src, dst, outside := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(src, "y.mov"), "bytes", t0)
+		if _, _, code := vault(t, cfg, "copy", "B", src, filepath.Join(t.TempDir(), "stage")); code != 0 {
+			t.Fatalf("seed copy: exit %d", code)
+		}
+		m, err := manifest.Open(filepath.Join(cfg, "manifest.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Upsert(manifest.Entry{SourceDisk: "B", SourcePath: "y.mov", DestPath: "y.mov", Size: 5,
+			MtimeNs: t0.UnixNano(), SHA256: sha("bytes"), CopiedAt: 1, Status: "copied"}); err != nil {
+			t.Fatal(err)
+		}
+		m.Close()
+		if err := os.Symlink(outside, filepath.Join(dst, "alias")); err != nil {
+			t.Fatal(err)
+		}
+		out, _, _ := vault(t, cfg, "move", "B", "A", src, dst, "--rule", "MOV=alias")
+		if !strings.Contains(out, "dst through a symlink (alias)") {
+			t.Errorf("not guarded as a symlink route:\n%s", out)
+		}
+		if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+			t.Errorf("a file was created through the symlink: %v", entries)
+		}
+		if got := readFile(t, filepath.Join(src, "y.mov")); got != "bytes" {
+			t.Errorf("source moved away: %q", got)
+		}
+	})
 }
 
 // TestCertifyRefusesOutputInsideArchive is B25 through main(): a certificate
