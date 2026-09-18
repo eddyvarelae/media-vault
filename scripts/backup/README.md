@@ -45,6 +45,19 @@ size no row has. A disk whose content is entirely archived is therefore
 fully hashed to prove it - the Tester measured ~800 MB/s on the Mini, i.e.
 ~26 min for 1.3 TB. The report says how many bytes were hashed.
 
+The `<hexname>` in the output paths is a **bounded** slug: the hex of the
+disk name's first 24 bytes then 16 hex of its whole sha256 (~65 chars,
+`[0-9a-f]` only - so `Disk` and `disk` never share a file on a
+case-folding state dir, and a long name never overruns the filename limit).
+It is injective in practice; to prove it, **line 1 of both the report and
+the TSV is the full disk name** (`disk: <name>`). Before writing, an
+existing output whose line 1 names a *different* disk is treated as a
+**SLUG COLLISION**: the run refuses to overwrite it, logs
+`GAP <name> SLUG COLLISION …`, and exits non-zero, leaving the file for a
+human (a `--force` re-report of the *same* disk matches line 1 and is
+replaced normally). A configured `BACKUP_DISKS` name longer than 255 bytes
+- which no mount point can be - is refused at discovery (exit 2).
+
 ## Two owners, two kinds of setting
 
 Machine settings (`SCRATCH_DIR`, `MANIFEST_DB`, `BACKUP_STATE_DIR`,

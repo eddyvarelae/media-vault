@@ -99,6 +99,8 @@ check "tick: case needs nothing (hashed to prove it)" \
 check "tick: the disk with a space in its name is reported" grep -q "GAP Eddy's Media Vault needs archiving: yes, 1 files, 19 bytes" "$logf"
 check "tick: report and tsv files written per disk" ls "$state"/gap-74617273-*.txt "$state"/gap-74617273-*.tsv "$state"/gap-456464792773204d65646961205661756c74-*.tsv
 check "tick: the tsv lists the absent file" grep -q "SonyA6700/DCIM/new.ARW	15	" "$state"/gap-74617273-*.tsv
+check "tick: line 1 of the report is the full disk name (slug-collision guard, review #43)" test "$(head -1 "$state"/gap-74617273-*.txt)" = "disk: tars"
+check "tick: line 1 of the tsv is the full disk name" test "$(head -1 "$state"/gap-74617273-*.tsv)" = "disk: tars"
 check "tick: three state lines" test "$(wc -l < "$state/backup-state.tsv" | tr -d ' ')" -eq 3
 check "tick: the unknown volume logged once" test "$(count "volume 'Random' is not in BACKUP_DISKS" "$logf")" -eq 1
 check "tick: lock released" test ! -e "$state/backup.lock"
@@ -219,6 +221,42 @@ check "bounded slug: a 200-byte name still lands a report (unbounded hex would o
 check "bounded slug: names sharing a 24-byte head get distinct files" test "$(ls "$state"/gap-"$pfx"-*.tsv 2>/dev/null | sort -u | wc -l | tr -d ' ')" -eq 2
 check "bounded slug: each report filename stays well under the 255-byte limit" test "$(ls "$state"/gap-"$pfx"-*.tsv 2>/dev/null | head -1 | xargs -n1 basename | wc -c | tr -d ' ')" -lt 120
 rm -rf "$vols"/*
+
+# review #43: slug-collision guard. The bounded slug is injective in practice,
+# but if two names ever shared a slug, line 1 of each output (the full disk
+# name) proves ownership. Simulate a collision by tampering the line-1 name of
+# an existing report+tsv; the next run must refuse to overwrite them and log
+# SLUG COLLISION, leaving them intact and exiting non-zero.
+rm -rf "$vols"/*; mkdir -p "$vols/tars/DCIM"; mk "$vols/tars/DCIM/new.ARW" "not archived yet"
+cat > "$work/mini5.env" <<ENV
+SCRATCH_DIR="$scratch"
+BACKUP_DISKS="tars"
+ENV
+runcol() { MINI_ENV="$work/mini5.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; }
+runcol
+rep=$(ls "$state"/gap-74617273-*.txt | head -1); tsvf=$(ls "$state"/gap-74617273-*.tsv | head -1)
+check "slug collision: the first run wrote tars' report and tsv" test -n "$rep" -a -n "$tsvf"
+sed -i '' '1s|.*|disk: imposter|' "$rep" "$tsvf"   # pretend a different disk owns this slug
+foreign=$(cat "$rep")
+before_state=$(wc -l < "$state/backup-state.tsv" | tr -d ' ')
+: > "$logf"
+runcol; colrc=$?
+check "slug collision: the run refuses (exit non-zero)" test "$colrc" -ne 0
+check "slug collision: SLUG COLLISION is logged, naming the disk" grep -q "GAP tars SLUG COLLISION" "$logf"
+check "slug collision: the foreign report is left untouched" test "$(cat "$rep")" = "$foreign"
+check "slug collision: the refused disk records no new state line" test "$(wc -l < "$state/backup-state.tsv" | tr -d ' ')" -eq "$before_state"
+rm -rf "$vols"/*
+
+# review #43: a configured disk name longer than 255 bytes can never be a
+# mount point; refuse it at discovery (before any report path is built).
+long255="$head24$(printf 'c%.0s' $(seq 300))"   # 324 bytes
+cat > "$work/mini6.env" <<ENV
+SCRATCH_DIR="$scratch"
+BACKUP_DISKS="$long255"
+ENV
+MINI_ENV="$work/mini6.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --dry-run > "$out" 2>&1; longrc=$?
+check "over-long name: refused with exit 2" test "$longrc" -eq 2
+check "over-long name: the message says 255 bytes" grep -q "longer than 255 bytes" "$out"
 
 echo
 if [ "$failures" -ne 0 ]; then echo "$failures check(s) failed"; exit 1; fi

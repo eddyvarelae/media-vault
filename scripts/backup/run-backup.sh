@@ -106,6 +106,17 @@ reported() {  # reported <name> <attach-id>: already reported for this attach to
   [[ -f "$STATE_FILE" ]] && grep -qF "$1	$2	$(today)" "$STATE_FILE"
 }
 
+# A mount-point component cannot exceed 255 bytes, so a configured disk name
+# longer than that can never match a real volume - and the full name is what
+# each report carries on line 1 for the slug-collision guard below. Refuse
+# such a name at discovery rather than build a report for a disk that cannot
+# exist (review #43).
+_ifs=$IFS; IFS='|'
+for _d in $BACKUP_DISKS; do
+  (( $(printf '%s' "$_d" | wc -c) <= 255 )) || die "BACKUP_DISKS entry is longer than 255 bytes, which no mount point can be: '${_d:0:48}…'"
+done
+IFS=$_ifs
+
 # ── 1. what is mounted, and what is due ──────────────────────────────────
 due=() unknown=()
 for mp in "$VOLUMES_DIR"/*; do
@@ -240,15 +251,35 @@ log "manifest snapshot: $rows rows, newest copied_at $newest, NAS file modified 
 for name in "${due[@]}"; do
   mp="$VOLUMES_DIR/$name"; id=$(attach_id "$mp"); d=$(today)
   slug=$(slug "$name")   # bounded hex+sha: distinct disks never share a report file, case included, any name length (review #38/#41/#43)
-  report="$STATE_DIR/gap-$slug-$d.txt"; tsv="$STATE_DIR/gap-$slug-$d.tsv"
-  rm -f "$report" "$tsv"   # the job owns its dated output; a --force re-report replaces it (vault gap's --tsv is O_EXCL against aliases, not against our own file)
+  report="$STATE_DIR/gap-$slug-$d.txt"; tsv="$STATE_DIR/gap-$slug-$d.tsv"; tsvtmp="$tsv.building"
+  # SLUG COLLISION guard (review #43): the bounded slug is injective in
+  # practice, but line 1 of each output - the full disk name - is what proves
+  # it. An existing output whose line 1 names a DIFFERENT disk means two names
+  # collided on this slug; it is not ours to overwrite, so refuse and leave it
+  # (our own same-disk output from a --force re-report matches and is replaced).
+  header="disk: $name"
+  collision=""
+  for f in "$report" "$tsv"; do
+    [[ -e "$f" ]] || continue
+    if [[ "$(head -1 "$f" 2>/dev/null)" != "$header" ]]; then
+      log "GAP $name SLUG COLLISION: $f already holds \"$(head -1 "$f" 2>/dev/null)\", not \"$header\" (slug $slug is shared) — refusing to overwrite; inspect and clear it by hand"
+      collision=1; rc=1; break
+    fi
+  done
+  [[ -n "$collision" ]] && continue
+  rm -f "$report" "$tsv" "$tsvtmp"   # our own dated output; a --force re-report replaces it
   log "GAP $name: report starting ($mp, attach $id)"
-  if VAULT_CONFIG="$SNAP_DIR" "$VAULT_BIN" gap "$mp" --tsv "$tsv" > "$report" 2>&1; then
+  printf '%s\n' "$header" > "$report"   # line 1: the full disk name (slug-collision guard)
+  # vault gap writes the TSV to a temp path (its --tsv is O_EXCL|O_NOFOLLOW
+  # against an alias); the final TSV is then the same full-name header line
+  # followed by that content, so both outputs are checkable line 1.
+  if VAULT_CONFIG="$SNAP_DIR" "$VAULT_BIN" gap "$mp" --tsv "$tsvtmp" >> "$report" 2>&1; then
+    { printf '%s\n' "$header"; cat "$tsvtmp"; } > "$tsv"; rm -f "$tsvtmp"
     log "$(grep '^GAP ' "$report" | sed "s|^GAP $mp|GAP $name|")"
     log "GAP $name: report at $report, absent files at $tsv"
     printf '%s\t%s\t%s\n' "$name" "$id" "$d" >> "$STATE_FILE"
   else
-    log "GAP $name FAILED: $(tail -1 "$report")"; rc=1
+    log "GAP $name FAILED: $(tail -1 "$report")"; rc=1; rm -f "$tsvtmp"
   fi
 done
 finish
