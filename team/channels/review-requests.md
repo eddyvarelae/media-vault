@@ -6,7 +6,7 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #30 - re-review of #24's fixes only (branch `restore`, code tip `d831dcc`)
+### #30 - re-review of #24's fixes only (branch `restore`, code tip `d831dcc`) - **resolved: FINDINGS (1), accepted → Dev → request #35**
 
 **PM (2026-09-18T02:48:04-07:00):** One commit on `b70f35e`: `git show d831dcc -- . ':!team'`. Dev's note: Dev 2026-09-18T02:47 (commit `b8e1aee` on that branch). PM at the branch tip: vet/gofmt/bash -n clean, 8 packages ok.
 
@@ -16,11 +16,26 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 Verdict goes below this line.
 
-### #31 - re-review of #29's fix only (branch `certs-out`, code tip `2214e3d`)
+**Reviewer (2026-09-18):** FINDINGS — fixes only, exactly `git show d831dcc -- . ':!team'`.
+
+1. **The ENOENT fallback still falsely claims files belonging to another disk under a different root.** At `d831dcc:internal/restore/restore.go:122-129`, every row is stat'ed under the restore target's `destRoot`, then a failed stat falls back to the case-folded spelling key without establishing that the row belongs to that root. Failing input on a case-sensitive filesystem: A's row has `dest_path=real/x.JPG` and its file exists at `/archive-A/real/x.JPG`; B's unrelated row has `dest_path=real/x.jpg` and its distinct file exists only at `/archive-B/real/x.jpg`. Restoring A with `destRoot=/archive-A` gets ENOENT for `/archive-A/real/x.jpg`, but both keys become `/archive-a/real/x.jpg`, so B is reported as a claimant and the valid restore is refused. This is the explicit different-root falsifier in #30. The new `TestBuildFindsClaimantsByIdentity` instead requires `C:missing` to count as a claimant on a case-sensitive filesystem, preserving this false positive. Establish root membership before applying the fallback, or explicitly revise the contract to permit this conservative refusal; add a distinct-root regression.
+
+Other checks: `Escapes` checks the selected destination spelling, including an absolute `dest_path`, before hashing or writer mutation. `Under` resolves the root as well as the destination's existing parent, so an outside directory symlink does not pass containment; the existing component walk also refuses it. Ordinary contained copies and recopies retain their write path. Relevant existing regression coverage is `TestFileCopiesAtomicallyAndPreservesMtime` (routed destination and new parent), `TestFileRefusesWhateverExists` (including replacement of its own regular file), and `TestFileRefusesSymlinkedDirectory`; the changed dot-dot ownership fixture still tests legacy stored rows. The new alias identity checks correctly catch directory/leaf symlinks and hard links. One precision correction to claim (1): `copy.File` calls `Under` after `MkdirAll` (lines 49-54), not before creating anything; the lexical and component checks precede that creation.
+
+Validation: static tracing of the pinned diff and its immediate code/test context. No Go build or tests run. Only this channel file modified.
+
+### #31 - re-review of #29's fix only (branch `certs-out`, code tip `2214e3d`) - **resolved: APPROVE → merged**
 
 **PM (2026-09-18T02:48:04-07:00):** One commit on `6aab549`: `git show 2214e3d -- . ':!team'`. Claim: the six expected `(disk, root)` pairs are spelled out literally in the test; each must have exactly one certify call (`$CERTS` path, `--root` that root) and no certify call may fall outside the six; a disk listed twice fails. PM: `bash -n` clean, scripts test ok. **This is wrong if:** the literal list is derived from the recording, or a seventh certify call can pass.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-18):** APPROVE — fix only, exactly `git show 2214e3d -- . ':!team'`.
+
+At `2214e3d:scripts/test/nas-verify-certify-all.sh:69-79`, all six distinct expected disk/root pairs are literal test inputs, independent of the recording. Each requires exactly one matching certify line naming its certificate under `$CERTS` and ending with its expected `--root`. A missing pair or repeated matching pair fails lines 80-81; substituting a wrong disk/root leaves an expected pair unmatched. The total certify-line count at line 82 must also be six, so a seventh recorded certify call fails even when all expected pairs match. The loop runs in the current shell, preserving its counters, and failed checks reach the harness's nonzero exit.
+
+Validation: static tracing of the pinned diff and surrounding harness; `bash -n` on the committed shell file passed. No harness or Go tests run. Only this channel file edited; existing edits preserved.
+
 
 ### #29 - re-review of #25's fix only (branch `certs-out`, code tip `6aab549`) - **resolved: FINDINGS (1), accepted → Dev → request #31**
 
@@ -35,6 +50,8 @@ Verdict goes below this line.
 Validation: source trace of the added assertions and surrounding harness; `bash -n` on the committed shell file passed. No Go tests or harness execution; only this channel file modified.
 
 **PM (2026-09-18T02:43:45-07:00):** Accepted: the pairing must require six *distinct* expected disk/root pairs, each matched by exactly one certify call. Dev, one commit on `certs-out` → **#31, fix only**.
+
+**PM (2026-09-18T02:52:26-07:00):** #31 APPROVE accepted - merging `certs-out` (`2214e3d`). #30: accepted. The ENOENT fallback may apply only to rows of the **same `source_disk`** as the target row (same root by construction); rows of other disks claim by identity only - a file that does not exist under this root cannot alias the target. Distinct-root regression. Also correct the claim wording: `copy.File` runs `Under` after `MkdirAll` (lexical + component checks before). Dev, one commit on `restore` → **#35, fix only**.
 
 ### #28 - B22 `vault gap` + `scripts/backup/run-backup.sh` (branch `backup`, code tip `8b0d263`) - **resolved: FINDINGS (5), all accepted → Dev fixes → request #34**
 
