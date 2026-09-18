@@ -81,7 +81,8 @@ attach_id() { stat -f '%d:%i:%B' "$1"; }
 # slug maps a volume name to a bounded, filesystem-safe report slug: the hex
 # of the first 24 bytes (a short name stays legible in the filename) then 16
 # hex of the whole name's sha256 (names that share that 24-byte head - or run
-# past it - still differ, because the hash is of the whole name). A single-
+# past it - almost always differ, since the hash is of the whole name; the
+# residual chance they do not is the probabilistic collision below). A single-
 # case alphabet [0-9a-f] throughout, on purpose: a percent/underscore scheme
 # keeps letter case, so "Disk" and "disk" would collide on a case-insensitive
 # $STATE_DIR and one report would delete the other (review #41). Bounded
@@ -90,9 +91,12 @@ attach_id() { stat -f '%d:%i:%B' "$1"; }
 # name's length. It is NOT injective: two names could share a slug if their
 # 24-byte heads match AND their sha256 collides in 16 hex (64 bits) - about
 # 1 in 1.8e19, negligible but not impossible - so every slug-keyed file
-# carries its full name on line 1 and the collision guard below catches it
-# (review #50).
+# carries its full name on line 1 and the collision detection below catches it
+# (review #50/#51). BACKUP_SLUG_HOOK is a test seam: when set to a command, it
+# computes the slug instead, so a test can force two names to one slug and
+# exercise the guard for real.
 slug() {
+  if [[ -n "${BACKUP_SLUG_HOOK:-}" ]]; then "$BACKUP_SLUG_HOOK" "$1"; return; fi
   printf '%s-%s' \
     "$(printf '%s' "$1" | head -c 24 | od -An -v -tx1 | tr -d ' \n')" \
     "$(printf '%s' "$1" | shasum -a 256 | cut -c1-16)"
@@ -151,51 +155,61 @@ if (( dry_run )); then
   echo "  due now: ${due[*]-(none)}"
   exit 0
 fi
-# Unknown mounted volumes get logged once, independent of whether any known
-# disk is due (review #28). The marker is keyed by the name's slug ONLY - a
-# mount generation is not observable from /Volumes (device/inode/birth can all
-# survive a remount) - so a re-attach is logged again only when a tick in
-# between observed the volume gone and pruned its marker (review #38; stated in
-# README); a detach/remount entirely between two ticks is not detected, the
-# honest limit of polling /Volumes. Stale markers are pruned each tick.
-marker_collision=0
-if (( ! dry_run )); then
-  mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"
-  for u in "${unknown[@]+"${unknown[@]}"}"; do
-    slug=$(slug "$u")
-    marker="$STATE_DIR/backup.unknown-$slug"
-    uheader="volume: $u"
-    if [[ -f "$marker" ]]; then
-      # SLUG COLLISION on a marker: the slug already tracks a DIFFERENT
-      # volume (its line 1 names another), so this one cannot share it. Fail
-      # the tick and leave the marker, exactly as a report/tsv collision does
-      # (review #49/#50) - a slug collision is a real inconsistency, not a
-      # quiet "already logged".
-      if [[ "$(head -1 "$marker" 2>/dev/null)" != "$uheader" ]]; then
-        log "SLUG COLLISION: unknown-volume marker $marker names \"$(head -1 "$marker" 2>/dev/null)\", not \"$uheader\" (slug $slug shared) — '$u' cannot be tracked; clear it by hand"
-        marker_collision=1
-      fi
-    else
-      printf '%s\n' "$uheader" > "$marker"   # line 1 names the volume, for the collision check
-      log "mounted volume '$u' is not in BACKUP_DISKS — ignored (add it to report it)"
+# ── 1a. collision detection FIRST, over every slug-keyed output (review #51) ──
+# The slug is probabilistic, not injective, so before ANYTHING is written,
+# pruned or appended, check every output this tick would touch for a foreign
+# owner on line 1: each due disk's report and TSV, and each unknown volume's
+# marker. Any collision → log every one, touch nothing (the colliding files
+# stay), exit 1. Only a wholly collision-free tick goes on to prune and write.
+mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"   # so the diagnostic can be logged; writes nothing else
+d=$(today)
+collided=0
+for name in "${due[@]+"${due[@]}"}"; do
+  slug=$(slug "$name")
+  for f in "$STATE_DIR/gap-$slug-$d.txt" "$STATE_DIR/gap-$slug-$d.tsv"; do
+    [[ -e "$f" ]] || continue
+    if [[ "$(head -1 "$f" 2>/dev/null)" != "disk: $name" ]]; then
+      log "SLUG COLLISION: $f names \"$(head -1 "$f" 2>/dev/null)\", not \"disk: $name\" (slug $slug shared) — leaving it untouched; clear it by hand"
+      collided=1
     fi
   done
-  # Owner-validated pruning: a marker is stale when the volume it NAMES on line
-  # 1 is no longer mounted-and-unknown - not merely when its slug is absent
-  # from the live set, since a slug collision could otherwise keep a dead
-  # volume's marker alive under a live volume's slug (review #50).
-  for marker in "$STATE_DIR"/backup.unknown-*; do
-    [[ -e "$marker" ]] || continue
-    owner=$(head -1 "$marker" 2>/dev/null); owner=${owner#volume: }
-    live=0
-    for u in "${unknown[@]+"${unknown[@]}"}"; do [[ "$u" == "$owner" ]] && { live=1; break; }; done
-    (( live )) || rm -f "$marker"
-  done
-fi
-# A marker slug collision fails the tick (review #50), like a report collision:
-# with nothing else due, exit 1 now; otherwise it is folded into the run's exit
-# status below so the due disks are still reported.
-(( ${#due[@]} > 0 )) || { (( marker_collision )) && exit 1; exit 0; }
+done
+for u in "${unknown[@]+"${unknown[@]}"}"; do
+  slug=$(slug "$u")
+  marker="$STATE_DIR/backup.unknown-$slug"
+  [[ -e "$marker" ]] || continue
+  if [[ "$(head -1 "$marker" 2>/dev/null)" != "volume: $u" ]]; then
+    log "SLUG COLLISION: unknown-volume marker $marker names \"$(head -1 "$marker" 2>/dev/null)\", not \"volume: $u\" (slug $slug shared) — leaving it untouched; clear it by hand"
+    collided=1
+  fi
+done
+(( collided )) && { log "REFUSING: slug collision(s) above — nothing written, pruned or recorded this tick"; exit 1; }
+
+# ── 1b. a clean tick: log new unknown volumes, prune stale markers ────────────
+# Unknown mounted volumes get logged once, independent of whether any known
+# disk is due (review #28). The marker is keyed by the name's slug; a mount
+# generation is not observable from /Volumes (device/inode/birth can survive a
+# remount), so a re-attach is logged again only when a tick in between observed
+# the volume gone and pruned its marker (review #38; stated in README); a
+# detach/remount entirely between two ticks is not detected. Pruning is by
+# OWNER: a marker is stale when the volume named on its line 1 is no longer
+# mounted-and-unknown (review #50).
+for u in "${unknown[@]+"${unknown[@]}"}"; do
+  slug=$(slug "$u")
+  marker="$STATE_DIR/backup.unknown-$slug"
+  [[ -f "$marker" ]] || {
+    printf 'volume: %s\n' "$u" > "$marker"   # line 1 names the volume, for the collision check
+    log "mounted volume '$u' is not in BACKUP_DISKS — ignored (add it to report it)"
+  }
+done
+for marker in "$STATE_DIR"/backup.unknown-*; do
+  [[ -e "$marker" ]] || continue
+  owner=$(head -1 "$marker" 2>/dev/null); owner=${owner#volume: }
+  live=0
+  for u in "${unknown[@]+"${unknown[@]}"}"; do [[ "$u" == "$owner" ]] && { live=1; break; }; done
+  (( live )) || rm -f "$marker"
+done
+(( ${#due[@]} > 0 )) || exit 0     # the normal tick: nothing more owed; say nothing
 
 # ── 2. preconditions (only checked when something is due) ────────────────
 # A failure that will recur every five minutes - a missing OR unusable
@@ -238,7 +252,7 @@ ensure_vault() {
 # instant the lock is ours; a lock dir with no info yet is being acquired,
 # not dead; a dead lock is taken over by renaming it away, which only one
 # competitor can win.
-rc=$marker_collision have_lock="" finishing=""   # a marker collision (above) already fails the run
+rc=0 have_lock="" finishing=""
 finish() { finishing=1; [[ -n "$have_lock" ]] && rm -rf "$LOCK_DIR"; exit "$rc"; }
 # Never taken over automatically (review #38, as tagger #36): mkdir is the
 # only acquisition; any pre-existing lock - live, dead or info-less - makes
@@ -285,23 +299,11 @@ for name in "${due[@]}"; do
   mp="$VOLUMES_DIR/$name"; id=$(attach_id "$mp"); d=$(today)
   slug=$(slug "$name")   # bounded hex+sha, case-safe, any name length (review #38/#41/#43)
   report="$STATE_DIR/gap-$slug-$d.txt"; tsv="$STATE_DIR/gap-$slug-$d.tsv"; tsvtmp="$tsv.building"
-  # SLUG COLLISION guard (review #43/#50): the slug is collision-resistant but
-  # NOT injective (a 64-bit sha256-prefix clash is ~1 in 1.8e19 - negligible,
-  # not impossible), so line 1 of each output - the full disk name - is what
-  # proves ownership. An existing output whose line 1 names a DIFFERENT disk
-  # means two names landed on this slug; it is not ours to overwrite, so refuse
-  # and leave it (our own same-disk output from a --force re-report matches and
-  # is replaced).
+  # Phase 1a proved no foreign owner sits at this disk's slug, so the only file
+  # that can be here is our own from an earlier tick today; a --force re-report
+  # replaces it. Line 1 records the full disk name so the next tick's collision
+  # detection can prove ownership (review #43/#50/#51).
   header="disk: $name"
-  collision=""
-  for f in "$report" "$tsv"; do
-    [[ -e "$f" ]] || continue
-    if [[ "$(head -1 "$f" 2>/dev/null)" != "$header" ]]; then
-      log "GAP $name SLUG COLLISION: $f already holds \"$(head -1 "$f" 2>/dev/null)\", not \"$header\" (slug $slug is shared) — refusing to overwrite; inspect and clear it by hand"
-      collision=1; rc=1; break
-    fi
-  done
-  [[ -n "$collision" ]] && continue
   rm -f "$report" "$tsv" "$tsvtmp"   # our own dated output; a --force re-report replaces it
   log "GAP $name: report starting ($mp, attach $id)"
   printf '%s\n' "$header" > "$report"   # line 1: the full disk name (slug-collision guard)

@@ -222,54 +222,81 @@ check "bounded slug: names sharing a 24-byte head get distinct files" test "$(ls
 check "bounded slug: each report filename stays well under the 255-byte limit" test "$(ls "$state"/gap-"$pfx"-*.tsv 2>/dev/null | head -1 | xargs -n1 basename | wc -c | tr -d ' ')" -lt 120
 rm -rf "$vols"/*
 
-# review #43/#49/#50: the slug is collision-resistant, NOT injective; line 1
-# of every slug-keyed file names its owner, and a file whose line 1 names a
-# DIFFERENT volume is a SLUG COLLISION that fails the run. Exercised three-way
-# (report, tsv, marker) with two real names each (the file relabelled to a
-# different disk/volume).
-tslug() { printf '%s-%s' "$(printf '%s' "$1" | head -c 24 | od -An -v -tx1 | tr -d ' \n')" "$(printf '%s' "$1" | shasum -a 256 | cut -c1-16)"; }
+# review #51: collision detection runs FIRST over every slug-keyed output; any
+# collision -> log each, touch nothing, exit 1, no state. A BACKUP_SLUG_HOOK
+# forces two real names (Alpha, Beta) to one slug, so the guard is exercised
+# for real. Three isolated cases (report-only, TSV-only, marker-only foreign
+# file), each asserting: foreign bytes byte-exact (cmp), diagnostic, exit 1,
+# backup-state.tsv byte-identical, and no sibling output written for the due
+# disk in that tick.
+cat > "$work/slughook" <<'HOOK'
+#!/bin/bash
+case "$1" in
+  Alpha|Beta) printf 'c0ffeec0ffeec0ffeec0ffee-0011223344556677' ;;
+  *) printf '%s-%s' "$(printf '%s' "$1" | head -c 24 | od -An -v -tx1 | tr -d ' \n')" "$(printf '%s' "$1" | shasum -a 256 | cut -c1-16)" ;;
+esac
+HOOK
+chmod +x "$work/slughook"
+S=c0ffeec0ffeec0ffeec0ffee-0011223344556677   # the slug the hook forces for Alpha and Beta
+today=$(date +%Y-%m-%d)
+: > "$logf"; : > "$state/backup-state.tsv"   # a known state baseline for the byte-identical checks
+cp "$state/backup-state.tsv" "$work/state-base"
 
-# report + tsv: tars writes its report, then its slug file is relabelled to
-# another real disk (kipp); the next run must refuse, log, and exit non-zero.
-rm -rf "$vols"/*; mkdir -p "$vols/tars/DCIM"; mk "$vols/tars/DCIM/new.ARW" "not archived yet"
-cat > "$work/mini5.env" <<ENV
+# --- report-only: a foreign report at Beta's slug (owned by Alpha) ---
+rm -rf "$vols"/*; rm -f "$state"/gap-* "$state"/backup.unknown-*; mkvol Beta; mk "$vols/Beta/DCIM/x" "z"
+cat > "$work/mini-col.env" <<ENV
+SCRATCH_DIR="$scratch"
+BACKUP_DISKS="Beta"
+ENV
+runcol() { MINI_ENV="$work/mini-col.env" BACKUP_SLUG_HOOK="$work/slughook" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; }
+printf 'disk: Alpha\nforeign report body\n' > "$state/gap-$S-$today.txt"; cp "$state/gap-$S-$today.txt" "$work/exp"
+: > "$logf"; runcol; crc=$?
+check "collision report-only: exit 1" test "$crc" -eq 1
+check "collision report-only: diagnostic names the foreign owner" grep -q "SLUG COLLISION:.*gap-$S-$today.txt.*disk: Alpha" "$logf"
+check "collision report-only: foreign bytes byte-exact (cmp)" cmp -s "$state/gap-$S-$today.txt" "$work/exp"
+check "collision report-only: no sibling tsv written" test ! -e "$state/gap-$S-$today.tsv"
+check "collision report-only: backup-state.tsv byte-identical" cmp -s "$state/backup-state.tsv" "$work/state-base"
+
+# --- TSV-only: a foreign TSV at Beta's slug (owned by Alpha), report absent ---
+rm -f "$state"/gap-*
+printf 'disk: Alpha\npath\tsize\tsha256\n' > "$state/gap-$S-$today.tsv"; cp "$state/gap-$S-$today.tsv" "$work/exp"
+: > "$logf"; runcol; crc=$?
+check "collision tsv-only: exit 1" test "$crc" -eq 1
+check "collision tsv-only: diagnostic names the tsv" grep -q "SLUG COLLISION:.*gap-$S-$today.tsv" "$logf"
+check "collision tsv-only: foreign bytes byte-exact (cmp)" cmp -s "$state/gap-$S-$today.tsv" "$work/exp"
+check "collision tsv-only: no report written" test ! -e "$state/gap-$S-$today.txt"
+check "collision tsv-only: backup-state.tsv byte-identical" cmp -s "$state/backup-state.tsv" "$work/state-base"
+
+# --- marker-only: a foreign marker at Beta's slug (owned by Alpha); Beta unknown ---
+rm -rf "$vols"/*; rm -f "$state"/gap-* "$state"/backup.unknown-*; mkvol Beta; mk "$vols/Beta/DCIM/x" "z"
+cat > "$work/mini-colm.env" <<ENV
 SCRATCH_DIR="$scratch"
 BACKUP_DISKS="tars"
 ENV
-runcol() { MINI_ENV="$work/mini5.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; }
-runcol
-rep=$(ls "$state"/gap-74617273-*.txt | head -1); tsvf=$(ls "$state"/gap-74617273-*.tsv | head -1)
-check "collision(report/tsv): the first run wrote tars' report and tsv" test -n "$rep" -a -n "$tsvf"
-sed -i '' '1s|.*|disk: kipp|' "$rep" "$tsvf"   # a DIFFERENT real disk now owns tars' slug
-foreign=$(cat "$rep")
-before_state=$(wc -l < "$state/backup-state.tsv" | tr -d ' ')
-: > "$logf"; runcol; colrc=$?
-check "collision(report/tsv): the run refuses (exit non-zero)" test "$colrc" -ne 0
-check "collision(report/tsv): SLUG COLLISION is logged, naming the disk" grep -q "GAP tars SLUG COLLISION" "$logf"
-check "collision(report/tsv): the foreign file is left untouched" test "$(cat "$rep")" = "$foreign"
-check "collision(report/tsv): the refused disk records no new state line" test "$(wc -l < "$state/backup-state.tsv" | tr -d ' ')" -eq "$before_state"
-rm -rf "$vols"/*
+runcolm() { MINI_ENV="$work/mini-colm.env" BACKUP_SLUG_HOOK="$work/slughook" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" > "$out" 2>&1; }
+printf 'volume: Alpha\n' > "$state/backup.unknown-$S"; cp "$state/backup.unknown-$S" "$work/exp"
+: > "$logf"; runcolm; crc=$?
+check "collision marker-only: exit 1" test "$crc" -eq 1
+check "collision marker-only: diagnostic names the marker" grep -q "SLUG COLLISION: unknown-volume marker.*backup.unknown-$S.*volume: Alpha" "$logf"
+check "collision marker-only: foreign bytes byte-exact (cmp)" cmp -s "$state/backup.unknown-$S" "$work/exp"
+check "collision marker-only: backup-state.tsv byte-identical" cmp -s "$state/backup-state.tsv" "$work/state-base"
+rm -rf "$vols"/*; rm -f "$state"/gap-* "$state"/backup.unknown-*
 
-# marker: a marker whose line 1 names a different, gone volume must FAIL the
-# tick (review #50), and owner-validated pruning must remove the stale marker
-# even though its slug is a live volume's - so the tick after is clean.
-rm -f "$state"/backup.unknown-*; rm -rf "$vols"/*; mkdir -p "$vols/Random/DCIM"; mk "$vols/Random/DCIM/x" "z"
-cat > "$work/mini7.env" <<ENV
+# --- clean-tick pruning (review #50/#51): live-owner retained, stale-owner pruned ---
+mkvol Random; mk "$vols/Random/z" "u"
+cat > "$work/mini-clean.env" <<ENV
 SCRATCH_DIR="$scratch"
 BACKUP_DISKS="tars"
 ENV
-runmk() { MINI_ENV="$work/mini7.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" > "$out" 2>&1; }
-: > "$logf"; runmk; mkrc0=$?
-mk=$(ls "$state"/backup.unknown-* 2>/dev/null | head -1)
-check "collision(marker): a first run names the volume on line 1 and exits 0" test "$(head -1 "$mk" 2>/dev/null)" = "volume: Random" -a "$mkrc0" -eq 0
-sed -i '' '1s|.*|volume: Ghost|' "$mk"   # a DIFFERENT, gone volume now owns this slug
-: > "$logf"; runmk; mkrc=$?
-check "collision(marker): the run fails (exit non-zero, review #50)" test "$mkrc" -ne 0
-check "collision(marker): SLUG COLLISION is logged for the marker" grep -q "SLUG COLLISION: unknown-volume marker" "$logf"
-check "owner-pruning: the stale (owner-gone) marker is pruned though its slug is live" test ! -e "$mk"
-: > "$logf"; runmk; mkrc2=$?
-check "owner-pruning: the next tick is clean (exit 0)" test "$mkrc2" -eq 0
-check "owner-pruning: Random is tracked under its own name again" test "$(head -1 "$mk" 2>/dev/null)" = "volume: Random"
+runclean() { MINI_ENV="$work/mini-clean.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" > "$out" 2>&1; }
+printf 'volume: Ghost\n' > "$state/backup.unknown-ghost0slug0literal"   # a stale marker, owner not mounted
+: > "$logf"; runclean; clrc=$?
+rmk=$(ls "$state"/backup.unknown-* 2>/dev/null | grep -v ghost0slug0literal | head -1)
+check "clean tick: exits 0" test "$clrc" -eq 0
+check "clean tick: a live unknown volume's marker is created, owner on line 1" test "$(head -1 "$rmk" 2>/dev/null)" = "volume: Random"
+check "clean tick: the stale-owner marker is pruned" test ! -e "$state/backup.unknown-ghost0slug0literal"
+: > "$logf"; runclean
+check "clean tick: the live-owner marker is retained on the next clean tick" test -e "$rmk" -a "$(head -1 "$rmk" 2>/dev/null)" = "volume: Random"
 rm -rf "$vols"/*; rm -f "$state"/backup.unknown-*
 
 # review #43/#49: a configured disk name longer than 255 bytes can never be a
