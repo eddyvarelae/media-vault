@@ -71,7 +71,7 @@ Branch policy: Dev works in its own worktree (`~/Projects/media-vault-dev`) on a
 4. Skim `BACKLOG.md` and the `DECISIONS.md` tail.
 5. Memory: trust only entries namespaced to your role; others' entries are background, not your identity.
 
-## Current state (2026-09-17 18:50 - PM-verified, don't re-derive)
+## Current state (2026-09-17 19:15 - PM-verified, don't re-derive)
 
 **Resumed 2026-09-17 18:47 after the restart:** PM, Dev (Terminal window 406) and Tester (407) rebooted; worktrees and both NAS mounts survived. Boot lines + in-flight table: `team/archive/2026-09-17-pm-handoff.md`. SSDs attached now: `tars`, `kipp`, `case`, `Eddy's Media Vault`, `Scratch1` - `noahsarc` is not.
 
@@ -81,5 +81,5 @@ Branch policy: Dev works in its own worktree (`~/Projects/media-vault-dev`) on a
 - NAS: DXP2800 `192.168.1.167`, SMB `figmaboi`; `~/mounts/media` and `~/mounts/docker` mount via `com.varela.mount-nas`. SSH enabled 2026-09-17, details unconfirmed.
 - Scope since 2026-09-17: every scheduled batch against the archive is ours (nightly tagger = B17, after rev 3).
 - **P0 (Tester, 2026-09-17): 2,668 SonyA6700 photos overwritten on Sep 1, not found on any attached SSD - B23. Nothing gets wiped.** 195 rows need a dest_path fix before verify can pass - B24. Archive is 8.20 TiB (not 3.3).
-- Source SSDs mapped (B7 done): `tars`, `noahsarc`, `case`, `Eddy's Media Vault`; `kipp` never copied (B26). A 5th is now "Scratch1".
+- Source SSDs (B7 done): `tars`, `case`, `Eddy's Media Vault`, `kipp` (never copied, B26), and `Scratch1` = the former `noahsarc`, device-erased 2026-09-02 (Tester #17). The 2026-04-26 SonyA6700 source disk is unidentified. All five attached; agents read only.
 - Reviewer = `codex exec`, run by the PM. Seats boot in visible Terminal windows with `--remote-control`; nudges need a trailing empty `do script`.

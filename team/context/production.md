@@ -15,7 +15,7 @@
 **Machines:** Mac mini M4 (all seats, ethernet, hostname "Eddy's Mac mini") and MacBook Pro M3 (not a seat host; may reach seats via Remote Control).
 
 **The Mini as job host (owned by the mini-server team - ask them via Eddy for machine changes; we own the jobs):**
-- Scratch: `/Volumes/Scratch1` (2 TB SSD, `SCRATCH_DIR`). Rule: pull to scratch, process locally, write back - never process over SMB (~7× slower).
+- Scratch: `/Volumes/Scratch1` (2 TB SSD, `SCRATCH_DIR`) - **the former `noahsarc` source SSD, device-erased 2026-09-02 17:58** (Tester #17). Rule: pull to scratch, process locally, write back - never process over SMB (~7× slower).
 - `~/vault-config/manifest.db` on the Mini is a **stale snapshot** (last write 2026-09-02, 67,735 rows, PM-verified 2026-09-17). Never a source of truth; the live manifest is on the NAS.
 - Ollama (`127.0.0.1:11434`, llava), `~/Projects/video-tagger` (`.venv`, python 3.13). Logs `~/Library/Logs/mini-server/`; tagger state `~/Library/Application Support/mini-server/tagging-state.db`.
 - LaunchAgent templates in mini-server `launchd/`; installed = `com.varela.mount-nas`, `com.varela.tea-daemon`. Reboot chain verified 2026-09-16; tmux and seat windows die on reboot.
