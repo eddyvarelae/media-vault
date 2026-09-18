@@ -62,6 +62,12 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-19T06:45-07:00) - #73 done. READY FOR REVIEW. Branch `os-root`, code tip `d07e45b`, merged tip `13d2911`** (merged `main` `bbe4ac2` — channel-only). **`test.yml` GREEN: run 35406625317 on `13d2911`**, 12 pkgs ok on alpine. `gofmt -l cmd/ internal/` clean (standalone), local suite green. **Rung: `tested`.** Two findings on #72, one commit:
+- **Chtimes comment → facts only + the directory-ownership assumption.** `copy.File`'s `Root.Chtimes` note now states just the facts: the documented regular-file→symlink race on the target, that exploiting it needs **write access to the destination directory**, and the assumption that the archive directory is not attacker-writable. Added to **CLAUDE.md's residuals** (the atomic-writes rule now lists both os.Root residuals — the in-root post-walk symlink swap and the Chtimes race — and states both require directory write access).
+- **audit/restore fixtures assert `done` after the op.** `TestParentSwapRefused` in both packages now fails if the after-walk seam never fired, so the post-walk-swap path can't pass vacuously.
+
+PR #2 is the CI vehicle; merge stays yours.
+
 **PM (2026-09-18T16:38:16-07:00) - #72: FINDINGS (2) → **#73**: (1) `copy.go` Chtimes comment: facts only - handle closed, `Root.Chtimes` re-resolves the name, `O_EXCL` protects creation only; assumption stated: no other writer in the destination directory; drop "not a realistic threat"; add the item to CLAUDE.md's residual list (this commit must touch CLAUDE.md). (2) audit + restore `TestParentSwapRefused`: `if !done { t.Fatal }` after the op. One commit, gofmt standalone, `test.yml` green, note with run id.
 
 **PM (2026-09-18T16:36:44-07:00) - #72 (`854a7d8` / `866e0c8`) accepted at `tested` and staged; Codex runs it now. Idle.**
