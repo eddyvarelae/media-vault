@@ -143,6 +143,32 @@ func noPartials(t *testing.T, dst string) {
 	})
 }
 
+// caseFolds reports whether dir's filesystem folds case: a file created
+// lowercase is reachable spelled uppercase AND is the same physical file (APFS
+// on the dev Mac folds; ext4 in the linux CI does not). IsNotExist means
+// case-sensitive; any other stat error is a real failure, not "not folding";
+// a hit counts only when os.SameFile confirms one file.
+func caseFolds(t *testing.T, dir string) bool {
+	t.Helper()
+	probe := filepath.Join(dir, "case-probe")
+	if err := os.WriteFile(probe, []byte("p"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(probe)
+	lo, err := os.Stat(probe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hi, err := os.Stat(filepath.Join(dir, "CASE-PROBE"))
+	if os.IsNotExist(err) {
+		return false
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return os.SameFile(lo, hi)
+}
+
 // rowsOf reopens the manifest under cfg and returns the persisted rows for
 // disk, keyed by source path. A fresh open per call, never the subprocess's
 // handle: this is what the next `vault` run (and certify) will actually see.
@@ -1248,18 +1274,13 @@ func TestRestore(t *testing.T) {
 		other := t.TempDir()
 		writeFile(t, filepath.Join(other, "wrong.JPG"), "not the original", t0)
 		writeFile(t, filepath.Join(dst, "DCIM", "orphan.JPG"), "no row", t0)
-		// A deduped row of another disk resolving to the same file. The alias is
-		// the identical dest spelling (one physical file, two rows) so it is a
-		// claimant on every filesystem; a case-variant spelling would only
-		// collide where the FS folds case (it did not in the linux CI). The
-		// dir-symlink / leaf-symlink / hard-link / case-fold identities are
-		// covered exhaustively at package level (TestBuildFindsClaimantsByIdentity).
+		// A copied row whose destination file was never written (the "destination
+		// missing" case). The claimant cases live in their own isolated subtest
+		// below: a case-variant claimant refuses only where the FS folds case, so
+		// on a case-sensitive FS restore proceeds — which cannot sit inside this
+		// "nothing changed" block.
 		m, err := manifest.Open(filepath.Join(cfg, "manifest.db"))
 		if err != nil {
-			t.Fatal(err)
-		}
-		if err := m.Upsert(manifest.Entry{SourceDisk: "kipp", SourcePath: "x/DSC04868_2025.JPG", DestPath: "DCIM/DSC04868_2025.JPG",
-			Size: int64(len(torn)), MtimeNs: 1, SHA256: sha(torn), CopiedAt: 1, Status: "deduped"}); err != nil {
 			t.Fatal(err)
 		}
 		if err := m.Upsert(manifest.Entry{SourceDisk: "sony", SourcePath: "DCIM/gone.JPG", DestPath: "DCIM/gone.JPG",
@@ -1276,7 +1297,6 @@ func TestRestore(t *testing.T) {
 			want string
 			code int
 		}{
-			{"claimant", []string{"sony", "DCIM/DSC04868_2025.JPG", replacement(emv), dst, "--expect-sha", sha(good)}, "1 other row(s) resolve to", 1},
 			{"unknown row", []string{"sony", "DCIM/nope.JPG", replacement(emv), dst, "--expect-sha", sha(good)}, "no row for sony:DCIM/nope.JPG", 1},
 			{"destination missing", []string{"sony", "DCIM/gone.JPG", replacement(emv), dst, "--expect-sha", sha(good)}, "does not exist - a missing destination is `vault copy`'s case", 1},
 			{"wrong expect-sha", []string{"sony", "DCIM/DSC04869_2025.JPG", replacement(emv), dst, "--expect-sha", sha("something else")}, "not the file you verified", 1},
@@ -1310,6 +1330,42 @@ func TestRestore(t *testing.T) {
 		}
 		if got := rowsOf(t, cfg, "sony"); !reflect.DeepEqual(got, before) {
 			t.Errorf("a refusal changed rows")
+		}
+		noPartials(t, dst)
+	})
+
+	// A claimant reached by a case-variant spelling of the target's dest: on a
+	// case-folding FS it is the same physical file, so restore is refused; on a
+	// case-sensitive FS it is a different, absent path, so restore proceeds.
+	// Isolated (its own cfg/dst) because the second branch actually writes — it
+	// cannot live in "refusals write nothing". The input is kept on both FSes;
+	// only the assertion branches.
+	t.Run("case-variant claimant", func(t *testing.T) {
+		cfg, dst, emv := setup(t)
+		m, err := manifest.Open(filepath.Join(cfg, "manifest.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Upsert(manifest.Entry{SourceDisk: "kipp", SourcePath: "x/DSC04868_2025.JPG", DestPath: "dcim/dsc04868_2025.JPG",
+			Size: int64(len(torn)), MtimeNs: 1, SHA256: sha(torn), CopiedAt: 1, Status: "deduped"}); err != nil {
+			t.Fatal(err)
+		}
+		m.Close()
+		out, errOut, code := vault(t, cfg, "restore", "sony", "DCIM/DSC04868_2025.JPG", replacement(emv), dst, "--expect-sha", sha(good))
+		if caseFolds(t, dst) {
+			if code != 1 || !strings.Contains(errOut+out, "1 other row(s) resolve to") || strings.Contains(out, "RESTORED") {
+				t.Errorf("folding FS: want the claimant refusal, exit %d\n%s%s", code, out, errOut)
+			}
+			if got := readFile(t, filepath.Join(dst, "DCIM", "DSC04868_2025.JPG")); got != torn {
+				t.Errorf("folding FS: a refusal changed the file: %q", got)
+			}
+		} else {
+			if code != 0 || !strings.Contains(out, "RESTORED") {
+				t.Errorf("case-sensitive FS: want restore to proceed, exit %d\n%s%s", code, out, errOut)
+			}
+			if got := readFile(t, filepath.Join(dst, "DCIM", "DSC04868_2025.JPG")); got != good {
+				t.Errorf("case-sensitive FS: restore did not land the good bytes: %q", got)
+			}
 		}
 		noPartials(t, dst)
 	})

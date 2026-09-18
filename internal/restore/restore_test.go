@@ -42,20 +42,31 @@ func open(t *testing.T) *manifest.Manifest {
 }
 
 // caseFolds reports whether dir's filesystem folds case: a file created
-// lowercase is found spelled uppercase (APFS on the dev Mac folds; ext4 in the
-// linux CI does not). A case-alias claimant only exists where the FS folds, so
-// the tests that rely on it probe first and assert conditionally.
+// lowercase is reachable spelled uppercase AND is the same physical file (APFS
+// on the dev Mac folds; ext4 in the linux CI does not). The uppercase spelling
+// missing (IsNotExist) means case-sensitive; any other stat error is a real
+// failure, not "not folding", so it fails the test; a stat hit counts only when
+// os.SameFile confirms one file. The tests keep the case-variant input on both
+// filesystems and branch what they assert on this probe.
 func caseFolds(t *testing.T, dir string) bool {
 	t.Helper()
 	probe := filepath.Join(dir, "case-probe")
 	if err := os.WriteFile(probe, []byte("p"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, statErr := os.Stat(filepath.Join(dir, "CASE-PROBE"))
-	if err := os.Remove(probe); err != nil {
+	defer os.Remove(probe)
+	lo, err := os.Stat(probe)
+	if err != nil {
 		t.Fatal(err)
 	}
-	return statErr == nil
+	hi, err := os.Stat(filepath.Join(dir, "CASE-PROBE"))
+	if os.IsNotExist(err) {
+		return false
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return os.SameFile(lo, hi)
 }
 
 // The physical checks restore makes on the destination, and the empty
@@ -161,12 +172,10 @@ func TestBuildFindsClaimantsByIdentity(t *testing.T) {
 		"B:dir-alias":  "alias/x.JPG",
 		"B:leaf-alias": "leaf.JPG",
 		"B:hard-link":  "hard.JPG",
-	}
-	// A case-alias is one physical file only where the FS folds case; on a
-	// case-sensitive FS (the linux CI) REAL/X.jpg is simply a different path
-	// that does not exist, so it is neither created nor expected there.
-	if caseFolds(t, root) {
-		claimants["B:case-alias"] = "REAL/X.jpg"
+		// Seeded on BOTH filesystems; a claimant only where the FS folds case
+		// (else REAL/X.jpg is a different, absent path). Asserted against the
+		// probe below, not dropped.
+		"B:case-alias": "REAL/X.jpg",
 	}
 	for k, dest := range claimants {
 		disk, src, _ := strings.Cut(k, ":")
@@ -180,23 +189,31 @@ func TestBuildFindsClaimantsByIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, err := Build(context.Background(), m, "A", "x.JPG", filepath.Join(outside, "good.JPG"), root, sha("good"))
-	if !errors.Is(err, ErrRefused) {
+	if !errors.Is(err, ErrRefused) { // the dir/leaf/hard aliases refuse on every FS
 		t.Fatalf("err = %v, want the claimants refusal", err)
 	}
 	got := map[string]bool{}
 	for _, c := range p.Claimants {
 		got[c.SourceDisk+":"+c.SourcePath] = true
 	}
-	for k := range claimants {
-		if !got[k] {
-			t.Errorf("%s (dest %s) not found as a claimant; got %v", k, claimants[k], got)
+	// The case-alias is a claimant only where the FS folds case; on a
+	// case-sensitive FS REAL/X.jpg is ENOENT and not a claimant. The other
+	// three hold on both.
+	want := map[string]bool{"B:dir-alias": true, "B:leaf-alias": true, "B:hard-link": true, "B:case-alias": caseFolds(t, root)}
+	for k, w := range want {
+		if got[k] != w {
+			t.Errorf("claimant %s = %v, want %v (case-folds=%v); all claimants %v", k, got[k], w, want["B:case-alias"], got)
 		}
 	}
 	if got["D:u"] {
 		t.Errorf("a different file with the same bytes was reported as a claimant")
 	}
-	if len(p.Claimants) != len(claimants) {
-		t.Errorf("claimants = %d, want %d: %v", len(p.Claimants), len(claimants), got)
+	wantN := 3
+	if want["B:case-alias"] {
+		wantN = 4
+	}
+	if len(p.Claimants) != wantN {
+		t.Errorf("claimants = %d, want %d: %v", len(p.Claimants), wantN, got)
 	}
 	if got, _ := os.ReadFile(filepath.Join(root, "real", "x.JPG")); string(got) != "torn" {
 		t.Errorf("target touched: %q", got)
