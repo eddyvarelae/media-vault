@@ -6,6 +6,30 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #36 - re-review of #32's fixes only (branch `tagger`, code tip `3b3dba3`)
+
+**PM (2026-09-18T03:47:43-07:00):** `git show 3b3dba3 -- . ':!team'`. Claims: no automatic lock takeover - a dead or info-less lock → `STALE LOCK` reported, exit 1, human removes; `safe_rel` rejects any control character; helper→shell records are NUL-framed; the decoded camera must be one of the configured cameras before any path is built. PM: vet/gofmt/bash -n clean, 8 packages ok. **This is wrong if:** any takeover path remains; a record can still be split or spoofed; or a camera outside the configured set can reach path construction.
+
+Verdict goes below this line.
+
+### #37 - re-review of #33's fix only (branch `small-fixes`, code tip `467c588`)
+
+**PM (2026-09-18T03:47:43-07:00):** `git show 467c588 -- . ':!team'`. Claim: `dedup --min-size` joins the value-flag inventory (or detection is restricted to commands with `--dry-run`); doc wording corrected. PM: 9 packages ok. **This is wrong if:** any command's value-taking flag is still outside the inventory (re-list them).
+
+Verdict goes below this line.
+
+### #38 - re-review of #34's fixes only (branch `backup`, code tip `d64e4e2`)
+
+**PM (2026-09-18T03:47:43-07:00):** `git show d64e4e2 -- . ':!team'`. Claims: no automatic lock takeover (as #36); report filenames use an injective slug (percent-encoding outside `[A-Za-z0-9._-]`), `A B` vs `A_B` tested; README states re-attach is logged again only when a tick observed the detachment; `GOTELEMETRY=off` on the managed build and the harness asserts nothing outside `$STATE_DIR` under the temp `HOME`. PM: vet/gofmt/bash -n clean, 10 packages ok. **This is wrong if:** two distinct disk names can still map to one filename; the telemetry setting does not cover the Go version installed here; or the README claim is stronger than the code.
+
+Verdict goes below this line.
+
+### #39 - re-review of #35's fix only (branch `restore`, code tip `8979bcf`)
+
+**PM (2026-09-18T03:47:43-07:00):** `git show 8979bcf -- . ':!team'`. Claim: the spelling fallback is gone - claimants by identity only (`stat` + `SameFile`); ENOENT = not a claimant; any other stat error refuses the restore with `cannot rule out claimant <disk:path>: <err>`; tests for EACCES and for same-disk-different-root (now allowed). PM: vet/gofmt clean, 8 packages ok. **This is wrong if:** any error other than ENOENT can be swallowed, or a real alias can be missed on a case-folding FS.
+
+Verdict goes below this line.
+
 ### #32 - re-review of #26's fixes only (branch `tagger`, code tip `3e3fd5a`) - **resolved: FINDINGS (2), accepted → Dev → request #36**
 
 **PM (2026-09-18T03:23:59-07:00):** One commit on `6b061f3`: `git show 3e3fd5a -- . ':!team'`. Dev's note: Dev 2026-09-18T03:22 (commit `c7d3d23`). PM at `3e3fd5a`: vet/gofmt/bash -n clean, 8 packages ok. **Claims:** (1) `safe_rel` refuses absolute/climbing/junk-component paths for manifest rows (both `dest_path` and the empty-dest `source_path` fallback) and walked files; the shell re-checks each selected file's NAS path component by component (`path_is_unsafe`) at pull time, refusing symlinked dir or leaf. (2) Junk filter covers manifest rows. (3) Lock: cleanup trap before the state db opens; info-less lock = being acquired; dead-lock takeover by atomic rename. (4) `errf` inside the trapped temp dir. (+) the previous snapshot is removed before rsync so a same-size stale copy is never rsync-skipped. **This is wrong if:** a path can reach `rsync`/`xattr` without passing both `safe_rel` and `path_is_unsafe`; a takeover can leave two owners; or the snapshot removal can race a concurrent run (the lock should make that impossible - state it).
