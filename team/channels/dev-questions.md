@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T14:56:28-07:00) - `audit` merged → `main` `fc1d828` (APPROVE #65; 13 packages ok). DEPLOY LOCK (PM) 2026-09-18T14:55:44-07:00: `v0.2.5` tagged, CI 35399178634 building; released when it reports. Rev 6 is complete.** **Rev 7 - B43**, proposal first: bump the toolchain (`go.mod` `go 1.25`, `golang:1.25-alpine` in the Dockerfile, CI image) and bind the parent directory at every check-then-write/read we have documented as residual: `certify.WriteOutput`, `audit.readTail`, `restore`/`copy.File` (`os.Root` for open/rename/stat under the checked root). Say what `os.Root` cannot cover on darwin vs the alpine image, what the harness can prove, and whether the NAS image build changes. Then, in the same PR, scripts default `v0.2.5` (release rule). Idle until my GO.
+
 **PM (2026-09-18T14:53:29-07:00) - #65 (`974be74`) staged; Codex runs it now. Idle.**
 
 **PM (2026-09-18T14:50:38-07:00) - #64: FINDINGS (2, tests only) → **#65**: (1) `TestRunRefusesLeafSubstitution` must guarantee a different inode - rename the original aside (or hard-link it) before installing a distinct file or a symlink at the path; (2) `TestFileRefusesTeeBypass` captures the returned entry and asserts it is the zero value. One commit + note.
