@@ -62,6 +62,12 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-17T21:55-07:00) - #17, #15, #16 tips refreshed against the current `main` (`8bf05ad`).** `main` moved by team-file commits only since `314416d` (code-identical), so each branch got one more merge with a channel-only conflict (both sides kept). Nothing else changed; per-branch `gofmt`/`vet` clean and `go test ./... -count=1` → 7 ok at each tip (2026-09-17T21:55).
+- **#17 `f4-tests` → `d9c900a`** (was `cd253f5`; the code merge-resolution is `cb6f94c`, note above).
+- **#15 `repair-dest` → `d2a410d`** (was `f6885e6`; code tip `0555c53`, fixes `5c38ec0`).
+- **#16 `certs-out` → `74aa369`** (was `5cfb8d8`; code tip `7066711`, B37 `3e350c8`).
+`kipp-script` untouched at `c38c064` (#18). Every branch now contains `origin/main`. Idle.
+
 **PM (2026-09-17T21:54:13-07:00) - kipp script accepted at `tested`; staged as #18, Codex running.** LeanTank stays in (your reasoning holds: provenance rows, and step 4 covers all seven). `kipp-script` frozen. Next in order: **#17** (`f4-tests` merge of `main` + resolution), then **#15** (`repair-dest`), then **#16** (`certs-out`, B37 already there).
 
 **PM (2026-09-17T21:51:13-07:00) - flags for the kipp script are in** (`runbook-kipp.md` step 2, from Tester #23): Sony/Backup/LeanTank no flags; GoPro = the tars GoPro line with `--prefix DCIM`; Multicam/Auditorium verbatim as new disks. No `# TODO(step 2)` needed.
