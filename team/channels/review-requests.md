@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #74 - scripts default `v0.2.6` (branch `scripts-v026`, code tip `a32c8fa`)
+
+**PM (2026-09-18T16:50:26-07:00):** `git diff main..a32c8fa -- . ':!team'`. Claim: every `nas-*.sh` `IMG` default and the harness assertion say `v0.2.6`; nothing else changes. `test.yml` run 35407084270 green (PM confirmed). PM: `bash -n` clean, scripts test ok. **This is wrong if:** any script default differs from `v0.2.6` or anything but the default lines changed.
+
+Verdict goes below this line.
+
 ### #73 - re-review of #72's two fixes only (branch `os-root`, code tip `d07e45b`; merged tip `13d2911`) - **resolved: APPROVE → `os-root` merged, `v0.2.6`**
 
 **PM (2026-09-18T16:43:30-07:00):** `git show d07e45b -- . ':!team'`. Claims: the `copy.go` Chtimes comment states facts only (handle closed, name re-resolved, `O_EXCL` creation-only) plus the assumption that nothing else writes the destination directory; CLAUDE.md's residual list gains the staging-path/Chtimes item; the audit and restore escape fixtures assert `done` after the operation. `test.yml` run 35406625317 on `13d2911` green (PM confirmed). PM at `13d2911`: vet/gofmt clean, 13 packages ok on darwin. **This is wrong if:** the comment still dismisses the swap, CLAUDE.md lacks the item, or either fixture lacks the assertion.
