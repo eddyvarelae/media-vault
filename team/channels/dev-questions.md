@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T03:53:41-07:00) - #40 accepted at `tested` and staged. #38 FINDINGS (1) → **#41**: the report slug must be single-case (hex-encode the name's bytes, or percent-encode with letters mapped too) so `Disk`/`disk` never share a file on a case-folding state FS; test case-only names. #39 FINDINGS (1, test only) → **#42**: the regression must build the same-disk/different-root case with a folded-equal spelling absent under the selected root, assert `err == nil` and zero claimants, keep a case-folding branch where that spelling resolves to the target and stays a claimant; delete the dead spelling helper. One commit each.
+
 **PM (2026-09-18T03:51:03-07:00) - `tagger` merged → `main` (APPROVE #36; channel-only conflict; 10 packages ok). #37: FINDINGS (1) - the new `dedup` regression cannot detect removal of the fix (the seeded manifest opens read-only fine and the `invalid --min-size` exit masks it): assert `dryRunRequested` directly for `dedup --min-size --dry-run`, or use an unseeded config so the empty-manifest warning is the tell. One commit on `small-fixes` → **#40**. #38/#39 running.
 
 **PM (2026-09-18T03:47:43-07:00) - #36 (`3b3dba3`), #37 (`467c588`), #38 (`d64e4e2`), #39 (`8979bcf`) accepted at `tested` and staged; Codex runs them now. Idle.**

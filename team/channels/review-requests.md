@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #40 - re-review of #37's fix only (branch `small-fixes`, code tip `9f8281e`)
+
+**PM (2026-09-18T03:53:41-07:00):** `git show 9f8281e -- . ':!team'` (test file only, +32/-7). Claim: `TestDryRunRequested` asserts the detector directly (a `--dry-run` as the value of `--prefix`/`--rule`/`--on-collision`/`--min-size` is not a dry run; standalone is), and `TestDedupMinSizeNotADryRun` on an unseeded config asserts the manifest **was created**; removing the `dedup` inventory case fails both. Production unchanged from #37. PM: vet/gofmt clean, 9 packages ok. **This is wrong if:** either test can pass with the `dedup` case removed.
+
+Verdict goes below this line.
+
 ### #36 - re-review of #32's fixes only (branch `tagger`, code tip `3b3dba3`) - **resolved: APPROVE → merge**
 
 **PM (2026-09-18T03:47:43-07:00):** `git show 3b3dba3 -- . ':!team'`. Claims: no automatic lock takeover - a dead or info-less lock → `STALE LOCK` reported, exit 1, human removes; `safe_rel` rejects any control character; helper→shell records are NUL-framed; the decoded camera must be one of the configured cameras before any path is built. PM: vet/gofmt/bash -n clean, 8 packages ok. **This is wrong if:** any takeover path remains; a record can still be split or spoofed; or a camera outside the configured set can reach path construction.
@@ -19,6 +25,8 @@ At `3b3dba3:scripts/tagging/run-tagging.sh:209-222`, successful `mkdir` is the o
 At `scripts/tagging/tagging-helper.py:206-213`, `safe_rel` rejects ASCII control characters (including tab, newline, carriage return and NUL) and DEL. Both manifest path alternatives and walked relative paths pass this check before selection. Records are NUL-terminated at line 344, stored in files rather than shell variables, and consumed with `read -r -d ''` in both modes. This closes the submitted path-based record injection. The camera membership checks at `scripts/tagging/run-tagging.sh:179,297-299` precede processing of decoded records and, in the real run, construction of `rel`, `src`, and `dst` at lines 300-302.
 
 Validation: static tracing of the pinned fixes, immediate context, and regression assertions; `bash -n` passed for both committed shell files. No scripts, Go tests, or Python module execution run. Only this channel file modified.
+
+**PM (2026-09-18T03:53:41-07:00):** #38: accepted - the slug becomes a single-case encoding (hex of the name's bytes, or percent-encoding with letters folded to hex too); case-only names tested. Everything else in #38 passed. → **#41**. #39: accepted, test only - the production fix passes the falsifiers by trace; the regression must cover the same-disk/different-root case with a folded-equal path absent under the selected root, require `err == nil` and zero claimants, and keep a case-folding-FS branch where that spelling resolves to the target and must remain a claimant; remove the dead spelling helper. → **#42**.
 
 ### #37 - re-review of #33's fix only (branch `small-fixes`, code tip `467c588`) - **resolved: FINDINGS (1, test only), accepted → Dev → request #40**
 
@@ -35,17 +43,34 @@ The production fix satisfies the requested inventory criterion: `dryRunRequested
 Validation: static tracing of the exact diff and pinned parser/open-path context. No Go tests, builds, or executable reproductions run. Only this channel file modified; pre-existing edits preserved.
 
 
-### #38 - re-review of #34's fixes only (branch `backup`, code tip `d64e4e2`)
+### #38 - re-review of #34's fixes only (branch `backup`, code tip `d64e4e2`) - **resolved: FINDINGS (1), accepted → Dev → request #41**
 
 **PM (2026-09-18T03:47:43-07:00):** `git show d64e4e2 -- . ':!team'`. Claims: no automatic lock takeover (as #36); report filenames use an injective slug (percent-encoding outside `[A-Za-z0-9._-]`), `A B` vs `A_B` tested; README states re-attach is logged again only when a tick observed the detachment; the managed build runs with `HOME` (plus `GOPATH`/`GOCACHE`/`GOMODCACHE`/`GOTMPDIR`/`GOENV`) redirected under `$STATE_DIR` (Dev reports `GOTELEMETRY`/`GOTELEMETRYDIR` alone did not stop Go writing under `$HOME`), and the harness asserts nothing under the temp `HOME`'s `Library/Application Support/go`, `go`, `.config/go`. PM: vet/gofmt/bash -n clean, 10 packages ok. **This is wrong if:** two distinct disk names can still map to one filename; the `HOME` redirect can break the build (module downloads need no network here - stubs?) or leaves any write outside `$STATE_DIR`; or the README claim is stronger than the code.
 
 Verdict goes below this line.
 
-### #39 - re-review of #35's fix only (branch `restore`, code tip `8979bcf`)
+**Reviewer (2026-09-18):** FINDINGS — request #38, fixes only, exactly `git show d64e4e2 -- . ':!team'`.
+
+1. **The new slug still allows one disk's report to delete another's on a case-insensitive state filesystem.** At `d64e4e2:scripts/backup/run-backup.sh:84-93`, ASCII letters retain their case. With `BACKUP_DISKS='Disk|disk'` and `$STATE_DIR` on case-insensitive APFS, report `Disk`, detach it, then attach the distinct disk named `disk` on the same day. The names need not coexist under `/Volumes`. Lines 241-243 produce `gap-Disk-2026-09-18.tsv` and `gap-disk-2026-09-18.tsv` (likewise `.txt`), which resolve to the same file; the second report removes the first's output. String-level injectivity does not establish filesystem-level uniqueness. Encode the name's bytes using a single-case alphabet (for example, full hexadecimal), and cover case-only names on a case-insensitive state filesystem. The added `A B`/`A_B` test does not cover this case.
+
+Other checks: lock acquisition now succeeds only through `mkdir`; every failed acquisition returns 1 without takeover, before cleanup traps are installed. Unknown-volume markers are keyed by name and pruned on observed absence, matching the narrowed README statement. The managed build redirects HOME, GOPATH, GOCACHE, GOMODCACHE and GOTMPDIR into state and sets GOENV=off; local Go source confirms Darwin telemetry derives its directory from HOME, closing the previously identified telemetry path. The harness checks the three stated original-HOME locations. Its build case invokes real Go against this checkout, with a fresh module cache and no download stub; successful offline building is not established by this static review.
+
+Validation: static tracing of the pinned fixes, immediate context and harness; `bash -n` passed for both committed shell files. No Go tests, builds, project scripts or runtime reproductions run. Only this channel file modified.
+
+### #39 - re-review of #35's fix only (branch `restore`, code tip `8979bcf`) - **resolved: FINDINGS (1, test only), accepted → Dev → request #42**
 
 **PM (2026-09-18T03:47:43-07:00):** `git show 8979bcf -- . ':!team'`. Claim: the spelling fallback is gone - claimants by identity only (`stat` + `SameFile`); ENOENT = not a claimant; any other stat error refuses the restore with `cannot rule out claimant <disk:path>: <err>`; tests for EACCES and for same-disk-different-root (now allowed). PM: vet/gofmt clean, 8 packages ok. **This is wrong if:** any error other than ENOENT can be swallowed, or a real alias can be missed on a case-folding FS.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-18):** FINDINGS — request #39, fix only, exactly `git show 8979bcf -- . ':!team'`.
+
+1. **The replacement regression test does not cover removal of the same-disk spelling fallback.** At `8979bcf:internal/restore/restore_test.go:233-243`, the only missing-file row is disk B at `gone/elsewhere.JPG`; it is neither on the target's disk A nor folded-equal to `real/x.JPG`, despite the comment. No same-disk sibling or second archive root is created anywhere in this test. Reintroducing the removed same-disk `physKey` fallback while retaining the new non-ENOENT refusal would pass both portions of this test by trace. Also, the first assertion accepts an unexpected refusal whenever `Claimants` is empty. Add the claimed same-disk/different-root case with a folded-equal path absent under the selected root on a case-sensitive filesystem, and require `err == nil` and zero claimants. Handle a case-folding filesystem explicitly: if that spelling resolves to the target, it must remain a claimant. This is a test/claimed-evidence finding; the production fix itself passes the stated falsifiers by inspection.
+
+Production trace: `internal/restore/restore.go:117-141` checks all other rows, including the empty-destination source-path fallback, with `os.Stat` and `os.SameFile`. A case alias resolving to the target is therefore still a claimant regardless of disk name. Only `os.IsNotExist(statErr)` is ignored; every other stat error returns `ErrRefused` with the row identity and underlying error. `cmd/vault/main.go:685-705` exits on that error before Apply. The old spelling helper remains defined but is no longer called by Build. The EACCES portion at `internal/restore/restore_test.go:249-270` uses an independent stat probe and would catch removal of the non-ENOENT refusal when permissions are enforced.
+
+Validation: static tracing of the exact pinned diff, immediate caller/manifest context and regression assertions. No Go tests, builds or runtime reproductions run. Only this channel file modified; pre-existing edits preserved.
+
 
 ### #32 - re-review of #26's fixes only (branch `tagger`, code tip `3e3fd5a`) - **resolved: FINDINGS (2), accepted → Dev → request #36**
 
