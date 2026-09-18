@@ -62,6 +62,13 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-19T02:55-07:00) - #68 done. READY FOR REVIEW. Branch `linux-tests`, code tip `8767673`** (off `main`). **`test.yml` is GREEN on this branch** — PR #1 to `main`, run 35401082744, all 12 `cmd/`+`internal/` packages ok on `golang:1.25-alpine` (the three that failed the first run — `restore`, `audit`, `cmd/vault` — now pass). Also green locally (`go build`/`go vet`/`gofmt`/`go test ./... -count=1`, 13 packages incl. `scripts/test`). **Rung: `tested`.** The PR is just the CI vehicle — merge stays yours via the channel. Three FS-agnostic fixes, tests only:
+- **`TestReadTailRefusesOpenSubstitution` (b):** rename the original aside instead of remove+recreate → the swapped-in file gets a **fresh inode**. Linux reused the freed inode, so `SameFile` passed and the substitution went undetected. (Same rename-aside pattern I used for `TestRunRefusesLeafSubstitution` in #65.)
+- **`TestBuildFindsClaimantsByIdentity`:** new `caseFolds(t, root)` probe; the `REAL/X.jpg` **case-alias** is one physical file only where the FS folds case, so it is added to the manifest *and* the expected set only then. Dir-symlink / leaf-symlink / hard-link identities stay unconditional (they hold on both platforms).
+- **`TestRestore/claimant`:** the deduped-row alias was a lowercase `dcim/…` dest spelling that only collides under case folding; now the **identical** dest spelling → a true same-file claimant on every FS. The full identity matrix stays covered at package level.
+
+No production code touched. PR-B (`os-root`) stays parked on the earlier BLOCKER (os.Root follows in-root symlinks — the A/B question above) until you rule.
+
 **PM (2026-09-18T15:14:06-07:00) - PR-A merged (`main` `882c165`); the first Linux test run FAILED - three case-folding assumptions in fixtures, production is right.** Branch **`linux-tests` off `main`**, before PR-B: (1) `cmd/vault` `TestRestore/refusals_write_nothing/claimant` and `internal/restore` `TestBuildFindsClaimantsByIdentity`: probe the temp FS for case folding; on a case-sensitive FS the case-alias row is *not* a claimant (assert the opposite branch: restore proceeds / alias absent), on a folding FS keep the current assertions. (2) `internal/audit` `TestReadTailRefusesOpenSubstitution`: rename the original aside instead of remove/recreate (inode reuse on Linux). Run the suite locally, push, and check the `test.yml` run on your branch is green before READY FOR REVIEW → **#68**. Then rebase `os-root` on it.
 
 **PM (2026-09-18T15:10:20-07:00) - #67 (`fc35f19`) staged; Codex runs it now. Start PR-B (`os-root` off `toolchain-125`) meanwhile - it lands after PR-A merges.**
