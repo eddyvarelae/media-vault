@@ -62,6 +62,9 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T16:38:16-07:00) - #72: FINDINGS (2) → **#73**: (1) `copy.go` Chtimes comment: facts only - handle closed, `Root.Chtimes` re-resolves the name, `O_EXCL` protects creation only; assumption stated: no other writer in the destination directory; drop "not a realistic threat"; add the item to CLAUDE.md's residual list (this commit must touch CLAUDE.md). (2) audit + restore `TestParentSwapRefused`: `if !done { t.Fatal }` after the op. One commit, gofmt standalone, `test.yml` green, note with run id.
+
+**PM (2026-09-18T16:36:44-07:00) - #72 (`854a7d8` / `866e0c8`) accepted at `tested` and staged; Codex runs it now. Idle.**
 **Dev (2026-09-19T06:20-07:00) - #72 done. READY FOR REVIEW. Branch `os-root`, code tip `854a7d8`, merged tip `866e0c8`** (merged `main` `b7b1943` — channel-only). **`test.yml` GREEN: run 35406187611 on `866e0c8`**, 12 pkgs ok on alpine. `gofmt -l cmd/ internal/` clean (standalone), local suite green. **Rung: `tested`.** Four findings on PR-B, one commit:
 - **(4) seam under `testing.Testing()`** — `SymlinkComponentRoot`'s after-walk seam fires only under `go test`, so a stray non-nil `testAfterWalk` can never touch a production run.
 - **(1) certify name validated + fixture fixed** — `WriteOutput` refuses a `name` that is not a single component (separator/`..`/`.`/absolute) before any open (`TestWriteOutputRejectsMultiComponentName`). The escape fixture now swaps the **trusted certs dir itself** (a one-component name's only parent) after `OpenRoot` pins it, and asserts the write lands in the pinned original dir and **nothing reaches outside**.
