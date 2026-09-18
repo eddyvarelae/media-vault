@@ -127,12 +127,9 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 	// rows and the B40 torn write). copy.File is the only path that mints a row;
 	// refuse to return one whose hash was not computed here.
 	sum := hex.EncodeToString(hasher.Sum(nil))
-	// The tee fed the hasher and the destination from one source reader, so the
-	// bytes the hasher saw must equal the bytes written; if they ever diverge
-	// the sha is not the hash of what landed, and no row may be recorded.
-	if sum == "" || hashed.n != written {
+	if err := hashCovers(sum, hashed.n, written); err != nil {
 		cleanup()
-		return manifest.Entry{}, fmt.Errorf("refusing to record a row: hashed %d bytes but wrote %d", hashed.n, written)
+		return manifest.Entry{}, err
 	}
 	mt := time.Unix(0, task.MtimeNs)
 	if err := os.Chtimes(tmpPath, mt, mt); err != nil {
@@ -154,6 +151,17 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 		CopiedAt:   time.Now().UnixNano(),
 		Status:     "copied",
 	}, nil
+}
+
+// hashCovers guards the row-minting invariant (B38): the tee fed the hasher and
+// the destination from one source reader, so the bytes the hasher saw (hashed)
+// must equal the bytes written; if they ever diverge, the sha is not the hash of
+// what landed and no row may be recorded. Split out so a tee-bypass is testable.
+func hashCovers(sum string, hashed, written int64) error {
+	if sum == "" || hashed != written {
+		return fmt.Errorf("refusing to record a row: hashed %d bytes but wrote %d", hashed, written)
+	}
+	return nil
 }
 
 // byteCounter counts the bytes written through it — the tee writes every byte

@@ -338,3 +338,17 @@ func TestFileRefusesDestinationsOutsideTheRoot(t *testing.T) {
 		t.Errorf("Under: inside/through-link/outside decided wrong")
 	}
 }
+
+// TestHashCovers is the tee-bypass regression (B38): a row is refused unless the
+// bytes the hasher saw equal the bytes written and the sha is non-empty.
+func TestHashCovers(t *testing.T) {
+	if err := hashCovers("abcd", 100, 100); err != nil {
+		t.Errorf("equal counts + non-empty sha should pass: %v", err)
+	}
+	if hashCovers("abcd", 99, 100) == nil {
+		t.Errorf("hashed != written should be refused (a tee bypass)")
+	}
+	if hashCovers("", 100, 100) == nil {
+		t.Errorf("empty sha should be refused")
+	}
+}

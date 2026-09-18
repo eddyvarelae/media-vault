@@ -3,6 +3,7 @@ package audit
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -152,5 +153,104 @@ func TestRunRefusesSymlinkLeaf(t *testing.T) {
 	}
 	if r.Errors != 1 || r.Plausible != 0 {
 		t.Errorf("symlink leaf: errors=%d plausible=%d, want 1 error, 0 plausible", r.Errors, r.Plausible)
+	}
+}
+
+// TestReadTailRefusesOpenSubstitution is the open-substitution regression: the
+// path being a symlink is refused by O_NOFOLLOW, and a file swapped for a
+// different inode between Lstat and open is refused by SameFile.
+func TestReadTailRefusesOpenSubstitution(t *testing.T) {
+	dir := t.TempDir()
+	// (a) the leaf is a symlink → O_NOFOLLOW open fails.
+	real := filepath.Join(dir, "real")
+	if err := os.WriteFile(real, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	li, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := readTail(link, li); err == nil {
+		t.Errorf("readTail followed a symlink leaf; O_NOFOLLOW should refuse it")
+	}
+	// (b) the file at the path is swapped for a different inode after Lstat.
+	swap := filepath.Join(dir, "swap")
+	if err := os.WriteFile(swap, []byte("first"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first, err := os.Lstat(swap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(swap); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(swap, []byte("second"), 0o644); err != nil { // new inode
+		t.Fatal(err)
+	}
+	if _, _, err := readTail(swap, first); err == nil {
+		t.Errorf("readTail read a file that was swapped after Lstat; SameFile should refuse it")
+	}
+}
+
+// A ReaderAt that returns one byte short of any request, to exercise the
+// truncation short-read path deterministically.
+type shortReaderAt struct{}
+
+func (shortReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	return len(p) - 1, io.EOF // a file that shrank mid-read
+}
+
+func TestTailFromShortRead(t *testing.T) {
+	if _, err := tailFrom(shortReaderAt{}, 100); err == nil {
+		t.Errorf("tailFrom accepted a short read; a truncated file must be an error")
+	}
+	// A full ReaderAt returns the tail.
+	data := bytes.Repeat([]byte{0xAB}, 10)
+	got, err := tailFrom(bytes.NewReader(data), int64(len(data)))
+	if err != nil || !bytes.Equal(got, data) {
+		t.Errorf("tailFrom of a whole reader: %v, %v", got, err)
+	}
+}
+
+// TestRunTwinNeedsAValidMediaFile is the twin regression: an empty .SRT is a
+// twin only of media that actually resolves to a regular file under the root —
+// a mere manifest row for a missing video does not make it PLAUSIBLE.
+func TestRunTwinNeedsAValidMediaFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "x.SRT"), nil, 0o644); err != nil { // empty SRT
+		t.Fatal(err)
+	}
+	// x.MP4 has a row but no file on disk → not a valid twin.
+	m, err := manifest.Open(filepath.Join(t.TempDir(), "manifest.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	for _, rel := range []string{"x.SRT", "x.MP4"} {
+		if err := m.Upsert(manifest.Entry{SourceDisk: "cam", SourcePath: rel, DestPath: rel,
+			Size: 1, MtimeNs: 1, SHA256: "x", CopiedAt: 1, Status: "verified"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r, err := Run(context.Background(), m, "cam", root, func(Finding) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Review != 1 { // x.SRT: empty, no VALID twin → REVIEW
+		t.Errorf("empty SRT with only a missing-file video row: review=%d, want 1", r.Review)
+	}
+	if r.Plausible != 0 {
+		t.Errorf("nothing should be plausible: plausible=%d", r.Plausible)
+	}
+	if r.Errors != 1 { // x.MP4 file missing → ERROR
+		t.Errorf("missing video file: errors=%d, want 1", r.Errors)
 	}
 }

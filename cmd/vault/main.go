@@ -850,7 +850,9 @@ func runAudit(ctx context.Context, m *manifest.Manifest, args []string) int {
 	fmt.Printf("\nAUDIT %s: %d rows — %d plausible, %d suspect, %d review, %d skipped, %d error\n",
 		disk, r.Rows, r.Plausible, r.Suspect, r.Review, r.Skipped, r.Errors)
 	if r.Skipped > 0 {
-		// Announce what was not checked as loudly as what was, named by type.
+		// Announce what was not checked as loudly as what was, named by type,
+		// on both the report and the TSV (a SKIPPED row per extension, so a
+		// downstream tool sees the breakdown too — review #63).
 		exts := make([]string, 0, len(r.SkippedExt))
 		for e := range r.SkippedExt {
 			exts = append(exts, e)
@@ -859,6 +861,7 @@ func runAudit(ctx context.Context, m *manifest.Manifest, args []string) int {
 		var parts []string
 		for _, e := range exts {
 			parts = append(parts, fmt.Sprintf("%s:%d", e, r.SkippedExt[e]))
+			fmt.Fprintf(&b, "SKIPPED\t%s\t%d\ttype not audited\n", e, r.SkippedExt[e])
 		}
 		fmt.Printf("SKIPPED (type not audited): %s\n", strings.Join(parts, " "))
 	}

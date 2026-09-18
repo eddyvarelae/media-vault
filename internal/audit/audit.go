@@ -134,12 +134,17 @@ func Run(ctx context.Context, m *manifest.Manifest, disk, dstRoot string, onFind
 	if err != nil {
 		return nil, err
 	}
-	// A first pass over the rows records the stem of every video file, so an
-	// empty .SRT can be judged against whether its media is actually archived.
+	// A first pass records the stem of every video file that ACTUALLY resolves
+	// to a regular file under the root — so an empty .SRT is judged a twin only
+	// against media that is really archived and readable, not against a mere
+	// manifest row for a missing/outside-root/symlinked file (review #63).
 	videoStems := map[string]bool{}
 	for _, e := range rows {
 		rel := relOf(e)
-		if videoExts[strings.ToLower(filepath.Ext(rel))] {
+		if !videoExts[strings.ToLower(filepath.Ext(rel))] {
+			continue
+		}
+		if _, reason, _ := resolve(dstRoot, rel); reason == "" {
 			videoStems[stem(rel)] = true
 		}
 	}
@@ -176,32 +181,9 @@ func Run(ctx context.Context, m *manifest.Manifest, disk, dstRoot string, onFind
 			}
 		}
 
-		// The file must be inside the root, reached through real directories —
-		// a row path can be spelled `../x` or absolute (review #24), or pass
-		// through a symlinked directory. Same guards as restore/repair-dest.
-		if why := copy.Escapes(dstRoot, rel); why != "" {
-			record(ErrorV, "outside the root: "+why)
-			continue
-		}
-		if link, err := scan.SymlinkComponent(dstRoot, rel); err != nil {
-			record(ErrorV, fmt.Sprintf("cannot resolve path: %v", err))
-			continue
-		} else if link != "" {
-			record(ErrorV, "path passes through a symlinked directory ("+link+")")
-			continue
-		}
-		full := filepath.Join(dstRoot, rel)
-		li, err := os.Lstat(full)
-		if err != nil {
-			record(ErrorV, fmt.Sprintf("cannot stat: %v", err))
-			continue
-		}
-		if !li.Mode().IsRegular() {
-			record(ErrorV, "not a regular file")
-			continue
-		}
-		if !copy.Under(dstRoot, full) {
-			record(ErrorV, "resolves outside the root")
+		full, reason, li := resolve(dstRoot, rel)
+		if reason != "" {
+			record(ErrorV, reason)
 			continue
 		}
 		tail, size, err := readTail(full, li)
@@ -209,8 +191,8 @@ func Run(ctx context.Context, m *manifest.Manifest, disk, dstRoot string, onFind
 			record(ErrorV, fmt.Sprintf("cannot read tail: %v", err))
 			continue
 		}
-		v, reason := Classify(rel, size, tail, videoStems[stem(rel)])
-		record(v, reason)
+		v, why := Classify(rel, size, tail, videoStems[stem(rel)])
+		record(v, why)
 	}
 	return res, nil
 }
@@ -220,6 +202,39 @@ func relOf(e manifest.Entry) string {
 		return e.DestPath
 	}
 	return e.SourcePath // verify's rule: an empty dest_path falls back to source_path
+}
+
+// resolve validates rel against dstRoot the way every reader here must: inside
+// the root (a row path can be `../x` or absolute — review #24), reached through
+// real directories (no symlinked component), an existing regular file, and
+// physically under the resolved root. It returns the full path and the file's
+// Lstat info on success (empty reason), or a reason for the ERROR/skip.
+//
+// Residual (as in certify): the O_NOFOLLOW open below binds only the leaf, and
+// this component walk is a check-then-use — a PARENT directory swapped to a
+// symlink between the walk and the open is not caught. Closing that needs
+// os.Root (Go 1.25); backlog.
+func resolve(dstRoot, rel string) (full, reason string, li os.FileInfo) {
+	if why := copy.Escapes(dstRoot, rel); why != "" {
+		return "", "outside the root: " + why, nil
+	}
+	if link, err := scan.SymlinkComponent(dstRoot, rel); err != nil {
+		return "", fmt.Sprintf("cannot resolve path: %v", err), nil
+	} else if link != "" {
+		return "", "path passes through a symlinked directory (" + link + ")", nil
+	}
+	full = filepath.Join(dstRoot, rel)
+	fi, err := os.Lstat(full)
+	if err != nil {
+		return "", fmt.Sprintf("cannot stat: %v", err), nil
+	}
+	if !fi.Mode().IsRegular() {
+		return "", "not a regular file", nil
+	}
+	if !copy.Under(dstRoot, full) {
+		return "", "resolves outside the root", nil
+	}
+	return full, "", fi
 }
 
 // stem is the lowercased basename without its extension, so a .SRT and its
@@ -232,9 +247,8 @@ func stem(rel string) string {
 // readTail returns the last TailBytes of the file (or the whole file when it is
 // shorter) and the size read from the OPEN fd. It opens O_NOFOLLOW (the leaf
 // must not be a symlink), confirms via SameFile that the opened file is the one
-// Lstat saw (no swap between stat and open), sizes the read from the fd, and
-// treats a short read as an error — a file that shrank mid-read is not audited
-// on a partial tail. Read-only.
+// Lstat saw (no swap between stat and open), and sizes the read from the fd.
+// Read-only.
 func readTail(path string, lstatInfo os.FileInfo) ([]byte, int64, error) {
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
@@ -249,20 +263,29 @@ func readTail(path string, lstatInfo os.FileInfo) ([]byte, int64, error) {
 		return nil, 0, fmt.Errorf("file changed between stat and open")
 	}
 	size := fi.Size()
+	tail, err := tailFrom(f, size)
+	return tail, size, err
+}
+
+// tailFrom reads the last min(TailBytes, size) bytes at the fixed offset and
+// treats a short read as an error — a file that shrank mid-read is not audited
+// on a partial tail (review #62/#63). Split out so the short-read path is
+// testable with a ReaderAt that returns fewer bytes than asked.
+func tailFrom(r io.ReaderAt, size int64) ([]byte, error) {
 	n := int64(TailBytes)
 	if n > size {
 		n = size
 	}
 	if n == 0 {
-		return nil, size, nil
+		return nil, nil
 	}
 	buf := make([]byte, n)
-	k, err := f.ReadAt(buf, size-n)
+	k, err := r.ReadAt(buf, size-n)
 	if err != nil && err != io.EOF {
-		return nil, size, err
+		return nil, err
 	}
 	if int64(k) != n {
-		return nil, size, fmt.Errorf("short tail read: got %d of %d bytes", k, n)
+		return nil, fmt.Errorf("short tail read: got %d of %d bytes", k, n)
 	}
-	return buf, size, nil
+	return buf, nil
 }

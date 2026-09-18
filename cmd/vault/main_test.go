@@ -1665,6 +1665,7 @@ func TestAudit(t *testing.T) {
 	cfg, src, dst := t.TempDir(), t.TempDir(), t.TempDir()
 	writeFile(t, filepath.Join(src, "DCIM", "good.JPG"), "a photo\xff\xd9", t0) // ends in the EOI marker
 	writeFile(t, filepath.Join(src, "DCIM", "torn.JPG"), "the whole image\xff\xd9", t0)
+	writeFile(t, filepath.Join(src, "DCIM", "clip.MOV"), "a movie", t0) // a type audit does not check → SKIPPED
 	if _, _, code := vault(t, cfg, "copy", "cam", src, dst); code != 0 {
 		t.Fatalf("copy: exit %d", code)
 	}
@@ -1685,8 +1686,12 @@ func TestAudit(t *testing.T) {
 	if !strings.Contains(out, "SUSPECT") || !strings.Contains(out, "DCIM/torn.JPG") {
 		t.Errorf("audit should flag torn.JPG SUSPECT:\n%s", out)
 	}
-	if !strings.Contains(out, "AUDIT cam: 2 rows — 1 plausible, 1 suspect") {
+	if !strings.Contains(out, "AUDIT cam: 3 rows — 1 plausible, 1 suspect") {
 		t.Errorf("audit summary wrong:\n%s", out)
+	}
+	// The .MOV is a type audit does not check: named, with its ext:count.
+	if !strings.Contains(out, "SKIPPED (type not audited): .mov:1") {
+		t.Errorf("audit should name the skipped type as .mov:1:\n%s", out)
 	}
 	if readFile(t, filepath.Join(cfg, "manifest.db")) != dbBefore {
 		t.Errorf("audit changed the manifest")
@@ -1703,6 +1708,9 @@ func TestAudit(t *testing.T) {
 	}
 	if got := readFile(t, tsv); !strings.Contains(got, "SUSPECT\tDCIM/torn.JPG") {
 		t.Errorf("--tsv missing the suspect row:\n%s", got)
+	}
+	if got := readFile(t, tsv); !strings.Contains(got, "SKIPPED\t.mov\t1") {
+		t.Errorf("--tsv missing the skipped-type count row:\n%s", got)
 	}
 
 	// A whole archive is clean: exit 0 even under --strict.
