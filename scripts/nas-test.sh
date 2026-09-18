@@ -5,7 +5,7 @@
 set -e
 
 # Pinned release tag; override with VAULT_IMAGE=... for a one-off run.
-IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.1}"
+IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.4}"
 SRC=/mnt/@usb/sdc1/Test
 DST=/volume1/docker/vault-nas-test
 CFG=/volume1/docker/vault-nas-config
