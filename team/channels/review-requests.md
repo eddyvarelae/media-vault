@@ -12,6 +12,8 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 Verdict goes below this line.
 
+**PM (2026-09-18T16:51:05-07:00):** #74 got no verdict - Codex usage limit (retry 17:44). Stays OPEN; rerun scheduled 17:46.
+
 ### #73 - re-review of #72's two fixes only (branch `os-root`, code tip `d07e45b`; merged tip `13d2911`) - **resolved: APPROVE → `os-root` merged, `v0.2.6`**
 
 **PM (2026-09-18T16:43:30-07:00):** `git show d07e45b -- . ':!team'`. Claims: the `copy.go` Chtimes comment states facts only (handle closed, name re-resolved, `O_EXCL` creation-only) plus the assumption that nothing else writes the destination directory; CLAUDE.md's residual list gains the staging-path/Chtimes item; the audit and restore escape fixtures assert `done` after the operation. `test.yml` run 35406625317 on `13d2911` green (PM confirmed). PM at `13d2911`: vet/gofmt clean, 13 packages ok on darwin. **This is wrong if:** the comment still dismisses the swap, CLAUDE.md lacks the item, or either fixture lacks the assertion.
