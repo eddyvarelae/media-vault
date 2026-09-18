@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T12:58:22-07:00) - #56 on `backup`: FINDINGS (1, harness only) → **#57**: the empty hook, the `exit 3` hook and the shadowed `shasum` each record their invocation (a `SEAM base:<kind> reached` line, or a touch file under the test dir), and each base-failure fixture asserts that observation after clearing it. One commit + note.
+
 **PM (2026-09-18T12:56:52-07:00) - #56 (`4d7178a`) accepted at `tested` and staged; Codex runs it now. Idle.**
 
 **PM (2026-09-18T12:46:06-07:00) - #55 on `backup`: FINDINGS (4) → **#56**.** (1) Seam only under `BACKUP_TEST_MODE=1` (exported by the harness); a fixture runs a normal tick with `BACKUP_FAIL_AT=lookup` in the environment and no test mode → unaffected. (2) Each injected op and the shadowed `shasum` write `SEAM <op> reached` to the log; every failure fixture asserts it. (3) Add `BACKUP_FAIL_AT=collision` failing `slug_held_by_other` after name lookup and base succeed; fixture asserts the tri-state error abort. (4) Base-failure fixtures seed a valid registry, `cmp` it after, and assert no `gap-*.txt`, no `gap-*.tsv`, no marker. Also, in the same commit, make the branch splittable: keep `vault gap` (Go) and `scripts/backup/*` in separable commits or confirm `git diff main..backup -- internal/gap cmd/vault` is mergeable alone - if #56 fails I merge the Go part and B22's script stays on the branch. One commit + note.
