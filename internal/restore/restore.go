@@ -73,28 +73,50 @@ func Build(ctx context.Context, m *manifest.Manifest, disk, sourcePath, replacem
 	// `../x` or absolute names a file the root does not contain - refused
 	// before anything is read), reached through real directories, a
 	// regular file, its bytes hashed and recorded whatever they are.
+	// Anchor the destination's resolution and read to an os.Root on destRoot
+	// (B43): the walk, the Lstat and the hash all go through the pinned fd, and
+	// os.Root refuses any component that escapes — closing the check-then-read
+	// TOCTOU for the file being replaced (its physical containment is subsumed,
+	// so the old copy.Under check is gone). The write itself is copy.File, which
+	// re-anchors the same way. The claimant scan below stays on os.Stat: its
+	// cross-row identity semantics (review #30/#39) are deliberate.
+	root, err := os.OpenRoot(destRoot)
+	if err != nil {
+		return nil, fmt.Errorf("%w: cannot open destination root %s: %v", ErrRefused, destRoot, err)
+	}
+	defer root.Close()
 	if why := copy.Escapes(destRoot, p.DestRel); why != "" {
 		return nil, fmt.Errorf("%w: %s", ErrRefused, why)
 	}
-	if link, err := scan.SymlinkComponent(destRoot, p.DestRel); err != nil {
-		return nil, err
+	if link, err := scan.SymlinkComponentRoot(root, p.DestRel); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrRefused, err)
 	} else if link != "" {
 		return nil, fmt.Errorf("%w: destination path passes through a symlink (%s)", ErrRefused, filepath.Join(destRoot, link))
 	}
-	fi, err := os.Lstat(p.DestFull)
+	fi, err := root.Lstat(p.DestRel)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("%w: %s does not exist - a missing destination is `vault copy`'s case, not restore's", ErrRefused, p.DestFull)
 		}
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrRefused, err)
 	}
 	if !fi.Mode().IsRegular() {
 		return nil, fmt.Errorf("%w: %s is %s, not a regular file", ErrRefused, p.DestFull, describe(fi))
 	}
-	if !copy.Under(destRoot, p.DestFull) {
-		return nil, fmt.Errorf("%w: %s resolves outside %s", ErrRefused, p.DestFull, destRoot)
+	df, err := root.Open(p.DestRel)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrRefused, err)
 	}
-	if p.CurrentSHA, p.CurrentSize, err = hashFile(ctx, p.DestFull); err != nil {
+	if dfi, serr := df.Stat(); serr != nil {
+		df.Close()
+		return nil, fmt.Errorf("%w: %v", ErrRefused, serr)
+	} else if !os.SameFile(fi, dfi) { // leaf swapped between Lstat and open
+		df.Close()
+		return nil, fmt.Errorf("%w: %s changed between stat and open", ErrRefused, p.DestFull)
+	}
+	p.CurrentSHA, p.CurrentSize, err = hashReader(ctx, df)
+	df.Close()
+	if err != nil {
 		return nil, err
 	}
 	p.RowAttests = p.CurrentSHA == row.SHA256
@@ -210,6 +232,12 @@ func hashFile(ctx context.Context, path string) (string, int64, error) {
 		return "", 0, err
 	}
 	defer f.Close()
+	return hashReader(ctx, f)
+}
+
+// hashReader hashes an already-open file, so the destination can be read through
+// its os.Root handle (B43) rather than re-opened by path.
+func hashReader(ctx context.Context, f io.Reader) (string, int64, error) {
 	h := sha256.New()
 	buf := make([]byte, 1<<20)
 	var n int64

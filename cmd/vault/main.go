@@ -647,9 +647,11 @@ func runCertify(m *manifest.Manifest, configDir string, args []string) {
 	if out == "" {
 		fmt.Println(string(data))
 	} else {
-		// Never through the leaf: CheckOutput looked, but a symlink put
-		// there since would be followed by a plain write (review #16).
-		if err := certify.WriteOutput(out, data); err != nil {
+		// Never through the leaf, and never through a swapped parent:
+		// CheckOutput looked, but a symlink put there since would be followed
+		// by a plain write (review #16). WriteOutput anchors on the checked
+		// directory as a trusted os.Root and addresses the leaf by name (B43).
+		if err := certify.WriteOutput(filepath.Dir(out), filepath.Base(out), data); err != nil {
 			die("write %s: %v", out, err)
 		}
 		fmt.Fprintf(os.Stderr, "Wrote signed certificate: %s\n", out)

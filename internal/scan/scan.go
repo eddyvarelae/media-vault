@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/eddyvarelae/media-vault/internal/manifest"
@@ -462,6 +463,68 @@ func SymlinkComponent(root, rel string) (string, error) {
 	}
 	return "", nil
 }
+
+// SymlinkComponentRoot is SymlinkComponent re-anchored to an os.Root handle
+// (B43): it walks rel's directory components via root.Lstat, relative to the
+// root fd, and returns the first that is a symlink (relative, forward slashes)
+// or "" when every existing component is a real directory. A component that
+// does not exist yet ends the walk. Anchoring to the Root fd means this walk
+// and the caller's subsequent os.Root operation resolve against the same pinned
+// directory even if a parent is renamed under them, and os.Root refuses any
+// component that escapes the root outright. This still refuses an in-root
+// symlinked directory that exists at walk time (os.Root would otherwise follow
+// it, aliasing two spellings to one file); the narrower residual it cannot
+// close is a parent swapped to an in-root symlink in the window after the walk
+// (os.Root follows in-root links) — see the callers' docs.
+func SymlinkComponentRoot(root *os.Root, rel string) (string, error) {
+	dir := filepath.Dir(filepath.Clean(rel))
+	if dir == "." {
+		fireAfterWalk()
+		return "", nil
+	}
+	parts := strings.Split(dir, string(filepath.Separator))
+	cur := ""
+	for i, c := range parts {
+		if cur == "" {
+			cur = c
+		} else {
+			cur += "/" + c
+		}
+		fi, err := root.Lstat(cur)
+		if os.IsNotExist(err) {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return strings.Join(parts[:i+1], "/"), nil
+		}
+	}
+	fireAfterWalk()
+	return "", nil
+}
+
+// testAfterWalk is a test-only seam (nil in production): SymlinkComponentRoot
+// calls it after a clean walk and before returning "", so a test can mutate the
+// tree in the window between the check and the caller's os.Root operation —
+// swapping a parent for a symlink — to exercise os.Root as the atomic escape
+// backstop deterministically. Set and cleared by the binding sites' tests
+// (copy/audit/certify/restore) via SetTestAfterWalk; nil restores production.
+var testAfterWalk func()
+
+// fireAfterWalk runs the seam only under `go test` (testing.Testing()), so a
+// stray non-nil testAfterWalk can never alter a production run even in theory.
+func fireAfterWalk() {
+	if testAfterWalk != nil && testing.Testing() {
+		testAfterWalk()
+	}
+}
+
+// SetTestAfterWalk installs (or, with nil, clears) the after-walk test seam.
+// It exists only for the B43 parent-swap regressions in the binding packages,
+// which cannot reach an unexported var across package boundaries.
+func SetTestAfterWalk(f func()) { testAfterWalk = f }
 
 func renameWithMtimeYear(rel string, mtimeNs int64) string {
 	year := time.Unix(0, mtimeNs).Year()
