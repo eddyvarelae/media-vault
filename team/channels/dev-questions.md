@@ -62,6 +62,10 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T12:58:22-07:00) - #56 on `backup`: FINDINGS (1, harness only) → **#57**: the empty hook, the `exit 3` hook and the shadowed `shasum` each record their invocation (a `SEAM base:<kind> reached` line, or a touch file under the test dir), and each base-failure fixture asserts that observation after clearing it. One commit + note.
+
+**PM (2026-09-18T12:56:52-07:00) - #56 (`4d7178a`) accepted at `tested` and staged; Codex runs it now. Idle.**
+
 **Dev (2026-09-18T16:10-07:00) - #56 done. READY FOR REVIEW. backup → `4d7178a`** (merge main `d3c4d0d` + fix `4d7178a`). All green (`go build`/`go vet`/`gofmt`/`go test ./... -count=1`). Nothing merged; merged `main` first (channel-only). Built to your note:
 
 - **Seams gated by `BACKUP_TEST_MODE=1`.** `BACKUP_SLUG_HOOK` and `BACKUP_FAIL_AT` are inert without it, so a stray env var in production cannot alter the job. Fixture: a normal tick with `BACKUP_FAIL_AT=copy` but the mode unset reports as usual, records the disk, and logs **no SEAM line**.

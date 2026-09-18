@@ -6,6 +6,22 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #56 - re-review of #55's fixes only (branch `backup`, code tip `4d7178a`) - **resolved: FINDINGS (1, harness), accepted → Dev → request #57**
+
+**PM (2026-09-18T12:56:52-07:00):** `git show 4d7178a -- . ':!team'` (fix commit after the pre-#56 `main` merge, if any). Claims: the failure seam is honored only when `BACKUP_TEST_MODE=1` is exported by the harness, with a fixture proving a normal tick ignores `BACKUP_FAIL_AT`; every injected operation and the shadowed `shasum` log `SEAM <op> reached` and each fixture asserts it; a `collision` seam fails `slug_held_by_other` after name lookup and base succeed and the fixture asserts the tri-state error abort; base-failure fixtures start from a seeded registry, `cmp` it after, and assert no `gap-*.txt`, no `gap-*.tsv`, no marker; the Go part (`internal/gap`, `cmd/vault`) is mergeable alone. PM at `4d7178a`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** the seam can act without test mode; any fixture passes without its `SEAM … reached` line; the collision seam fires before the base computation; or a base-failure fixture can pass with a TSV left behind.
+
+Verdict goes below this line.
+
+**Reviewer (2026-09-18):** FINDINGS — request #56, fixes only: `git show 4d7178a -- . ':!team'`. Source references below are to pinned commit `4d7178a`.
+
+1. **The base-failure fixtures still pass without proving their injected operation was reached.** `scripts/test/run-backup.sh:450-452` creates an empty hook, an `exit 3` hook, and an `exit 1` shadowed `shasum`; none emits a `SEAM … reached` line. Their assertions at lines 453-461 check only non-zero exit, unchanged registry bytes, and absent outputs. An earlier abort, such as a failed name lookup before `slug()` is called, satisfies all those assertions without invoking either hook or the shadowed `shasum`. This directly falsifies #56's explicit reachability claim. Have each hook and the shadowed executable record its own invocation, and assert that observation separately for each fixture after clearing the observation log.
+
+Static trace of the other fixes: production lines 80-81 and 102 gate both seam mechanisms on `BACKUP_TEST_MODE=1`; the harness exports it and overrides it to empty for the normal-tick fixture. The operation loop asserts `SEAM <op> reached` for lookup, held, copy, and rename. The collision seam is named `held` in this commit; it is reached through `slug_held_by_other` only after successful name lookup and non-empty base computation (production lines 147-156). The base fixtures now seed and compare the registry, and `nowritten` checks both report extensions and unknown-volume markers.
+
+Validation: `bash -n` passed for both committed shell files. No scripts or Go tests executed. The specified fix diff contains no Go changes, so standalone Go mergeability is not independently established by this fixes-only review. Only `team/channels/review-requests.md` modified.
+
+**PM (2026-09-18T12:58:22-07:00):** Accepted - one harness gap left: the three base-failure hooks (empty hook, `exit 3` hook, shadowed `shasum`) must each record their own invocation (`SEAM base:<kind> reached` in the log, or a touch file) and the fixture asserts it after clearing. Everything else in #56 traced correct. → **#57**, the split fallback stays ready.
+
 ### #55 - re-review of #54's fixes only (branch `backup`, code tip `d49ce54`) - **resolved: FINDINGS (4), accepted → Dev → request #56**
 
 **PM (2026-09-18T10:49:17-07:00):** `git show d49ce54 -- . ':!team'` (fix commit after the pre-#55 `main` merge, if any). Claims: `slug()` computes each component into a variable with status and non-emptiness checked before the final print (fixture: `shasum` shadowed to fail → abort, registry untouched); a `BACKUP_FAIL_AT=<lookup|copy|rename>` seam, honored only under the harness, makes exactly that operation fail after `check_slugs` passed, and each fixture asserts the seam was reached; every failure fixture asserts non-zero exit, registry byte-identical, no report/marker written; real tab and interior-newline name fixtures beside the trailing-newline one; tri-state labels as the code comments have them. PM at `d49ce54`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** any component failure in `slug()` can still print; the seam can be triggered outside the harness; any fixture passes without reaching its operation; or a tab/newline name can be recorded.
