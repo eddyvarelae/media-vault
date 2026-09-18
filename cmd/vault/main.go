@@ -1031,7 +1031,10 @@ func human(n int64) string {
 // --prefix --dry-run) is a prefix, not a mode switch (review #27). The
 // per-command sets below are exactly the value-taking flags each parser
 // consumes (scan/copy/move: --prefix/--rule/--on-collision; dedup:
-// --min-size; the rest none); keep them in step with the parsers.
+// --min-size; certify: --root; the rest none); keep them in step with the
+// parsers, or a value that happens to read --dry-run (e.g. certify --root
+// --dry-run) is misread as the mode switch and the manifest opens
+// read-only (review #46).
 func dryRunRequested(cmd string, args []string) bool {
 	var valueFlags map[string]bool
 	switch cmd {
@@ -1039,6 +1042,8 @@ func dryRunRequested(cmd string, args []string) bool {
 		valueFlags = map[string]bool{"--prefix": true, "--rule": true, "--on-collision": true}
 	case "dedup":
 		valueFlags = map[string]bool{"--min-size": true}
+	case "certify":
+		valueFlags = map[string]bool{"--root": true}
 	}
 	for i := 0; i < len(args); i++ {
 		if valueFlags[args[i]] {

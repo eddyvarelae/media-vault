@@ -1411,6 +1411,8 @@ func TestDryRunRequested(t *testing.T) {
 		{"dedup", []string{"--min-size", "--dry-run"}, false},      // value of --min-size (the #37 fix)
 		{"dedup", []string{"--min-size", "10", "--dry-run"}, true}, // a real (nonsense) dry-run
 		{"repair-dest", []string{"cam", "d", "--dry-run"}, true},
+		{"certify", []string{"sony", "--root", "--dry-run"}, false}, // value of --root, not a mode switch (review #46)
+		{"certify", []string{"sony", "out.json", "--root", "/x"}, false},
 	}
 	for _, c := range cases {
 		if got := dryRunRequested(c.cmd, c.args); got != c.want {
