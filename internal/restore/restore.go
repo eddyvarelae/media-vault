@@ -193,10 +193,6 @@ func Apply(ctx context.Context, m *manifest.Manifest, p *Plan, destRoot string) 
 	return row, nil
 }
 
-func physKey(root, rel string) string {
-	return strings.ToLower(filepath.Clean(filepath.Join(root, rel)))
-}
-
 func describe(fi os.FileInfo) string {
 	switch {
 	case fi.Mode()&os.ModeSymlink != 0:

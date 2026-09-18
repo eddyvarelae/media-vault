@@ -217,10 +217,14 @@ func TestApplyRewritesOnlyTheByteFacts(t *testing.T) {
 	}
 }
 
-// Review #39: claimants are by file identity only - no spelling fallback.
-// A row whose file is not under this root (ENOENT) is not a claimant; a row
-// whose file cannot be stat'ed for another reason (permission/I/O) leaves
-// it unknown, so the restore is refused rather than risk an unseen alias.
+// Review #39/#42: claimants are by file identity only, no spelling
+// fallback. This builds the same-disk/different-root case the fix is about:
+// a same-disk sibling whose folded-equal path is absent under the selected
+// root. On a case-sensitive filesystem it is ENOENT -> not a claimant and
+// the restore proceeds (err == nil, zero claimants). On a case-folding one
+// the spelling resolves to the target, so it stays a claimant (via
+// SameFile). Reintroducing the old same-disk physKey fallback would make
+// the case-sensitive branch refuse - which this catches.
 func TestBuildClaimantsIdentityOnly(t *testing.T) {
 	m := open(t)
 	root, outside := t.TempDir(), t.TempDir()
@@ -230,22 +234,42 @@ func TestBuildClaimantsIdentityOnly(t *testing.T) {
 		SHA256: sha("torn"), CopiedAt: 1, VerifiedAt: 2, Status: "verified"}); err != nil {
 		t.Fatal(err)
 	}
-	// A folded-equal row of another disk whose file is simply not under this
-	// root: ENOENT, so not a claimant (no spelling guess).
-	if err := m.Upsert(manifest.Entry{SourceDisk: "B", SourcePath: "b", DestPath: "gone/elsewhere.JPG", Size: 4, MtimeNs: 1,
-		SHA256: sha("torn"), CopiedAt: 1, Status: "deduped"}); err != nil {
+	// A SAME-DISK sibling, folded-equal to the target (real/X.JPG), that
+	// does not exist on disk under its own spelling.
+	if err := m.Upsert(manifest.Entry{SourceDisk: "A", SourcePath: "sib", DestPath: "real/X.JPG", Size: 4, MtimeNs: 1,
+		SHA256: sha("torn"), CopiedAt: 1, Status: "mismatch"}); err != nil {
 		t.Fatal(err)
 	}
+	_, foldErr := os.Stat(filepath.Join(root, "real", "X.JPG"))
+	caseInsensitive := foldErr == nil
+
 	p, err := Build(context.Background(), m, "A", "x.JPG", filepath.Join(outside, "good.JPG"), root, sha("good"))
-	// No claimant, and the row is not refused for claimants (it is
-	// AlreadyThere=false, so it would proceed past this check).
-	if errors.Is(err, ErrRefused) && len(p.Claimants) > 0 {
-		t.Errorf("an ENOENT row was flagged as a claimant: %+v", p.Claimants)
+	sib := false
+	for _, c := range p.Claimants {
+		if c.SourceDisk == "A" && c.SourcePath == "sib" {
+			sib = true
+		}
+	}
+	if caseInsensitive {
+		// real/X.JPG resolves to A's file: a real alias, still a claimant.
+		if !errors.Is(err, ErrRefused) || !sib {
+			t.Errorf("case-insensitive: the folded sibling should be a claimant via SameFile; sib=%v err=%v", sib, err)
+		}
+	} else {
+		// real/X.JPG is ENOENT under the root: not a claimant, no spelling
+		// guess, the restore proceeds.
+		if err != nil {
+			t.Errorf("case-sensitive: a folded-but-absent same-disk sibling must not refuse: %v", err)
+		}
+		if sib || len(p.Claimants) != 0 {
+			t.Errorf("case-sensitive: expected zero claimants, got %+v", p.Claimants)
+		}
 	}
 
 	// A row whose file cannot be stat'ed for a reason other than ENOENT:
-	// make its parent directory unreadable so stat returns EACCES. The
-	// restore is then refused, naming the row.
+	// its parent directory is unreadable, so stat returns EACCES. The
+	// restore is refused, naming the row. The skip is decided by a direct
+	// stat probe, so a Build that ignored the error is still caught.
 	blocked := filepath.Join(root, "blocked")
 	if err := os.MkdirAll(blocked, 0o755); err != nil {
 		t.Fatal(err)
@@ -259,11 +283,8 @@ func TestBuildClaimantsIdentityOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(blocked, 0o755) })
-	// Only assert refusal if this environment actually denies the stat
-	// (not root); the skip is decided by a direct probe, not by Build's
-	// result, so a Build that wrongly IGNORES the error is still caught.
 	if _, probe := os.Stat(filepath.Join(blocked, "c.JPG")); probe == nil || os.IsNotExist(probe) {
-		t.Skip("this environment can stat under a 0000 dir (running as root?); the EACCES path is not exercised")
+		return // running as root or the FS allows the stat; the EACCES path is not exercisable here
 	}
 	_, err = Build(context.Background(), m, "A", "x.JPG", filepath.Join(outside, "good.JPG"), root, sha("good"))
 	if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "cannot rule out claimant C:c") {
