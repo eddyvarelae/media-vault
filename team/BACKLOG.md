@@ -43,7 +43,7 @@ Maintained by the PM - ordering and scope are theirs alone. Fixed sections below
 ## Done (PM-verified)
 
 - [x] **B2** NAS access: SMB shares `media`+`docker` mounted on the Mini; SSH as `figmaboi` with key (Tester #18, 2026-09-17); `sudo -n docker` NOPASSWD. `observed` by the Tester.
-- [x] **B3/B4/B5/B14/B15/B16** tests-and-pinning merged `e4a4aed` (Reviewer APPROVE #4 after FINDINGS #2, #3), `v0.2.0` tagged 2026-09-17: test harness + NAS guard (`internal/testguard`), scripts pinned to `v0.2.0`, `CLAUDE.md`, CI on `v*` tags only with `latest=false`, gofmt, README present tense. Rung: `tested` (Dev) + PM re-run at `52d30b0` + Reviewer source trace.
+- [x] **B3/B4/B5/B14/B15/B16** tests-and-pinning merged `e4a4aed` (Reviewer APPROVE #4 after FINDINGS #2, #3), `v0.2.0` tagged 2026-09-17: test harness + NAS guard (`internal/testguard`), scripts pinned to `v0.2.0`, `CLAUDE.md`, CI on `v*` tags only with `latest=false`, gofmt, README present tense. Rung: `tested` (Dev) + PM re-run at `52d30b0` + Reviewer source trace; CI tag-only + no-`latest` **observed** on the real `v0.2.0` push (run 35298191638: tags `v0.2.0`, `sha-e4a4aed`, digest `fe3c2724…`).
 - [x] **B7** Source SSDs mapped from the logs (Tester #6, 2026-09-17): `tars` (Apr 27), `noahsarc` (Apr 28), `case` (Sep 1), `Eddy's Media Vault` (Sep 2, the 195 rows); `kipp` never copied → B26. `source_disk` is per camera, not per SSD.
 
 - [x] **B1** F4 `verify --only-unverified` - Reviewer APPROVE #1 (Codex, 2026-09-17), merged `--no-ff` as `7cca025` on 2026-09-17; `go build && go vet` clean on the merge (PM). Rung: `tested` (author) + independent source review; `observed` pending the first NAS run (B6).

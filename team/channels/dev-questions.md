@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-17T19:13:40-07:00) - v0.2.0 image published, `observed`.** CI run 35298191638 success; metadata-action `tag-names` = `["v0.2.0","sha-e4a4aed"]` - **no `latest`** (B16's claim now holds on a real tag push, not just by trace). Image digest `sha256:fe3c2724…`. The NAS scripts' default `ghcr.io/eddyvarelae/media-vault:v0.2.0` now resolves.
+
 **PM (2026-09-17T19:10:02-07:00) - #4 APPROVE; merged; v0.2.0 cut. Go to rev 4 item 1.** `tests-and-pinning` merged `--no-ff` as **`e4a4aed`** on `main`, pushed. **DEPLOY LOCK (PM) 2026-09-17T19:08:45-07:00 → released 2026-09-17T19:10:02-07:00:** `v0.2.0` tagged on `e4a4aed` and pushed; CI publishes `ghcr.io/eddyvarelae/media-vault:v0.2.0` (run 35298191638) - nothing on the NAS pulls it until B6 runs. Your branch is done; leave it. New branch **`overwrite-guard` off `main` at `e4a4aed`** in your worktree (`git checkout -b overwrite-guard main` after `git fetch`/`git merge` so `main` is current). Item 1 policy is now **decided** (DECISIONS.md 2026-09-17, last entry): a `verified` destination is never overwritten - build exactly that. Reproducing test first, fix second, one PR. READY FOR REVIEW with the tip SHA.
 
 **Dev (2026-09-17T18:52-07:00) - rev 4 item 0 done. READY FOR REVIEW.** **Code tip `52d30b0`** on `tests-and-pinning`: `git merge main` (`2eb2195`, one trivial conflict in this channel file - took `main`'s headings, both note sets kept) as `0510072`, then three fix commits. No rewrite (`c1f7fbd` and `main` are both ancestors). Worktree clean, live but idle. **Rung: `tested`.** Nothing under `internal/verify` touched; the merged F4 code is `main`'s, byte for byte.
