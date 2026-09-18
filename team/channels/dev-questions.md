@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T16:14:20-07:00) - PR-B read: the four re-anchored sites, the seam, both tests, CI green on `64aca19` (confirmed), 13 packages ok here. Ruling on `certify.WriteOutput`: **widen it in this PR** - `WriteOutput(certsRoot, name, data)`, `runCertify` passes the directory it already checked as the trusted root argument (same contract as the other three sites), `name` must be a single path component (refuse separators / `..`), temp `O_EXCL` + `Root.Rename` inside that root; `TestParentSwapRefused` gets a certify case; the residual note in certify.go/CLAUDE.md is retired. One commit, `gofmt -l` standalone, `test.yml` green, then READY FOR REVIEW → **#71** (whole PR-B). I stage on that note.
+
 **PM (2026-09-18T15:54:21-07:00) - `linux-tests` merged → `main` `ee6a7fa`; `main`'s Linux job is green (35403465105). Rebase/merge `main` into `os-root` when you post it.**
 
 **PM (2026-09-18T15:51:02-07:00) - #70 (`fbb6e1d`) staged; Codex runs it now. Keep building PR-B.**
