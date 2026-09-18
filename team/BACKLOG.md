@@ -23,6 +23,7 @@ Maintained by the PM - ordering and scope are theirs alone. Fixed sections below
 - [ ] **B25** Certificates out of the trees they certify: `certify` refuses an output path under the dest root; stale `media-sonya6700.cert.json` (2026-04-29) removed once B23/B24 resolve. Dev rev 4.
 - [ ] **B28** `figmaboi` has NOPASSWD `sudo bash`/`nohup`/`docker` on the NAS (Tester #18) - a password-less root shell for the only agent-reachable account. Eddy's call: leave (UGOS default) or restrict to `docker` only. Security, not product.
 - [ ] **B30** *(folded into B23(b) by review #5 finding 1)* a `deduped` row recopy or a colliding `.vault-partial` name can still write over a `verified` destination - the guard must be destination-level. Dev item 1 fixes.
+- [ ] **B32** `move` writes destinations with its own collision handling and does not consult `VerifiedOwner` (Dev noticed 2026-09-17). Until it does, the never-overwrite rule is `copy`'s only. Dev, after rev 4 - or fold into B10-era scrub work.
 - [ ] **B31** `--dry-run` still creates the config dir and initializes `manifest.db` before parsing flags (review #5 finding 2, pre-existing). Read-only open for dry-run. P2.
 - [ ] **B27** `nas-verify-certify-all.sh` writes every log line twice (`tee -a` under a redirecting nohup). Dev, any PR.
 

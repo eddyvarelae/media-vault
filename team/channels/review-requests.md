@@ -6,6 +6,19 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #6 - re-review of #5's fixes only (branch `overwrite-guard`, code tip `c03eb68`)
+
+**PM (2026-09-17T20:06:14-07:00):** Check the three #5 findings are closed, nothing else. Diff `git diff 3f13325..c03eb68 -- . ':!team'` (2 commits after Dev's merge of `main` at `3f13325`; 6 files, +330/-14). Dev's note: `team/channels/dev-questions.md`, Dev 2026-09-17T20:05 (worktree `~/Projects/media-vault-dev`, commit `cb927fd`). PM independently at `c03eb68` in a detached checkout: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all six test packages. Note: `internal/manifest/manifest.go` now changes (a new read-only query `VerifiedOwner`); #5's claim 5 no longer holds and that is expected.
+
+**Claims, one per #5 finding:**
+1. (#5-1) Before admitting any task to `ToCopy` or `ToRecopy`, `scan.Build` checks both paths `copy.File` writes - `DstRel + ".vault-partial"` and `DstRel` - against `manifest.VerifiedOwner` (any disk, `status = verified`); a hit lands in `Plan.DstOwned`, is never written under any policy, is reported, named in `INCOMPLETE:`, exit 1. The check runs after the collision policy so a renamed path is what gets checked. Regression cases: the Reviewer's A/B deduped recopy (both policies, with and without `--dedupe-content`), a new file colliding with a verified `.vault-partial`.
+2. (#5-2) `CLAUDE.md`: `--dry-run` writes no archive file and no manifest row; config/manifest initialization is stated as pre-existing.
+3. (#5-3) `reportVerifiedChanged` runs unconditionally before the no-op return; zero-count and retouched-only outputs are tested.
+
+**This is wrong if:** any write site reachable from `runCopy` (`copy.File` and its staging file) can receive a path that `VerifiedOwner` would have refused - trace every task source into `ToCopy`/`ToRecopy`/`Deduped` and every rename/dedupe path rewrite that happens *after* the check; `VerifiedOwner` misses a verified row because of dest-path spelling (leading `./`, trailing slash, case) that the writer would still hit; the regression tests pass with the `VerifiedOwner` calls removed (say which assertion catches it); the reporter can still be skipped on any path; or `CLAUDE.md` still claims dry-run touches nothing.
+
+Verdict goes below this line.
+
 ### #5 - B23(b) overwrite guard (branch `overwrite-guard`, code tip `a6c74a5`) - **resolved: FINDINGS (3), all accepted → Dev item 1 fixes → request #6**
 
 **PM (2026-09-17T19:57:17-07:00):** Review `git diff e4a4aed..a6c74a5 -- . ':!team'` (2 commits: `01d373c` reproduction test, `a6c74a5` fix; 6 files, +274/-52: `cmd/vault/main.go`, `cmd/vault/main_test.go`, `internal/scan/scan.go`, `internal/scan/scan_test.go`, `CLAUDE.md`, `README.md`). Context: on 2026-09-01 `copy` replaced 2,668 `verified` destinations in place because the same `(source_disk, source_path)` arrived with different content (Tester #5). Decision (DECISIONS.md 2026-09-17): a `verified` destination is never overwritten. Dev's evidence note: `team/channels/dev-questions.md`, Dev 2026-09-17T19:20 (in the `~/Projects/media-vault-dev` worktree, commit `9f4aa14`). PM independently at `a6c74a5` in a detached checkout: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all six test packages.
