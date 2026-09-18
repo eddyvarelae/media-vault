@@ -70,6 +70,16 @@ type Plan struct {
 	DstCollisions    []FileTask // dst file already exists (would overwrite)
 	BytesToCopy      int64
 	BytesToRecopy    int64
+
+	// VerifiedChanged holds files whose row is `verified` but whose source
+	// now carries different content. They are never copied: the archived
+	// bytes are what a certificate attested, and the manifest keys on
+	// (source_disk, source_path), so there is no second row for the new
+	// bytes to live in. Retouched counts the harmless cousin - same content,
+	// new mtime - which is skipped like an unchanged file.
+	VerifiedChanged      []FileTask
+	BytesVerifiedChanged int64
+	Retouched            int
 }
 
 type CollisionStrategy int
@@ -202,6 +212,28 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 		if entry != nil {
 			if entry.Size == task.Size && entry.MtimeNs == task.MtimeNs {
 				p.SkipCount++
+				return nil
+			}
+			if entry.Status == "verified" {
+				// A verified destination is never overwritten (B23(b): a
+				// second card carried different photos under the same DCIM
+				// names, and recopy replaced 2,668 certified files in place).
+				// Same size is not proof of change - a touched file hashes
+				// equal and is simply skipped - but any difference in bytes
+				// is a collision, and one the collision policy cannot rename
+				// its way out of: the row for this (disk, path) is taken.
+				if entry.Size == task.Size {
+					sum, hErr := hashFile(ctx, path)
+					if hErr != nil {
+						return hErr
+					}
+					if sum == entry.SHA256 {
+						p.Retouched++
+						return nil
+					}
+				}
+				p.VerifiedChanged = append(p.VerifiedChanged, task)
+				p.BytesVerifiedChanged += task.Size
 				return nil
 			}
 			p.ToRecopy = append(p.ToRecopy, task)

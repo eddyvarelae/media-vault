@@ -30,7 +30,7 @@ runs them, so `go test ./...` is still the one command.
 |---|---|
 | `cmd/vault/main.go` | Hand-rolled arg parsing (`parseScanFlags` style — no flag frameworks), one `runX` per command, `die()` for fatal errors |
 | `internal/manifest` | SQLite schema + queries. Single writer per config dir (WAL, `busy_timeout`). Rows keyed `(source_disk, source_path)` |
-| `internal/scan` | Walk source, diff against manifest and destination → `Plan{ToCopy, ToRecopy, SkipCount, Deduped, DstCollisions}` |
+| `internal/scan` | Walk source, diff against manifest and destination → `Plan{ToCopy, ToRecopy, SkipCount, Deduped, DstCollisions, VerifiedChanged, Retouched}` |
 | `internal/copy` | One file: stream + sha256 → `<dst>.vault-partial`, fsync, chtimes, rename. A failed copy leaves no partial |
 | `internal/verify` | Re-hash destination rows → `verified` / `mismatch`; missing rows counted, not touched |
 | `internal/certify` | Refuses unless every row is `verified`; signs with `$VAULT_CONFIG/key.pem` (created on first use, mode 600) |
@@ -45,6 +45,18 @@ archived under another row; `dest_path` points at it) and `inventoried`
 (NAS-side row, no `dest_path`). `copy` and recopy write `copied`; only
 `verify` promotes. `certify` requires **every** row for the disk to be
 `verified` — the fast route to that is verifying, never editing status.
+
+Recopy is for rows that are **not** `verified` (`copied`, `mismatch`): a
+changed source replaces the destination and the row takes the new hash. A
+`verified` destination is never overwritten (B23(b), decided 2026-09-17):
+same `(source_disk, source_path)` with different bytes is `VerifiedChanged`
+— the archived copy and its row stay as certified, the file is skipped
+under every `--on-collision` policy, counted in `INCOMPLETE:`, exit 1. The
+manifest keys on `(source_disk, source_path)`, so there is no second row
+for the new bytes under this disk name; copy them under their own `<disk>`
+with `--on-collision rename-mtime-year` and they land beside the originals.
+Same size with a new mtime is hashed first: identical content is
+`Retouched` and skipped like an unchanged file, no row written.
 
 The one invariant: the manifest never silently holds content it has no row
 for, and never claims a row it cannot back with a hash.
@@ -71,8 +83,8 @@ command:
 
 | Command | Exits 1 when | Exits 0 even though |
 |---|---|---|
-| `scan` | scan error (unreadable source, cancelled) | collisions/recopies are predicted — it only reports |
-| `copy` | run finished `INCOMPLETE:` — any file failed, any unresolved destination collision, any intra-run duplicate left unarchived (stderr names which); interrupted between files; `die` on scan or manifest-write error | no-op, `--dry-run` (even with predicted collisions) |
+| `scan` | scan error (unreadable source, cancelled) | collisions/recopies/verified-changed are predicted — it only reports |
+| `copy` | run finished `INCOMPLETE:` — any file failed, any unresolved destination collision, any file whose verified archive copy holds different content (kept, never overwritten), any intra-run duplicate left unarchived (stderr names which); interrupted between files; `die` on scan or manifest-write error | no-op (including only retouched files), `--dry-run` (even with predicted collisions or verified-changed files) |
 | `verify` | any mismatch, missing, or read error; `die` on cancel | — |
 | `certify` | any row not `verified` (`Cannot certify: …`); no rows for the disk; key/sign/marshal/write error | — |
 | `inventory` | `die` on walk error | per-file hash errors — counted in `Errors:`, exit 0 |
@@ -106,6 +118,9 @@ number nobody can recompute is a finding, not a fact.
 
 - Never write to a source disk. Containers mount `/sources` read-only.
 - Atomic destination writes only (`.vault-partial` → fsync → rename).
+- A `verified` destination is never overwritten. Not by recopy, not by any
+  collision policy. The check lives in `scan.Build`, so `scan` and `copy`
+  agree.
 - One `vault` process per config dir; read-only queries need `?mode=ro`.
 - Nothing secret in the repo. `vault-config/` is gitignored.
 - Comments explain *why*, not what. Match the surrounding style; no new frameworks.

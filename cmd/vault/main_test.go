@@ -248,12 +248,40 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatalf("certify before verify: exit %d, want 1", code)
 	}
 
+	// Recopy: the source changes size AND mtime while its row is still
+	// `copied` (nothing has attested the destination yet), so scan plans
+	// exactly one recopy and copy replaces the destination; the row takes
+	// the new hash and mtime, the other rows do not move.
+	writeFile(t, filepath.Join(src, "DCIM", "C0001.MP4"), "clip one, re-exported", t0.Add(time.Hour))
+	out, _, code = vault(t, cfg, "scan", "cam", src, dst, "--prefix", "DCIM", "--rule", "MP4=Videos", "--rule", "JPG=Photos")
+	if code != 0 || !strings.Contains(out, "Files to recopy:  1") || !strings.Contains(out, "Files to skip:    2") {
+		t.Fatalf("scan after change: exit %d", code)
+	}
+	out, _, code = vault(t, cfg, "copy", "cam", src, dst, "--prefix", "DCIM", "--rule", "MP4=Videos", "--rule", "JPG=Photos")
+	if code != 0 || !strings.Contains(out, "Done. Copied 1/1 files") {
+		t.Fatalf("recopy: exit %d", code)
+	}
+	if got := readFile(t, filepath.Join(dst, "Videos", "C0001.MP4")); got != "clip one, re-exported" {
+		t.Errorf("recopied content = %q", got)
+	}
+	recopied := rowsOf(t, cfg, "cam")
+	wantRow(t, recopied, "DCIM/C0001.MP4", "Videos/C0001.MP4", "clip one, re-exported", "copied")
+	if recopied["DCIM/C0001.MP4"].MtimeNs != t0.Add(time.Hour).UnixNano() {
+		t.Errorf("recopied row mtime = %d, want the new source mtime", recopied["DCIM/C0001.MP4"].MtimeNs)
+	}
+	for _, src := range []string{"DCIM/C0002.MP4", "DCIM/C0001.JPG"} {
+		if !reflect.DeepEqual(recopied[src], rows[src]) {
+			t.Errorf("recopy touched an unrelated row %s: %+v vs %+v", src, recopied[src], rows[src])
+		}
+	}
+	rows = recopied
+
 	out, _, code = vault(t, cfg, "verify", "cam", dst)
 	if code != 0 || !strings.Contains(out, "Verified: 3   Mismatch: 0   Missing: 0   Errors: 0") {
 		t.Fatalf("verify: exit %d", code)
 	}
 	verified := rowsOf(t, cfg, "cam")
-	wantRow(t, verified, "DCIM/C0001.MP4", "Videos/C0001.MP4", "clip one", "verified")
+	wantRow(t, verified, "DCIM/C0001.MP4", "Videos/C0001.MP4", "clip one, re-exported", "verified")
 	wantRow(t, verified, "DCIM/C0002.MP4", "Videos/C0002.MP4", "clip two", "verified")
 	wantRow(t, verified, "DCIM/C0001.JPG", "Photos/C0001.JPG", "still", "verified")
 	for src, e := range verified {
@@ -276,7 +304,7 @@ func TestRoundTrip(t *testing.T) {
 	if err := json.Unmarshal([]byte(readFile(t, certPath)), &cert); err != nil {
 		t.Fatal(err)
 	}
-	if cert.FileCount != 3 || cert.TotalBytes != int64(len("clip one")+len("clip two")+len("still")) || cert.SourceDisk != "cam" {
+	if cert.FileCount != 3 || cert.TotalBytes != int64(len("clip one, re-exported")+len("clip two")+len("still")) || cert.SourceDisk != "cam" {
 		t.Errorf("cert = %+v", cert)
 	}
 	if len(cert.Files) != len(verified) {
@@ -300,52 +328,45 @@ func TestRoundTrip(t *testing.T) {
 		t.Errorf("signing key should live under VAULT_CONFIG: %v", err)
 	}
 
-	// Recopy: the source changes size AND mtime; scan plans exactly one
-	// recopy, copy replaces the destination, and the row drops back to
-	// `copied` so certify refuses again until verify re-promotes it.
-	writeFile(t, filepath.Join(src, "DCIM", "C0001.MP4"), "clip one, re-exported", t0.Add(time.Hour))
-	out, _, code = vault(t, cfg, "scan", "cam", src, dst, "--prefix", "DCIM", "--rule", "MP4=Videos", "--rule", "JPG=Photos")
-	if code != 0 || !strings.Contains(out, "Files to recopy:  1") || !strings.Contains(out, "Files to skip:    2") {
-		t.Fatalf("scan after change: exit %d", code)
-	}
-	out, _, code = vault(t, cfg, "copy", "cam", src, dst, "--prefix", "DCIM", "--rule", "MP4=Videos", "--rule", "JPG=Photos")
-	if code != 0 || !strings.Contains(out, "Done. Copied 1/1 files") {
-		t.Fatalf("recopy: exit %d", code)
-	}
-	if got := readFile(t, filepath.Join(dst, "Videos", "C0001.MP4")); got != "clip one, re-exported" {
-		t.Errorf("recopied content = %q", got)
-	}
-	recopied := rowsOf(t, cfg, "cam")
-	wantRow(t, recopied, "DCIM/C0001.MP4", "Videos/C0001.MP4", "clip one, re-exported", "copied")
-	if recopied["DCIM/C0001.MP4"].MtimeNs != t0.Add(time.Hour).UnixNano() {
-		t.Errorf("recopied row mtime = %d, want the new source mtime", recopied["DCIM/C0001.MP4"].MtimeNs)
-	}
-	for _, src := range []string{"DCIM/C0002.MP4", "DCIM/C0001.JPG"} {
-		if !reflect.DeepEqual(recopied[src], verified[src]) {
-			t.Errorf("recopy touched an unrelated row %s: %+v vs %+v", src, recopied[src], verified[src])
-		}
-	}
-	if _, _, code = vault(t, cfg, "certify", "cam"); code != 1 {
-		t.Fatalf("certify after recopy: exit %d, want 1", code)
-	}
-	if _, _, code = vault(t, cfg, "verify", "cam", dst); code != 0 {
-		t.Fatalf("verify after recopy: exit %d", code)
-	}
-	reverified := rowsOf(t, cfg, "cam")
-	e := wantRow(t, reverified, "DCIM/C0001.MP4", "Videos/C0001.MP4", "clip one, re-exported", "verified")
-	if e.VerifiedAt <= verified["DCIM/C0001.MP4"].VerifiedAt {
-		t.Errorf("re-verify did not advance verified_at: %d → %d", verified["DCIM/C0001.MP4"].VerifiedAt, e.VerifiedAt)
-	}
-	if _, _, code = vault(t, cfg, "certify", "cam"); code != 0 {
-		t.Fatalf("certify after re-verify: exit %d", code)
-	}
-
-	// A mtime-only change is also a recopy (size equal, mtime differs).
+	// A verified row whose source was merely touched (same bytes, new
+	// mtime) is not a change: scan hashes it, reports it retouched, and copy
+	// has nothing to do. No row moves, certify still passes.
 	writeFile(t, filepath.Join(src, "DCIM", "C0001.JPG"), "still", t0.Add(2*time.Hour))
 	out, _, code = vault(t, cfg, "scan", "cam", src, dst, "--prefix", "DCIM", "--rule", "MP4=Videos", "--rule", "JPG=Photos")
-	if code != 0 || !strings.Contains(out, "Files to recopy:  1") {
-		t.Fatalf("scan after mtime-only change: exit %d\n%s", code, out)
+	if code != 0 || !strings.Contains(out, "Retouched:        1") || !strings.Contains(out, "Files to recopy:  0") || !strings.Contains(out, "Verified, changed: 0") {
+		t.Fatalf("scan after mtime-only touch: exit %d\n%s", code, out)
 	}
+	out, _, code = vault(t, cfg, "copy", "cam", src, dst, "--prefix", "DCIM", "--rule", "MP4=Videos", "--rule", "JPG=Photos")
+	if code != 0 || !strings.Contains(out, "Nothing to copy") {
+		t.Fatalf("copy after mtime-only touch: exit %d\n%s", code, out)
+	}
+	if got := rowsOf(t, cfg, "cam"); !reflect.DeepEqual(got, verified) {
+		t.Errorf("mtime-only touch moved a row:\n before %+v\n after  %+v", verified, got)
+	}
+
+	// A verified row whose source now holds different bytes is the B23(b)
+	// case (TestVerifiedDestinationNeverOverwritten has the full assertion
+	// set): never recopied, named in INCOMPLETE:, exit 1, destination and
+	// row exactly as certified, certify still passes.
+	writeFile(t, filepath.Join(src, "DCIM", "C0001.MP4"), "clip one, re-exported AGAIN", t0.Add(3*time.Hour))
+	out, _, code = vault(t, cfg, "scan", "cam", src, dst, "--prefix", "DCIM", "--rule", "MP4=Videos", "--rule", "JPG=Photos")
+	if code != 0 || !strings.Contains(out, "Verified, changed: 1") || !strings.Contains(out, "Files to recopy:  0") {
+		t.Fatalf("scan after change under a verified row: exit %d\n%s", code, out)
+	}
+	_, errOut, code = vault(t, cfg, "copy", "cam", src, dst, "--prefix", "DCIM", "--rule", "MP4=Videos", "--rule", "JPG=Photos")
+	if code != 1 || !strings.Contains(errOut, "INCOMPLETE: 1 file(s) skipped because their verified archive copy holds different content (kept)") {
+		t.Fatalf("copy over a verified row: exit %d, stderr %q", code, errOut)
+	}
+	if got := readFile(t, filepath.Join(dst, "Videos", "C0001.MP4")); got != "clip one, re-exported" {
+		t.Errorf("verified destination overwritten: %q", got)
+	}
+	if got := rowsOf(t, cfg, "cam"); !reflect.DeepEqual(got, verified) {
+		t.Errorf("refused copy moved a row:\n before %+v\n after  %+v", verified, got)
+	}
+	if _, _, code = vault(t, cfg, "certify", "cam"); code != 0 {
+		t.Fatalf("certify after the refused copy: exit %d", code)
+	}
+	reverified := verified
 
 	// Bit-rot at the destination: verify exits 1, names the file, marks the
 	// row mismatch; certify refuses. A missing destination file also fails
@@ -358,7 +379,7 @@ func TestRoundTrip(t *testing.T) {
 	// The row keeps the sha the file HAD (the certificate's claim), flips to
 	// mismatch, and stamps when the mismatch was seen. Nothing else moves.
 	mismatched := rowsOf(t, cfg, "cam")
-	e = wantRow(t, mismatched, "DCIM/C0002.MP4", "Videos/C0002.MP4", "clip two", "mismatch")
+	e := wantRow(t, mismatched, "DCIM/C0002.MP4", "Videos/C0002.MP4", "clip two", "mismatch")
 	if e.VerifiedAt <= reverified["DCIM/C0002.MP4"].VerifiedAt {
 		t.Errorf("mismatch did not stamp verified_at: %d → %d", reverified["DCIM/C0002.MP4"].VerifiedAt, e.VerifiedAt)
 	}
@@ -457,7 +478,7 @@ func TestCopyExitStatus(t *testing.T) {
 			},
 			flags:   []string{"--dry-run"},
 			want:    0,
-			stdout:  []string{"(dry-run; 1 files would be copied, 0 recorded as deduped, 1 collisions skipped)"},
+			stdout:  []string{"(dry-run; 1 files would be copied, 0 recorded as deduped, 1 collisions skipped, 0 verified kept)"},
 			noFiles: true,
 		},
 		{
