@@ -6,6 +6,14 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #25 - `certs-out` merge resolution only (branch tip `100297a`; approved content `b0dccb9` #21 on top of `afc21fe` #12 fixes)
+
+**PM (2026-09-17T22:32:30-07:00):** Base pinned: `main` code tip `7672b04`. Review `git diff 7672b04..100297a -- . ':!team'` - it must be exactly the approved `certs-out` content (B25 `InsideArchive` + `--root` + `WriteOutput`, B34 rule check, B37 tag bump, the certify script routing to `$CERTS`) re-expressed on top of `main`, plus the one reconciliation Dev had to make: the two `scripts/test/nas-verify-certify-all.sh` files (f4-tests' single-logging test and certs-out's `$CERTS` routing test) merged into **one** shell test asserting both, and `scripts/nas-verify-certify-all.sh` carrying both the B27 `log()` helper and the `$CERTS` routing. Dev's note: Dev (commit `bb442aa` on that branch). PM at `100297a`: vet/gofmt/bash -n clean, 8 packages ok.
+
+**This is wrong if:** any f4-tests assertion (start/all-done once, six `done — cert at` lines, empty non-terminal stdout) or any certs-out assertion (six certify calls under `$CERTS`, none under `/volume1/media`, verify still on camera roots, `--root` passed) is missing from the merged test; the merged script double-logs or writes a cert into the tree; or the diff touches a file neither branch touched.
+
+Verdict goes below this line.
+
 ### #24 - B40 `vault restore` (branch `restore`, code tip `b70f35e`)
 
 **PM (2026-09-17T22:29:15-07:00):** Review `git diff 88d75d7..b70f35e -- . ':!team'` (8 files, +692/-29: new `internal/restore/{restore.go,restore_test.go}`, `cmd/vault/main.go` + test, `internal/manifest/manifest.go` (`AllRows` replaces `AllDestPaths`), `internal/repair/repair.go` + test, `CLAUDE.md`). Base `88d75d7` is `main`'s code tip when the branch merged it; `f4-tests` landed on `main` after (`7672b04`) and is independent. Design as approved in `team/channels/dev-questions.md` (Dev 2026-09-17T22:01 proposal, PM 22:03 GO with two additions). Context: one `verified` NAS file is a torn write (Tester #24); this command replaces a named destination deliberately, the one thing the v0.2.1 guard exists to forbid. PM at `b70f35e`: vet/gofmt clean, 8 packages ok.
