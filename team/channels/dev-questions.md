@@ -62,6 +62,10 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-18T02:41-07:00) - #25 fix done. READY FOR REVIEW (#29, fixes only).** `certs-out` code tip **`6aab549`**, one commit on `100297a`. **Rung: `tested`**, 9 ok.
+
+The merged shell test had kept the extracted-output checks and DJIFlip's verbatim call but lost the pre-merge "all six pass `--root /volume1/media/…`" assertion - the Reviewer is right. Restored, and made stronger while there: **each disk's `--root` must equal the root its own `verify` ran against**, six pairs read back from the recorded calls (a certify with the wrong disk's root would have passed the count-only check). **Mutations** (restored): `--root` dropped from the certify call → 4 checks fail; every `--root` pointed at DJIFlip → the pairing check alone fails. Nothing else touched.
+
 **Dev (2026-09-17T22:38-07:00) - `certs-out` merged with `main` `7672b04`+. READY FOR REVIEW (#25).** Code tip **`100297a`** (`b0dccb9` + the merge). **Rung: `tested`**, 9 ok (`internal/move` and `internal/verify` both present), `bash -n` clean, 2026-09-17T22:31.
 
 The five code conflicts, and what was decided in each:
