@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #29 - re-review of #25's fix only (branch `certs-out`, code tip `6aab549`)
+
+**PM (2026-09-18T02:42:23-07:00):** One commit on `100297a`: `git show 6aab549 -- . ':!team'` (+11 in `scripts/test/nas-verify-certify-all.sh`). Claim: the all-six `--root /volume1/media/<Cam>` assertion is back, and stronger - each disk's `--root` must equal the root its own `verify` call used (six pairs read from the recorded calls). PM at `6aab549`: `bash -n` clean, `go test ./scripts/test` ok. **This is wrong if:** the pairing can be satisfied with fewer than six distinct pairs, or a certify call with a wrong disk's root still passes.
+
+Verdict goes below this line.
+
 ### #28 - B22 `vault gap` + `scripts/backup/run-backup.sh` (branch `backup`, code tip `8b0d263`)
 
 **PM (2026-09-17T23:19:08-07:00):** Base pinned at `03d8e81` (= `tagger` #26 + `main` + `small-fixes` #27, which B22 builds on); review `git diff 03d8e81..8b0d263 -- . ':!team'` (13 files, +927/-13: new `internal/gap/{gap.go,gap_test.go}`, `cmd/vault/main.go` + test, new `scripts/backup/{run-backup.sh,README.md,com.varela.media-backup.plist.example}`, new `scripts/test/run-backup.sh`, `scripts/test/scripts_test.go`, `MINI_ENV` rename in `scripts/tagging/*`, `CLAUDE.md`). Design: Dev 2026-09-17T23:05 proposal + PM 23:04 GO (`team/channels/dev-questions.md`); decision 2026-09-15 in `team/DECISIONS.md` (report-only, copy nothing, attach polling). Merge order: #26, #27, then this. PM at `8b0d263`: vet/gofmt/bash -n clean, 10 packages ok.
@@ -59,7 +65,7 @@ Comparison otherwise found no unexpected paths: all 16 files outside the reconci
 
 **PM (2026-09-18T02:39:53-07:00):** FINDING accepted - the fold dropped the six-call `--root /volume1/media/` assertion. Dev restores it in the merged test (one commit); re-review as **#29, fix only**. Everything else in the resolution verified.
 
-### #24 - B40 `vault restore` (branch `restore`, code tip `b70f35e`)
+### #24 - B40 `vault restore` (branch `restore`, code tip `b70f35e`) - **resolved: FINDINGS (2, P1), accepted → Dev fixes → request #30**
 
 **PM (2026-09-17T22:29:15-07:00):** Review `git diff 88d75d7..b70f35e -- . ':!team'` (8 files, +692/-29: new `internal/restore/{restore.go,restore_test.go}`, `cmd/vault/main.go` + test, `internal/manifest/manifest.go` (`AllRows` replaces `AllDestPaths`), `internal/repair/repair.go` + test, `CLAUDE.md`). Base `88d75d7` is `main`'s code tip when the branch merged it; `f4-tests` landed on `main` after (`7672b04`) and is independent. Design as approved in `team/channels/dev-questions.md` (Dev 2026-09-17T22:01 proposal, PM 22:03 GO with two additions). Context: one `verified` NAS file is a torn write (Tester #24); this command replaces a named destination deliberately, the one thing the v0.2.1 guard exists to forbid. PM at `b70f35e`: vet/gofmt clean, 8 packages ok.
 
@@ -74,6 +80,15 @@ Comparison otherwise found no unexpected paths: all 16 files outside the reconci
 **This is wrong if:** any refusal can be bypassed by argument order or a flag (`--force` must not exist); the claimants check misses a `deduped` row of another disk; the write can happen with `--dry-run`; the post-rename sha check can be skipped; the row can end `verified`; `repair-dest`'s behavior changed beyond claim 5; or the restore path can be used to write outside `dest-root` (symlink component, `..` in `source-path`).
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-18):** FINDINGS — request #24, exactly `git diff 88d75d7..b70f35e -- . ':!team'`, against the Dev 22:01 proposal (`c1ea58f`) and PM GO (`a112fcc`, timestamp 22:02:33).
+
+1. **P1 — Restore can replace a file outside `dest-root`.** At `b70f35e:internal/restore/restore.go:65-79`, the destination is joined and checked for symlink components, but never checked for containment. Failing input: a row `sony:../outside.JPG` with empty `dest_path`, an existing regular `../outside.JPG` next to the destination root, no other claimant, and a valid replacement/`--expect-sha`. `SymlinkComponent(root, "../outside.JPG")` checks the real parent directory and succeeds; `copy.File` repeats that same check, stages beside the outside file, and renames over it. A nonempty `dest_path = "../outside.JPG"` has the same result. Refuse paths outside the resolved root before hashing or writing, and enforce containment at the writer boundary too. Add regressions for both row-path forms; the present tests exercise symlinks but no `..` escape.
+
+2. **P1 — The claimant check misses a different row that reaches the replaced file through a symlink alias.** At `b70f35e:internal/restore/restore.go:103-113,176-177`, `physKey` only joins, cleans, and lowercases text. Failing input: A owns `real/x.JPG`, `root/alias` is a symlink to `root/real`, and another disk B has a `deduped` (or `verified`) row with `dest_path = "alias/x.JPG"`. Restoring A passes the destination walk because A's path contains no symlink; B's key differs, so the plan reports no claimants and replaces `real/x.JPG`. B now resolves to the new bytes while its old hash/status remain unchanged. Resolve existing claimant paths physically (including directory/leaf symlink aliases), or conservatively refuse when an alias cannot be ruled out, and add this cross-disk regression. Checking only the target's directory walk does not protect other rows' views.
+
+Validation: static diff and call-path review only; no build or tests run. `VerifiedRows` is unchanged apart from its position in the file; the repair-dest change adds the approved empty-`dest_path` fallback. The dry-run manifest-open side effects are explicitly acknowledged in proposal step 5 (B31), rather than a new finding here. Only `team/channels/review-requests.md` was modified.
+
 
 ### #22 - `f4-tests` merge resolution only, second attempt (branch tip `846c958`; approved content `dc36e5f` #13, resolution verified once #17) - **resolved: APPROVE → merged**
 
@@ -116,6 +131,8 @@ Validation: source review and local system-call documentation only; no Go build/
 **PM (2026-09-17T22:28:28-07:00):** #22 APPROVE accepted - merging `f4-tests` (`846c958`). #21 APPROVE accepted - merging `certs-out` (`0f3ae2f`, code `b0dccb9`) after it; B43's concrete consequence (a swapped `certs/` parent) is recorded in the backlog item verbatim. If `certs-out` conflicts with `f4-tests` in code (both add a `scripts/test/nas-verify-certify-all.sh`), it goes back to Dev for the merge.
 
 **PM (2026-09-17T22:30:35-07:00):** #24 got no verdict - Codex hit its usage limit again at 2026-09-17T22:30:35-07:00 (its message: retry Sep 18 02:35). Stays OPEN; rerun scheduled 02:37, or earlier if Eddy adds credits. #25 (certs-out resolution) will queue behind it.
+
+**PM (2026-09-18T02:42:23-07:00):** Both accepted. #1: the row's path must be proven under the resolved `dest-root` (lexically and physically) before hashing or writing, and the writer boundary enforces it too - `..` in `source_path`/`dest_path` regressions. #2: claimants are compared on physical identity (resolve each claimant's path; a directory/leaf alias to the target counts), or the tool refuses when an alias cannot be ruled out; cross-disk `alias/x.JPG` regression. Back to Dev on `restore`, new commits only; re-review as **#30, fixes only**.
 
 ### #23 - acceptance: B24 live run may proceed (Tester #26 dry-run evidence vs the original finding #7) - **resolved: APPROVE → live run gated only on Eddy naming the executor**
 
