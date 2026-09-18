@@ -94,11 +94,13 @@ line 1 and is replaced normally.
 A configured `BACKUP_DISKS` name longer than 255 bytes - which no mount point
 can be - is refused at discovery (exit 2), before any report path is built and
 before any log call (the log directory is not created until a disk is due).
-`BACKUP_SLUG_HOOK`, if set to a command, computes the base in place of the
-built-in - a test seam for forcing two names onto one base. `BACKUP_FAIL_AT`
-(`lookup`/`copy`/`rename`), if set, makes that one assignment op fail on the
-real command after `check_slugs` has passed - a test seam for exercising each
-fail-closed guard in isolation.
+The test seams are inert unless `BACKUP_TEST_MODE=1`, so a stray env var in
+production cannot alter the job. Under it: `BACKUP_SLUG_HOOK`, if set to a
+command, computes the base in place of the built-in (forcing two names onto one
+base); `BACKUP_FAIL_AT` (`lookup`/`held`/`copy`/`rename`) makes that one
+assignment op fail on the real command after `check_slugs` has passed and logs
+`SEAM <op> reached`, exercising each fail-closed guard - including the
+held-check's tri-state error branch - in isolation.
 
 ## Two owners, two kinds of setting
 

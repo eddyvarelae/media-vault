@@ -73,6 +73,12 @@ done
 ts() { date +%Y-%m-%dT%H:%M:%S%z; }
 log() { if (( dry_run )); then echo "$*"; else echo "[$(ts)] $*" >> "$LOG_FILE"; fi; }
 die() { log "REFUSING TO RUN: $*"; echo "[$(ts)] REFUSING TO RUN: $*" >&2; exit 2; }
+# The test seams (BACKUP_SLUG_HOOK, BACKUP_FAIL_AT) are inert unless
+# BACKUP_TEST_MODE=1, so a stray env var in production cannot alter the job
+# (review #56). seam <op> is true when that op should be failed; it logs
+# "SEAM <op> reached" so a test can prove the seam fired on the real op.
+test_mode() { [[ "${BACKUP_TEST_MODE:-}" == 1 ]]; }
+seam() { test_mode && [[ "${BACKUP_FAIL_AT:-}" == "$1" ]] && { log "SEAM $1 reached"; return 0; }; return 1; }
 today() { date +%Y-%m-%d; }
 
 # A volume's attach identity: device + inode + birth time of its mount
@@ -93,7 +99,7 @@ attach_id() { stat -f '%d:%i:%B' "$1"; }
 # #55): a failed pipeline (pipefail) or an empty result is not a slug, so a
 # broken shasum/od can never yield a half-formed base that looks valid.
 slug() {
-  if [[ -n "${BACKUP_SLUG_HOOK:-}" ]]; then "$BACKUP_SLUG_HOOK" "$1" || return 1; return; fi
+  if test_mode && [[ -n "${BACKUP_SLUG_HOOK:-}" ]]; then "$BACKUP_SLUG_HOOK" "$1" || return 1; return; fi
   local hexhead sha
   hexhead=$(set -o pipefail; printf '%s' "$1" | head -c 24 | od -An -v -tx1 | tr -d ' \n') || return 1
   sha=$(set -o pipefail; printf '%s' "$1" | shasum -a 256 | cut -c1-16) || return 1
@@ -107,23 +113,25 @@ slug() {
 # -v un-escapes backslash sequences - a volume literally named `a\tb` would then
 # be compared as `a<TAB>b` (review #53). recorded_slug prints a name's stored
 # slug (empty if none); returns non-zero only on an I/O error.
-# BACKUP_FAIL_AT is a test seam (review #55): set to lookup|copy|rename, it makes
-# that assignment op run against $SLUGS_FILE/x - a path under a regular file, so
-# every access is ENOTDIR - which makes the REAL op fail after check_slugs has
-# already passed, exercising each op's fail-closed guard in isolation.
+# BACKUP_FAIL_AT (under BACKUP_TEST_MODE=1) makes one assignment op run against
+# $SLUGS_FILE/x - a path under a regular file, so every access is ENOTDIR - so
+# the REAL op fails after check_slugs has already passed, exercising each op's
+# fail-closed guard in isolation (review #55/#56).
 recorded_slug() {
   [[ -f "$SLUGS_FILE" ]] || return 0
-  local f="$SLUGS_FILE"; [[ "${BACKUP_FAIL_AT:-}" == lookup ]] && f="$SLUGS_FILE/x"
+  local f="$SLUGS_FILE"; seam lookup && f="$SLUGS_FILE/x"
   nm="$1" awk -F'\t' 'BEGIN{n=ENVIRON["nm"]} $1==n{print $2; exit}' "$f" 2>/dev/null
 }
 # slug_held_by_other is TRI-STATE (review #54): 0 = a name OTHER than $2 holds
 # slug $1, 1 = not held, 2 = the registry could not be read. A read error must
 # never look like "not held" (which would hand out a slug already in use), so
 # the caller fails closed on 2. awk exits 0/1 for held/not-held and >=2 on an
-# I/O or parse error; that exit is preserved.
+# I/O or parse error; that exit is preserved. The `held` seam forces the error
+# state, so the tri-state fail-closed branch is exercised on its own (review #56).
 slug_held_by_other() {
   [[ -f "$SLUGS_FILE" ]] || return 1
-  sg="$1" me="$2" awk -F'\t' 'BEGIN{s=ENVIRON["sg"]; me=ENVIRON["me"]} $2==s && $1!=me{f=1} END{exit f?0:1}' "$SLUGS_FILE" 2>/dev/null
+  local f="$SLUGS_FILE"; seam held && f="$SLUGS_FILE/x"
+  sg="$1" me="$2" awk -F'\t' 'BEGIN{s=ENVIRON["sg"]; me=ENVIRON["me"]} $2==s && $1!=me{f=1} END{exit f?0:1}' "$f" 2>/dev/null
 }
 # assign_slug prints a name's slug, assigning and recording one on first sight:
 # the base, else base-2, base-3, … until no OTHER name holds it. It is
@@ -149,13 +157,13 @@ assign_slug() {
     break                                                             # not held: take it
   done
   tmp="$SLUGS_FILE.tmp"   # a fixed name is safe: the lock guarantees one writer (review #53)
-  local src="$SLUGS_FILE"; [[ "${BACKUP_FAIL_AT:-}" == copy ]] && src="$SLUGS_FILE/x"       # ENOTDIR (test seam)
+  local src="$SLUGS_FILE"; seam copy && src="$SLUGS_FILE/x"       # ENOTDIR (test seam)
   if [[ -f "$SLUGS_FILE" ]]; then cat "$src" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
   else : > "$tmp" 2>/dev/null || return 1; fi
   printf '%s\t%s\n' "$name" "$cand" >> "$tmp" || { rm -f "$tmp"; return 1; }
   new_n=$(wc -l < "$tmp") || { rm -f "$tmp"; return 1; }
   (( new_n == old_n + 1 )) || { rm -f "$tmp"; return 1; }   # never install a copy that lost rows
-  local target="$SLUGS_FILE"; [[ "${BACKUP_FAIL_AT:-}" == rename ]] && target="$SLUGS_FILE/x"   # ENOTDIR (test seam)
+  local target="$SLUGS_FILE"; seam rename && target="$SLUGS_FILE/x"   # ENOTDIR (test seam)
   mv "$tmp" "$target" 2>/dev/null || { rm -f "$tmp"; return 1; }
   printf '%s' "$cand"
 }

@@ -20,6 +20,7 @@ trap 'chmod -R u+w "$work" 2>/dev/null; rm -rf "$work"' EXIT
 # boundary instead (see the build case). The trap chmods before rm because
 # Go writes the module cache read-only.
 export HOME="$work/home" PYTHONDONTWRITEBYTECODE=1; mkdir -p "$HOME"
+export BACKUP_TEST_MODE=1   # the script's BACKUP_SLUG_HOOK / BACKUP_FAIL_AT seams are inert without this (review #56)
 
 failures=0
 check() { local desc=$1; shift; if "$@"; then echo "  ok   $desc"; else echo "  FAIL $desc"; failures=$((failures + 1)); fi; }
@@ -434,38 +435,47 @@ for badname in $'trail\n' $'a\tb' $'a\nb'; do
 done
 rm -rf "$vols"/*; rm -f "$state/slugs.tsv"
 
-# review #54/#55: the base computation is checked component by component - an
-# empty base, a failing hook, or a broken shasum aborts the tick fail-closed and
-# writes nothing.
+# review #54/#55/#56: the base computation is checked component by component - an
+# empty base, a failing hook, or a broken shasum aborts fail-closed against a
+# SEEDED registry, which stays byte-identical, and writes no report (either
+# extension) or marker.
 rm -f "$state"/gap-*.txt "$state"/gap-*.tsv "$state"/backup.unknown-*; mkvol Base; mk "$vols/Base/DCIM/x" "z"; : > "$state/backup-state.tsv"
+printf 'Keep\tkeepslug\n' > "$state/slugs.tsv"; cp "$state/slugs.tsv" "$work/reg-base"
 cat > "$work/mini-b.env" <<ENV
 SCRATCH_DIR="$scratch"
 BACKUP_DISKS="Base"
 ENV
-runb() { MINI_ENV="$work/mini-b.env" PATH="$1" BACKUP_SLUG_HOOK="$2" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; }
+nowritten() { test -z "$(ls "$state"/gap-*.txt "$state"/gap-*.tsv "$state"/backup.unknown-* 2>/dev/null)"; }
+runb() { rm -f "$state"/gap-*.txt "$state"/gap-*.tsv "$state"/backup.unknown-*; : > "$logf"; MINI_ENV="$work/mini-b.env" PATH="$1" BACKUP_SLUG_HOOK="$2" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; }
 printf '#!/bin/bash\n' > "$work/hook-empty"; chmod +x "$work/hook-empty"
 printf '#!/bin/bash\nexit 3\n' > "$work/hook-fail"; chmod +x "$work/hook-fail"
 mkdir -p "$work/binfail"; printf '#!/bin/bash\nexit 1\n' > "$work/binfail/shasum"; chmod +x "$work/binfail/shasum"
-: > "$logf"; runb "$work/bin:$PATH" "$work/hook-empty"; check "empty base: aborts" test "$?" -ne 0
-check "empty base: nothing written" test -z "$(ls "$state"/gap-*.txt "$state"/backup.unknown-* 2>/dev/null)" -a ! -e "$state/slugs.tsv"
-: > "$logf"; runb "$work/bin:$PATH" "$work/hook-fail"; check "failing hook base: aborts" test "$?" -ne 0
-check "failing hook base: nothing written" test -z "$(ls "$state"/gap-*.txt "$state"/backup.unknown-* 2>/dev/null)" -a ! -e "$state/slugs.tsv"
-: > "$logf"; runb "$work/binfail:$work/bin:$PATH" ""; check "shasum fails: aborts" test "$?" -ne 0
-check "shasum fails: nothing written" test -z "$(ls "$state"/gap-*.txt "$state"/backup.unknown-* 2>/dev/null)" -a ! -e "$state/slugs.tsv"
+runb "$work/bin:$PATH" "$work/hook-empty"; check "empty base: aborts" test "$?" -ne 0
+check "empty base: registry byte-identical" cmp -s "$state/slugs.tsv" "$work/reg-base"
+check "empty base: no report or marker" nowritten
+runb "$work/bin:$PATH" "$work/hook-fail"; check "failing hook base: aborts" test "$?" -ne 0
+check "failing hook base: registry byte-identical" cmp -s "$state/slugs.tsv" "$work/reg-base"
+check "failing hook base: no report or marker" nowritten
+runb "$work/binfail:$work/bin:$PATH" ""; check "shasum fails: aborts" test "$?" -ne 0
+check "shasum fails: registry byte-identical" cmp -s "$state/slugs.tsv" "$work/reg-base"
+check "shasum fails: no report or marker" nowritten
 rm -rf "$vols"/*; rm -f "$state/slugs.tsv"
 
-# review #55: BACKUP_FAIL_AT injects a failure at a specific assignment op AFTER
-# check_slugs has passed, so each op's fail-closed guard is exercised on the real
-# op. Each aborts with the registry byte-identical and no report/marker.
+# review #55/#56: BACKUP_FAIL_AT injects a failure at a specific assignment op
+# AFTER check_slugs has passed; the "SEAM <op> reached" log proves the real op
+# was hit. `held` forces the tri-state held-check into its error state. Each op
+# aborts with the registry byte-identical and no report/marker.
 mkvol OpFail; mk "$vols/OpFail/DCIM/x" "z"; : > "$state/backup-state.tsv"
 cat > "$work/mini-op.env" <<ENV
 SCRATCH_DIR="$scratch"
 BACKUP_DISKS="OpFail"
 ENV
-for op in lookup copy rename; do
-  rm -f "$state/slugs.tsv" "$state/slugs.tsv.tmp" "$state"/gap-*.txt "$state"/gap-*.tsv "$state"/backup.unknown-*; printf 'Keep\tkeepslug\n' > "$state/slugs.tsv"; cp "$state/slugs.tsv" "$work/reg-base"
+for op in lookup held copy rename; do
+  rm -f "$state/slugs.tsv" "$state/slugs.tsv.tmp" "$state"/gap-*.txt "$state"/gap-*.tsv "$state"/backup.unknown-*
+  printf 'Keep\tkeepslug\n' > "$state/slugs.tsv"; cp "$state/slugs.tsv" "$work/reg-base"
   : > "$logf"; BACKUP_FAIL_AT="$op" MINI_ENV="$work/mini-op.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; oprc=$?
   check "fail-at $op: the tick aborts (exit non-zero)" test "$oprc" -ne 0
+  check "fail-at $op: SEAM $op reached (the real op)" grep -q "SEAM $op reached" "$logf"
   check "fail-at $op: diagnostic mentions the slug assignment" grep -q "could not assign a slug" "$logf"
   check "fail-at $op: the registry is byte-identical" cmp -s "$state/slugs.tsv" "$work/reg-base"
   check "fail-at $op: no report or marker written" test -z "$(ls "$state"/gap-*.txt "$state"/gap-*.tsv "$state"/backup.unknown-* 2>/dev/null)"
@@ -473,6 +483,21 @@ for op in lookup copy rename; do
 done
 rm -rf "$vols"/*; rm -f "$state/slugs.tsv" "$state/slugs.tsv.tmp"
 
+# review #56: the seams are inert without BACKUP_TEST_MODE=1 - a stray
+# BACKUP_FAIL_AT in production changes nothing. A normal tick with FAIL_AT=copy
+# but the mode unset reports as usual, records the disk, and logs no SEAM line.
+rm -f "$state"/gap-*.txt "$state"/gap-*.tsv "$state"/backup.unknown-* "$state/slugs.tsv"; : > "$state/backup-state.tsv"
+mkvol Inert; mk "$vols/Inert/DCIM/new.ARW" "brand new"
+cat > "$work/mini-in.env" <<ENV
+SCRATCH_DIR="$scratch"
+BACKUP_DISKS="Inert"
+ENV
+: > "$logf"; BACKUP_TEST_MODE= BACKUP_FAIL_AT=copy MINI_ENV="$work/mini-in.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; inrc=$?
+check "seam inert: a normal tick with FAIL_AT set but mode off exits 0" test "$inrc" -eq 0
+check "seam inert: the report was written normally" test -n "$(ls "$state"/gap-*.txt 2>/dev/null)"
+check "seam inert: the disk was recorded in the registry" test "$(nm=Inert awk -F'\t' 'BEGIN{n=ENVIRON["nm"]} $1==n{c++} END{print c+0}' "$state/slugs.tsv")" -eq 1
+check "seam inert: no SEAM line logged" test -z "$(grep SEAM "$logf")"
+rm -rf "$vols"/*; rm -f "$state/slugs.tsv"
 
 
 # review #43/#49: a configured disk name longer than 255 bytes can never be a
