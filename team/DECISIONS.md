@@ -20,3 +20,7 @@ Format: `- YYYY-MM-DD · **decision** · context/why · received-by: {role}`
 - 2026-09-17 · **The PM runs the Reviewer (codex) and boots every seat itself; the human is not asked to run agents** · received-by: pm
 - 2026-09-17 · **Push `main` (team framework commit)** · received-by: pm
 - 2026-09-17 · **NAS access method is unknown to the human** · PM/Tester discover it; the human will be asked only for a concrete enable-step or credential · received-by: pm
+- 2026-09-17 · **media-vault owns every scheduled batch against the archive, the nightly video tagger included; mini-server is only the machine** · handed over in `team/archive/2026-09-17-notes-from-mini-server-pm.md` (received via Eddy) · received-by: pm (relayed from the mini-server PM's record of Eddy's decision)
+- 2026-09-17 · **Tagger batch rules (travel with the job): newest first over the whole archive (`copied_at` DESC, no watermark); 200 GB/night cap until a Sony night is timed; no folder skipped, six camera folders first then Backup/LeanTank/Public; `#recycle` never a source; the five GoPro test clips stay tagged** · same source · received-by: pm (relayed)
+- 2026-09-15 · **`run-backup.sh` is report-only: on attach of a known external SSD run the content gap check, write a report, copy nothing; attach detection by `StartInterval` polling** · same source · received-by: pm (relayed)
+- 2026-09-17 · **`case` SSD is certified and cleared to wipe; only Eddy wipes** · same source · received-by: pm (relayed)
