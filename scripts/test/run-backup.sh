@@ -446,17 +446,37 @@ SCRATCH_DIR="$scratch"
 BACKUP_DISKS="Base"
 ENV
 nowritten() { test -z "$(ls "$state"/gap-*.txt "$state"/gap-*.tsv "$state"/backup.unknown-* 2>/dev/null)"; }
-runb() { rm -f "$state"/gap-*.txt "$state"/gap-*.tsv "$state"/backup.unknown-*; : > "$logf"; MINI_ENV="$work/mini-b.env" PATH="$1" BACKUP_SLUG_HOOK="$2" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; }
-printf '#!/bin/bash\n' > "$work/hook-empty"; chmod +x "$work/hook-empty"
-printf '#!/bin/bash\nexit 3\n' > "$work/hook-fail"; chmod +x "$work/hook-fail"
-mkdir -p "$work/binfail"; printf '#!/bin/bash\nexit 1\n' > "$work/binfail/shasum"; chmod +x "$work/binfail/shasum"
+# Each base-failure hook records its own invocation to $srec (review #57), so a
+# fixture proves the intended failure mechanism actually fired - not that the
+# base failed for some unrelated reason. runb clears $srec + $logf before each.
+srec="$work/seam-record"
+runb() { rm -f "$state"/gap-*.txt "$state"/gap-*.tsv "$state"/backup.unknown-*; : > "$logf" "$srec"; MINI_ENV="$work/mini-b.env" PATH="$1" BACKUP_SLUG_HOOK="$2" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --force > "$out" 2>&1; }
+cat > "$work/hook-empty" <<HOOK
+#!/bin/bash
+echo "SEAM base:empty reached" >> "$srec"
+HOOK
+cat > "$work/hook-fail" <<HOOK
+#!/bin/bash
+echo "SEAM base:exit3 reached" >> "$srec"
+exit 3
+HOOK
+mkdir -p "$work/binfail"
+cat > "$work/binfail/shasum" <<HOOK
+#!/bin/bash
+echo "SEAM base:shasum reached" >> "$srec"
+exit 1
+HOOK
+chmod +x "$work/hook-empty" "$work/hook-fail" "$work/binfail/shasum"
 runb "$work/bin:$PATH" "$work/hook-empty"; check "empty base: aborts" test "$?" -ne 0
+check "empty base: the empty-base hook was invoked" grep -q "SEAM base:empty reached" "$srec"
 check "empty base: registry byte-identical" cmp -s "$state/slugs.tsv" "$work/reg-base"
 check "empty base: no report or marker" nowritten
 runb "$work/bin:$PATH" "$work/hook-fail"; check "failing hook base: aborts" test "$?" -ne 0
+check "failing hook base: the exit-3 hook was invoked" grep -q "SEAM base:exit3 reached" "$srec"
 check "failing hook base: registry byte-identical" cmp -s "$state/slugs.tsv" "$work/reg-base"
 check "failing hook base: no report or marker" nowritten
 runb "$work/binfail:$work/bin:$PATH" ""; check "shasum fails: aborts" test "$?" -ne 0
+check "shasum fails: the shadowed shasum was invoked" grep -q "SEAM base:shasum reached" "$srec"
 check "shasum fails: registry byte-identical" cmp -s "$state/slugs.tsv" "$work/reg-base"
 check "shasum fails: no report or marker" nowritten
 rm -rf "$vols"/*; rm -f "$state/slugs.tsv"
