@@ -6,6 +6,21 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #14 - numbers: `tars` gap report (Tester #20) - headed to Eddy as "this SSD needs archiving too"
+
+**PM (2026-09-17T20:49:59-07:00):** Not code. The Tester (2026-09-17T20:49, `team/channels/tester-feedback.md` item 20) reports for the SSD `tars` (`/Volumes/tars`, read-only): **needs archiving: YES - 5,040 files, 1,188,169,289,959 bytes (1.19 TB)**; archived already 2,719 files / 772,522,033,618 B; every file hashed (`--hash-all`). Recompute from `/Volumes/Scratch1/tester/` (read-only, write nothing there): `gap-tars.tsv` (7,759 rows), `gap-tars.summary.txt`, `gap-tars.log`, script `gap-report.py`, snapshot `manifest-2026-09-17.db` (`?mode=ro&immutable=1`).
+
+**Claims:**
+1. Files on the SSD = 7,759; bytes = 1,960,691,323,577. `HASH_ARCHIVED` 2,719 / 772,522,033,618 B; `GAP` 5,040 / 1,188,169,289,959 B; 2,719 + 5,040 = 7,759; bytes add to the total.
+2. Every `GAP` sha is absent from the snapshot; every `HASH_ARCHIVED` sha is present.
+3. Gap by folder: SonyA6700 4,775 / 1,003.8 GB; SonyZVE10 240 / 130.0 GB; GoPro 25 / 54.4 GB; DJIFlip and Test fully archived.
+4. Of the 5,040: 5,029 no name+size match; 10 name+size collisions with different content; 1 ambiguous.
+5. Running total across `kipp` (#8) + `tars`: 14,912 files / 3,109,865,074,408 B.
+
+**This is wrong if:** the TSV counts or byte sums differ; any `GAP` sha appears on any snapshot row; the folder sums do not add to the gap total; the TSV row count differs from a fresh `find /Volumes/tars -type f` (dotfiles/`._*` excluded, dot-dirs pruned); or the running total arithmetic is off. Report recomputed next to claimed.
+
+Verdict goes below this line.
+
 ### #13 - B9 F4 tests + B27 single logging + B20 skip `reports/` (branch `f4-tests`, code tip `dc36e5f`)
 
 **PM (2026-09-17T20:38:33-07:00):** Review `git diff 73c52ae..dc36e5f -- . ':!team'` (3 commits off `main` at `73c52ae`, code-identical to `e4a4aed`; 9 files, +453/-14: new `internal/verify/verify_test.go`, `cmd/vault/main_test.go`, `internal/scan/scan.go` + test, `scripts/nas-verify-certify-all.sh`, new `scripts/test/nas-verify-certify-all.sh`, `scripts/test/scripts_test.go`, `CLAUDE.md`, `README.md`). Dev's note: Dev 2026-09-17T20:38 (commit `5828145` on that branch). PM independently at `dc36e5f`: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all seven test packages (`internal/verify` now tested). Note: `certs-out` (#12) also creates `scripts/test/nas-verify-certify-all.sh` and edits the same script - a merge conflict Dev resolves when the second of the two lands; review each as it is.
