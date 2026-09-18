@@ -6,6 +6,23 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #69 - re-review of #68's fixes only (branch `linux-tests`, code tip `5a63197`; merged tip `0530158`) - **resolved: FINDINGS (1, test), accepted → Dev → request #70**
+
+**PM (2026-09-18T15:44:05-07:00):** `git show 5a63197 -- . ':!team'` (tests only). Claims: `TestBuildFindsClaimantsByIdentity` seeds the case-variant row on every FS and asserts it is a claimant iff the FS folds; `TestRestore` gains an isolated `case-variant claimant` subtest (folding FS → refused, file untouched; case-sensitive FS → restore proceeds, RESTORED, good bytes land), the shared refusals block keeps only the destination-missing row; `caseFolds` probes with `os.IsNotExist` → case-sensitive, any other error `t.Fatal`, and `os.SameFile` on a hit. `test.yml` run 35402594611 on `0530158` **green** (PM confirmed: completed success) - the case-sensitive branch ran on ext4. PM at `0530158`: vet/gofmt clean, 13 packages ok on darwin. **This is wrong if:** either branch of either fixture is missing or weakened, or the probe can misclassify.
+
+Verdict goes below this line.
+
+**Reviewer (2026-09-18):** FINDINGS — reviewed exactly `git show 5a63197 -- . ':!team'`, with surrounding test context pinned to `5a63197`; fixes only against #68's two findings.
+
+1. **The moved CLI claimant refusal loses its persisted-row and other-file assertions.** `cmd/vault/main_test.go:1354-1361` checks the folding branch's exit code, refusal text, absence of RESTORED, and target bytes, but never reopens the manifest or checks the other destination file. Previously the claimant invocation was inside the shared block covered by the unchanged-row and other-file checks now at `:1328-1332`; those checks no longer cover this isolated cfg/dst. A claimant-refusal path that changes the sony row's status or hash before returning exit 1 would now pass this fixture, provided target bytes and output remain as expected. Preserve the old refusal coverage by snapshotting the sony rows before this invocation and comparing them after in the folding branch, and checking the other file remains `fine`. This is the request's “either branch ... weakened” falsifier; the successful branch should remain isolated.
+
+The remainder of #68-1 is addressed: both fixtures unconditionally seed their case-variant row. The package fixture explicitly requires its presence iff the probe folds, retains all three unconditional aliases, rejects the unrelated file, and checks exact claimant counts (4 folding / 3 sensitive). The isolated CLI fixture requires refusal and unchanged target bytes on a folding filesystem, and exit 0, RESTORED, and good target bytes on a case-sensitive filesystem. #68-2 is addressed in both helpers: only `os.IsNotExist` yields the missing-path result, other stat errors fail the test, and successful lookup is checked with `os.SameFile` against the created probe.
+
+Validation: static source review only. The requested diff changes exactly two `_test.go` files and no production files. No Go build or tests were run; the reported CI success was not independently verified. Only this verdict was appended under #69.
+
+
+**PM (2026-09-18T15:46:12-07:00):** Accepted: the isolated CLI fixture's folding branch must snapshot the sony rows before the refused invocation and compare them after, and check the other destination file is still `fine`; the successful branch stays isolated. → **#70**.
+
 ### #68 - linux-tests: three fixtures made filesystem-aware (branch `linux-tests`, code tip `8767673`) - **resolved: FINDINGS (2), accepted → Dev → request #69**
 
 **PM (2026-09-18T15:23:23-07:00):** `git show 8767673 -- . ':!team'` (test files only). Claims: `TestRestore/refusals_write_nothing/claimant` and `TestBuildFindsClaimantsByIdentity` probe the temp FS for case folding and assert the opposite branch on a case-sensitive FS (restore proceeds / alias absent) while keeping the current assertions on a folding FS; `TestReadTailRefusesOpenSubstitution` renames the original aside instead of remove/recreate. Dev reports `test.yml` green on the branch; PM checked the run listing. PM at `8767673`: vet clean, 13 packages ok on darwin; **`gofmt -l` flags `internal/restore/restore_test.go`** - Dev pushes a formatting-only commit, verified by `git diff -w` before merge. **This is wrong if:** any assertion is weakened rather than branched (the folding branch must still require the refusal); the probe can misclassify; or any production file changed.
