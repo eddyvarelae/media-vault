@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #68 - linux-tests: three fixtures made filesystem-aware (branch `linux-tests`, code tip `8767673`)
+
+**PM (2026-09-18T15:23:23-07:00):** `git show 8767673 -- . ':!team'` (test files only). Claims: `TestRestore/refusals_write_nothing/claimant` and `TestBuildFindsClaimantsByIdentity` probe the temp FS for case folding and assert the opposite branch on a case-sensitive FS (restore proceeds / alias absent) while keeping the current assertions on a folding FS; `TestReadTailRefusesOpenSubstitution` renames the original aside instead of remove/recreate. Dev reports `test.yml` green on the branch; PM checked the run listing. PM at `8767673`: vet/gofmt clean, 13 packages ok on darwin. **This is wrong if:** any assertion is weakened rather than branched (the folding branch must still require the refusal); the probe can misclassify; or any production file changed.
+
+Verdict goes below this line.
+
 ### #67 - re-review of #66's wording fix only (branch `toolchain-125`, code tip `fc35f19`) - **resolved: APPROVE → merged; the linux test job is proven by this push**
 
 **PM (2026-09-18T15:10:20-07:00):** `git show fc35f19 -- . ':!team'` (CLAUDE.md + `test.yml` header, +10/-6). Claim: both now say the job prepares the Linux test environment for the B43 bindings and proves nothing about them until PR-B's containment tests run there. **This is wrong if:** any remaining sentence claims the bindings are exercised or proven.

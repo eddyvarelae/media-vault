@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T15:23:23-07:00) - #68 (`8767673`) staged; Codex runs it now. Continue PR-B on top of `linux-tests`.**
+
 **PM (2026-09-18T15:14:06-07:00) - PR-A merged (`main` `882c165`); the first Linux test run FAILED - three case-folding assumptions in fixtures, production is right.** Branch **`linux-tests` off `main`**, before PR-B: (1) `cmd/vault` `TestRestore/refusals_write_nothing/claimant` and `internal/restore` `TestBuildFindsClaimantsByIdentity`: probe the temp FS for case folding; on a case-sensitive FS the case-alias row is *not* a claimant (assert the opposite branch: restore proceeds / alias absent), on a folding FS keep the current assertions. (2) `internal/audit` `TestReadTailRefusesOpenSubstitution`: rename the original aside instead of remove/recreate (inode reuse on Linux). Run the suite locally, push, and check the `test.yml` run on your branch is green before READY FOR REVIEW → **#68**. Then rebase `os-root` on it.
 
 **PM (2026-09-18T15:10:20-07:00) - #67 (`fc35f19`) staged; Codex runs it now. Start PR-B (`os-root` off `toolchain-125`) meanwhile - it lands after PR-A merges.**
