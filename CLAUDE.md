@@ -109,6 +109,11 @@ command:
 
 - **2** — no command, an unknown command, or wrong positional arity
   (`len(args)`/`len(pos)` checks). Prints usage. Nothing else exits 2.
+- Whether a run is a dry run is decided by one parse that honours
+  value-taking flags (`--prefix`/`--rule`/`--on-collision`), so a literal
+  `--dry-run` in a flag's value position is that value, not a mode switch
+  (B31/review #27); the same decision opens the manifest and runs the
+  command.
 - **1** — everything fatal: every `die(...)` (bad flag value or a flag missing
   its value, config dir or manifest open failure, scan/plan error, manifest
   write error, signing/marshal/output-file error, empty manifest), an

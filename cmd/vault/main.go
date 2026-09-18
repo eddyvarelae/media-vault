@@ -75,7 +75,7 @@ func main() {
 	dbPath := filepath.Join(configDir, "manifest.db")
 	var m *manifest.Manifest
 	var err error
-	if hasDryRun(args) {
+	if dryRunRequested(cmd, args) {
 		// A dry run writes nothing - not an archive file, not a row, and
 		// (B31) not the config dir or the manifest file either: the
 		// manifest is opened read-only, or planned against an empty
@@ -979,12 +979,24 @@ func human(n int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
-// hasDryRun reports whether --dry-run is among the arguments. It is only
-// used to pick how the manifest is opened; each command still parses its
-// own flags and rejects the flag where it means nothing.
-func hasDryRun(args []string) bool {
-	for _, a := range args {
-		if a == "--dry-run" {
+// dryRunRequested reports whether the command will run as a dry run - the
+// single interpretation main opens the manifest by and the command executes
+// by, so a literal --dry-run sitting where a flag VALUE is expected (e.g.
+// --prefix --dry-run) is a prefix, not a mode switch (review #27). The
+// per-command sets below are exactly the value-taking flags each parser
+// consumes; keep them in step with the parsers.
+func dryRunRequested(cmd string, args []string) bool {
+	var valueFlags map[string]bool
+	switch cmd {
+	case "scan", "copy", "move":
+		valueFlags = map[string]bool{"--prefix": true, "--rule": true, "--on-collision": true}
+	}
+	for i := 0; i < len(args); i++ {
+		if valueFlags[args[i]] {
+			i++
+			continue
+		}
+		if args[i] == "--dry-run" {
 			return true
 		}
 	}

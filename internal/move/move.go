@@ -164,6 +164,18 @@ func Execute(ctx context.Context, m *manifest.Manifest, plan *Plan, dstDisk stri
 			continue
 		}
 
+		// Guard BEFORE any filesystem change - MkdirAll, the duplicate
+		// os.Remove/DeleteEntry, the rename (review #27): a destination a
+		// verified row owns, one that climbs out, or one through a
+		// symlinked directory is skipped without touching anything.
+		if skip := guardDest(plan.dstRoot, owners, mv); skip != "" {
+			res.Skipped++
+			if onFile != nil {
+				onFile(mv, skip)
+			}
+			continue
+		}
+
 		if err := os.MkdirAll(filepath.Dir(mv.DstAbs), 0o755); err != nil {
 			res.Errors++
 			if onFile != nil {
@@ -208,6 +220,14 @@ func Execute(ctx context.Context, m *manifest.Manifest, plan *Plan, dstDisk stri
 				if newRel != mv.DstRel {
 					mv.DstRel = newRel
 					mv.DstAbs = filepath.Join(plan.dstRoot, newRel)
+					// The rewritten path gets the same guard (review #27).
+					if skip := guardDest(plan.dstRoot, owners, mv); skip != "" {
+						res.Skipped++
+						if onFile != nil {
+							onFile(mv, skip)
+						}
+						continue
+					}
 					if onFile != nil {
 						onFile(mv, "renamed-on-collision → "+newRel)
 					}
@@ -225,26 +245,6 @@ func Execute(ctx context.Context, m *manifest.Manifest, plan *Plan, dstDisk stri
 			continue
 		}
 
-		if owner, path, ok := owners.Owner(plan.dstRoot, mv.DstRel); ok {
-			res.Skipped++
-			if onFile != nil {
-				onFile(mv, fmt.Sprintf("dst-owned by verified row %s:%s (%s) — never written", owner.SourceDisk, owner.SourcePath, path))
-			}
-			continue
-		}
-		if link, err := scan.SymlinkComponent(plan.dstRoot, mv.DstRel); err != nil {
-			res.Errors++
-			if onFile != nil {
-				onFile(mv, "lstat-error: "+err.Error())
-			}
-			continue
-		} else if link != "" {
-			res.Skipped++
-			if onFile != nil {
-				onFile(mv, "dst through a symlink ("+link+") — never written")
-			}
-			continue
-		}
 		if err := os.Rename(mv.SrcAbs, mv.DstAbs); err != nil {
 			res.Errors++
 			if onFile != nil {
@@ -270,6 +270,23 @@ func Execute(ctx context.Context, m *manifest.Manifest, plan *Plan, dstDisk stri
 		}
 	}
 	return res, nil
+}
+
+// guardDest reports why mv's destination must not be written - a verified
+// row owns it (present or missing, any spelling) or a directory on its
+// path is a symlink - or "" when it is safe.
+// Consulted before every filesystem change and again after a collision
+// rename (review #27; B32).
+func guardDest(dstRoot string, owners scan.OwnerIndex, mv Move) string {
+	if owner, path, ok := owners.Owner(dstRoot, mv.DstRel); ok {
+		return fmt.Sprintf("dst-owned by verified row %s:%s (%s) — never written", owner.SourceDisk, owner.SourcePath, path)
+	}
+	if link, err := scan.SymlinkComponent(dstRoot, mv.DstRel); err != nil {
+		return "lstat-error: " + err.Error()
+	} else if link != "" {
+		return "dst through a symlink (" + link + ") — never written"
+	}
+	return ""
 }
 
 // route picks the destination relative path for a source relative path.

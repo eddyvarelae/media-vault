@@ -1380,3 +1380,99 @@ func TestMoveNeverLandsOnAVerifiedDestination(t *testing.T) {
 		t.Errorf("z.mov moved through the link: %q", got)
 	}
 }
+
+// TestDryRunFlagAfterAValueFlag is review #27-1: a literal --dry-run where a
+// flag value is expected is that value, not a mode switch. main must open
+// read-write and the command must run for real, recording the copy.
+func TestDryRunFlagAfterAValueFlag(t *testing.T) {
+	cfg, src, dst := t.TempDir(), t.TempDir(), t.TempDir()
+	// --prefix --dry-run means prefix="--dry-run": the file lives under that.
+	writeFile(t, filepath.Join(src, "--dry-run", "a.mov"), "clip", t0)
+	out, errOut, code := vault(t, cfg, "copy", "cam", src, dst, "--prefix", "--dry-run")
+	if code != 0 {
+		t.Fatalf("copy: exit %d\n%s%s", code, out, errOut)
+	}
+	if strings.Contains(errOut, "planning against an empty one") || strings.Contains(out, "(dry-run;") {
+		t.Errorf("the command was treated as a dry run:\n%s%s", out, errOut)
+	}
+	// The real copy happened and was recorded - not left unrecorded (the
+	// read-only-open failure the finding describes) nor lost to an in-memory db.
+	if got := readFile(t, filepath.Join(dst, "a.mov")); got != "clip" {
+		t.Errorf("file not copied for real: %q", got)
+	}
+	rows := rowsOf(t, cfg, "cam")
+	if len(rows) != 1 || rows["--dry-run/a.mov"].Status != "copied" {
+		t.Errorf("copy not recorded: %v", rows)
+	}
+	// And a real --dry-run (standalone) still is one.
+	writeFile(t, filepath.Join(src, "b.mov"), "two", t0)
+	out, _, code = vault(t, cfg, "copy", "cam", src, dst, "--dry-run")
+	if code != 0 || !strings.Contains(out, "(dry-run;") {
+		t.Fatalf("standalone --dry-run: exit %d\n%s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "b.mov")); err == nil {
+		t.Errorf("standalone dry-run copied b.mov")
+	}
+}
+
+// TestMoveGuardsBeforeAnyMutation is review #27-2: the owner/symlink guard
+// runs before MkdirAll and before the duplicate delete. move A A over a
+// verified row whose source and dest are the same path must not delete the
+// verified file, and a rule routing through a symlinked dir must not create
+// the file before refusing.
+func TestMoveGuardsBeforeAnyMutation(t *testing.T) {
+	t.Run("same-path move over a verified row does not delete it", func(t *testing.T) {
+		cfg, src, arch := t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(src, "x.mov"), "the clip", t0)
+		if _, _, code := vault(t, cfg, "copy", "A", src, arch); code != 0 {
+			t.Fatalf("copy: exit %d", code)
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", arch); code != 0 {
+			t.Fatalf("verify: exit %d", code)
+		}
+		before := rowsOf(t, cfg, "A")
+		// move A A arch arch: src rel == dst rel == x.mov, the file exists,
+		// its hash matches the row - the old code's dedup branch would
+		// os.Remove it and DeleteEntry before the owner guard ran.
+		out, _, _ := vault(t, cfg, "move", "A", "A", arch, arch)
+		if !strings.Contains(out, "dst-owned by verified row A:x.mov") {
+			t.Errorf("not guarded as owned:\n%s", out)
+		}
+		if got := readFile(t, filepath.Join(arch, "x.mov")); got != "the clip" {
+			t.Fatalf("the verified file was deleted/replaced: %q", got)
+		}
+		if got := rowsOf(t, cfg, "A"); !reflect.DeepEqual(got, before) {
+			t.Errorf("the verified row changed: %v", got)
+		}
+	})
+
+	t.Run("rule through a symlinked dir creates nothing", func(t *testing.T) {
+		cfg, src, dst, outside := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(src, "y.mov"), "bytes", t0)
+		if _, _, code := vault(t, cfg, "copy", "B", src, filepath.Join(t.TempDir(), "stage")); code != 0 {
+			t.Fatalf("seed copy: exit %d", code)
+		}
+		m, err := manifest.Open(filepath.Join(cfg, "manifest.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Upsert(manifest.Entry{SourceDisk: "B", SourcePath: "y.mov", DestPath: "y.mov", Size: 5,
+			MtimeNs: t0.UnixNano(), SHA256: sha("bytes"), CopiedAt: 1, Status: "copied"}); err != nil {
+			t.Fatal(err)
+		}
+		m.Close()
+		if err := os.Symlink(outside, filepath.Join(dst, "alias")); err != nil {
+			t.Fatal(err)
+		}
+		out, _, _ := vault(t, cfg, "move", "B", "A", src, dst, "--rule", "MOV=alias")
+		if !strings.Contains(out, "dst through a symlink (alias)") {
+			t.Errorf("not guarded as a symlink route:\n%s", out)
+		}
+		if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+			t.Errorf("a file was created through the symlink: %v", entries)
+		}
+		if got := readFile(t, filepath.Join(src, "y.mov")); got != "bytes" {
+			t.Errorf("source moved away: %q", got)
+		}
+	})
+}
