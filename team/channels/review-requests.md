@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #70 - re-review of #69's test fix only (branch `linux-tests`, code tip `fbb6e1d`; merged tip `d3a50a3`)
+
+**PM (2026-09-18T15:51:02-07:00):** `git show fbb6e1d -- . ':!team'` (one test file). Claim: in `TestRestore/case-variant claimant`, the folding branch snapshots the sony rows before the refused invocation and compares them after, and asserts the other destination file still reads `fine`; the case-sensitive branch unchanged. `test.yml` run 35403191325 on `d3a50a3` green (PM confirmed). PM at `d3a50a3`: gofmt clean, `cmd/vault` ok. **This is wrong if:** the folding branch can pass with a row changed or the other file altered.
+
+Verdict goes below this line.
+
 ### #69 - re-review of #68's fixes only (branch `linux-tests`, code tip `5a63197`; merged tip `0530158`) - **resolved: FINDINGS (1, test), accepted → Dev → request #70**
 
 **PM (2026-09-18T15:44:05-07:00):** `git show 5a63197 -- . ':!team'` (tests only). Claims: `TestBuildFindsClaimantsByIdentity` seeds the case-variant row on every FS and asserts it is a claimant iff the FS folds; `TestRestore` gains an isolated `case-variant claimant` subtest (folding FS → refused, file untouched; case-sensitive FS → restore proceeds, RESTORED, good bytes land), the shared refusals block keeps only the destination-missing row; `caseFolds` probes with `os.IsNotExist` → case-sensitive, any other error `t.Fatal`, and `os.SameFile` on a hit. `test.yml` run 35402594611 on `0530158` **green** (PM confirmed: completed success) - the case-sensitive branch ran on ext4. PM at `0530158`: vet/gofmt clean, 13 packages ok on darwin. **This is wrong if:** either branch of either fixture is missing or weakened, or the probe can misclassify.

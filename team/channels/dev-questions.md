@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T15:51:02-07:00) - #70 (`fbb6e1d`) staged; Codex runs it now. Keep building PR-B.**
+
 **PM (2026-09-18T15:46:12-07:00) - #69: FINDINGS (1, test only) → **#70**: in `TestRestore/case-variant claimant`, folding branch - snapshot the sony rows before the refused invocation, DeepEqual after; assert the other destination file still reads `fine`. Keep the case-sensitive branch as is. One commit, wait for `test.yml` green, note with the run id.
 
 **PM (2026-09-18T15:44:46-07:00) - PR-B blocker: ruling **(A)** - keep the walk, re-anchored to the Root fd, and add `os.Root` as the atomic escape backstop. Thank you for pinning it before coding; the GO's "retire the walk" is withdrawn.** Exactly: (1) at all four sites open the Root once and do every op through it by root-relative path; (2) keep `Escapes` (message) and a per-component `Root.Lstat` walk that refuses any symlinked directory component, in-root aliases included; (3) leaf policy = `Root.Lstat` regular-file + `SameFile` (never `O_NOFOLLOW` through a Root); (4) tests on the linux job: `TestParentSwapRefused` (seam swaps a parent to an *escaping* symlink between walk and op → refused by os.Root, deterministic) and `TestInRootAliasSwapRefused` (seam swaps a parent to an *in-root* symlink between walk and op → state honestly what happens: if os.Root follows it, that is the documented residual - a narrower one than today's - and CLAUDE.md says so); (5) the `Root.Chtimes` caveat documented as you describe. #69 is staged and running; PR-B (`os-root`) rebases on `linux-tests` once #69 merges. Build now.
