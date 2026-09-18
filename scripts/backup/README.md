@@ -49,14 +49,18 @@ The `<hexname>` in the output paths is a **bounded** slug: the hex of the
 disk name's first 24 bytes then 16 hex of its whole sha256 (~65 chars,
 `[0-9a-f]` only - so `Disk` and `disk` never share a file on a
 case-folding state dir, and a long name never overruns the filename limit).
-It is injective in practice; to prove it, **line 1 of both the report and
-the TSV is the full disk name** (`disk: <name>`). Before writing, an
-existing output whose line 1 names a *different* disk is treated as a
-**SLUG COLLISION**: the run refuses to overwrite it, logs
-`GAP <name> SLUG COLLISION …`, and exits non-zero, leaving the file for a
-human (a `--force` re-report of the *same* disk matches line 1 and is
-replaced normally). A configured `BACKUP_DISKS` name longer than 255 bytes
-- which no mount point can be - is refused at discovery (exit 2).
+It is injective in practice; to prove it, **line 1 of every slug-keyed file
+is the full name** - the report (`disk: <name>`), the TSV (`disk: <name>`),
+and the unknown-volume marker (`volume: <name>`). Before writing, an existing
+file whose line 1 names a *different* volume is treated as a **SLUG
+COLLISION**: for a report/TSV the run refuses to overwrite it, logs
+`GAP <name> SLUG COLLISION …`, exits non-zero and leaves it (a `--force`
+re-report of the *same* disk matches line 1 and is replaced normally); for a
+marker it logs `SLUG COLLISION: unknown-volume marker …` and leaves it, so a
+second unknown volume sharing the slug is not silently swallowed. A configured
+`BACKUP_DISKS` name longer than 255 bytes - which no mount point can be - is
+refused at discovery (exit 2), before any report path is built and before any
+log call (the log directory is not created until a disk is due).
 
 ## Two owners, two kinds of setting
 

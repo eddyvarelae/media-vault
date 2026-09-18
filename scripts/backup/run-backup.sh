@@ -109,11 +109,18 @@ reported() {  # reported <name> <attach-id>: already reported for this attach to
 # A mount-point component cannot exceed 255 bytes, so a configured disk name
 # longer than that can never match a real volume - and the full name is what
 # each report carries on line 1 for the slug-collision guard below. Refuse
-# such a name at discovery rather than build a report for a disk that cannot
-# exist (review #43).
+# such a name at discovery, before building any report path (review #43).
+# Refuse it BEFORE any log call: the log directory is not created until a disk
+# is due, so die()'s log() would write into a directory that does not exist
+# yet (review #49). A configuration error goes straight to stderr, which
+# launchd routes into the log.
 _ifs=$IFS; IFS='|'
 for _d in $BACKUP_DISKS; do
-  (( $(printf '%s' "$_d" | wc -c) <= 255 )) || die "BACKUP_DISKS entry is longer than 255 bytes, which no mount point can be: '${_d:0:48}…'"
+  if (( $(printf '%s' "$_d" | wc -c) > 255 )); then
+    IFS=$_ifs
+    printf '[%s] REFUSING TO RUN: BACKUP_DISKS entry is longer than 255 bytes, which no mount point can be: %s\n' "$(ts)" "'${_d:0:48}…'" >&2
+    exit 2
+  fi
 done
 IFS=$_ifs
 
@@ -140,22 +147,32 @@ if (( dry_run )); then
   echo "  due now: ${due[*]-(none)}"
   exit 0
 fi
-# Unknown mounted volumes get logged once per attach, independent of whether
-# any known disk is due (review #28). The marker is keyed by name+attach-id,
-# so a detach/reattach (new id) logs again, and stale markers are pruned.
+# Unknown mounted volumes get logged once, independent of whether any known
+# disk is due (review #28). The marker is keyed by the name's slug ONLY - a
+# mount generation is not observable from /Volumes (device/inode/birth can all
+# survive a remount) - so a re-attach is logged again only when a tick in
+# between observed the volume gone and pruned its marker (review #38; stated in
+# README); a detach/remount entirely between two ticks is not detected, the
+# honest limit of polling /Volumes. Stale markers are pruned each tick.
 if (( ! dry_run )); then
   mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"
-  # Keyed by name only. A mount generation is not observable from /Volumes
-  # (device/inode/birth can all survive a remount), so a re-attach is logged
-  # again ONLY when a tick in between observed the volume gone and pruned its
-  # marker (review #38; stated in README). A detach/remount entirely between
-  # two ticks is not detected - the honest limit of polling /Volumes.
   live_unknown=""
   for u in "${unknown[@]+"${unknown[@]}"}"; do
     slug=$(slug "$u")
     live_unknown="$live_unknown $slug"
     marker="$STATE_DIR/backup.unknown-$slug"
-    [[ -f "$marker" ]] || { touch "$marker"; log "mounted volume '$u' is not in BACKUP_DISKS — ignored (add it to report it)"; }
+    uheader="volume: $u"
+    if [[ -f "$marker" ]]; then
+      # SLUG COLLISION on a marker: the slug already tracks a DIFFERENT
+      # volume, so this one cannot share it. Say so, rather than let it be
+      # silently swallowed as "already logged" (review #49; same guard as the
+      # report/tsv outputs).
+      [[ "$(head -1 "$marker" 2>/dev/null)" == "$uheader" ]] || \
+        log "SLUG COLLISION: unknown-volume marker $marker names \"$(head -1 "$marker" 2>/dev/null)\", not \"$uheader\" (slug $slug shared) — '$u' cannot be tracked; clear it by hand"
+    else
+      printf '%s\n' "$uheader" > "$marker"   # line 1 names the volume, for the collision check
+      log "mounted volume '$u' is not in BACKUP_DISKS — ignored (add it to report it)"
+    fi
   done
   for marker in "$STATE_DIR"/backup.unknown-*; do
     [[ -e "$marker" ]] || continue

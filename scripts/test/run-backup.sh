@@ -247,16 +247,42 @@ check "slug collision: the foreign report is left untouched" test "$(cat "$rep")
 check "slug collision: the refused disk records no new state line" test "$(wc -l < "$state/backup-state.tsv" | tr -d ' ')" -eq "$before_state"
 rm -rf "$vols"/*
 
-# review #43: a configured disk name longer than 255 bytes can never be a
-# mount point; refuse it at discovery (before any report path is built).
+# review #49: the collision guard covers all THREE slug-keyed outputs - the
+# report (.txt) and tsv (.tsv, above) and the unknown-volume marker. A marker
+# whose line 1 names a different volume is a collision: log it, leave it.
+rm -f "$state"/backup.unknown-*
+rm -rf "$vols"/*; mkdir -p "$vols/Random/DCIM"; mk "$vols/Random/DCIM/x" "z"   # an unknown volume
+cat > "$work/mini7.env" <<ENV
+SCRATCH_DIR="$scratch"
+BACKUP_DISKS="tars"
+ENV
+runmk() { MINI_ENV="$work/mini7.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" > "$out" 2>&1; }
+: > "$logf"; runmk
+mk=$(ls "$state"/backup.unknown-* 2>/dev/null | head -1)
+check "marker collision: an unknown volume's marker names it on line 1" test "$(head -1 "$mk" 2>/dev/null)" = "volume: Random"
+sed -i '' '1s|.*|volume: Imposter|' "$mk"   # pretend a different volume owns this slug
+: > "$logf"; runmk
+check "marker collision: a foreign marker triggers SLUG COLLISION" grep -q "SLUG COLLISION: unknown-volume marker" "$logf"
+check "marker collision: the foreign marker is left untouched" test "$(head -1 "$mk")" = "volume: Imposter"
+rm -rf "$vols"/*; rm -f "$state"/backup.unknown-*
+
+# review #43/#49: a configured disk name longer than 255 bytes can never be a
+# mount point; refuse it at discovery, before any report path is built AND
+# before any log call. Use a FRESH state dir whose log directory does not
+# exist, and a real (non-dry-run) tick so log() would write to that file: the
+# refusal must reach stderr with exit 2 and NOT try to log into the missing
+# dir (the old die()->log() would print "No such file" and create nothing).
 long255="$head24$(printf 'c%.0s' $(seq 300))"   # 324 bytes
+fresh="$work/freshstate"; rm -rf "$fresh"
 cat > "$work/mini6.env" <<ENV
 SCRATCH_DIR="$scratch"
 BACKUP_DISKS="$long255"
 ENV
-MINI_ENV="$work/mini6.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$state" BACKUP_LOG_FILE="$logf" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" --dry-run > "$out" 2>&1; longrc=$?
+MINI_ENV="$work/mini6.env" PATH="$work/bin:$PATH" MANIFEST_DB="$manifest" BACKUP_STATE_DIR="$fresh" BACKUP_LOG_FILE="$fresh/log/media-backup.log" VOLUMES_DIR="$vols" VAULT_BIN="$vault" bash "$script" > "$out" 2>&1; longrc=$?
 check "over-long name: refused with exit 2" test "$longrc" -eq 2
 check "over-long name: the message says 255 bytes" grep -q "longer than 255 bytes" "$out"
+check "over-long name: no broken log write (refused before any log call)" test "$(grep -c 'No such file' "$out")" -eq 0
+check "over-long name: no state dir created" test ! -e "$fresh"
 
 echo
 if [ "$failures" -ne 0 ]; then echo "$failures check(s) failed"; exit 1; fi
