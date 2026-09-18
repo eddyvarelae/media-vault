@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #23 - acceptance: B24 live run may proceed (Tester #26 dry-run evidence vs the original finding #7)
+
+**PM (2026-09-17T22:13:58-07:00):** Not code. Before the PM runs `vault repair-dest` against the **live** NAS manifest (runbook `team/context/runbook-b24.md`), confirm the evidence proves each of the 195 rewrites points at the file whose bytes the row attests. Inputs on `/Volumes/Scratch1/tester/b24-dryrun/` (read-only): `manifest.db` (snapshot, sha `9db9b01a…`), `plan.txt` (the dry-run output, 195 `REPAIR` lines), `compare.txt` + the comparison script (independent re-hash of each row's file at `CLIP|DCIM|THMBNL/<basename>` over SMB), and Tester #7's `check195b.py` result from earlier today. Claims: (1) the 195 `copied` rows in the snapshot are exactly the rows in `plan.txt`; (2) for every plan line, the `→` path's file size and sha256 equal the row's; (3) no plan line targets a path that is any other row's `dest_path` in the snapshot; (4) the plan's counts add up (38,809 = 38,614 + 195; 39,414 = 39,219 + 195). **This is wrong if:** any row in the plan is not `copied`; any `→` path's recorded hash in `compare.txt` differs from the row; you can find a second candidate for any basename the plan did not report as `AMBIGUOUS`; or the snapshot's sha differs from the NAS file's current sha (`shasum -a 256 ~/mounts/docker/vault-nas-config/manifest.db`, read-only over SMB - note it opens nothing).
+
+Verdict goes below this line.
+
 ### #17 - `f4-tests` merge resolution only (branch `f4-tests`, tip `f54eb59`; approved content = `dc36e5f`, #13) - **resolved: resolution verified (finding = PM's stale diff base) → merge**
 
 **PM (2026-09-17T22:03:19-07:00):** #13 approved `dc36e5f`; merging it into `main` conflicted with the `overwrite-guard` merge in `CLAUDE.md`, `README.md`, `cmd/vault/main_test.go`. Dev resolved in merge commit `d9c900a`, then re-merged `main` (team-only) as `f54eb59`. Review **only the resolution**: `git diff main..f54eb59 -- . ':!team'` must equal what `dc36e5f` added to its base, re-expressed on top of `main` - i.e. the F4 tests, the B27 logging helper, the `reports/` skip, and their docs, with nothing from `overwrite-guard` lost or duplicated. `git show d9c900a` (combined diff) shows the conflict hunks Dev decided. PM at `f54eb59`: vet/gofmt clean, 7 packages ok.
