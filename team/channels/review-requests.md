@@ -82,7 +82,7 @@ The case-fold and `..` examples are closed by the shared key function; the stagi
 
 **PM (2026-09-17T20:22:28-07:00):** FINDING accepted. A symlinked *directory component* under the destination root aliases two spellings to one physical file, and neither the key nor the writer's `Lstat` (which follows intermediate links) sees it. Fix direction to Dev: the same discipline `repair-dest` now has - walk the destination path component by component from the root with `Lstat` and refuse any symlink component before admitting or writing (new file or recopy); ownership stays on the cleaned key. Back to Dev on `overwrite-guard`, new commits only; re-review as **#11, fixes only**. **Reviewer availability:** Codex hit its usage limit at 2026-09-17T20:22:28-07:00 right after writing #9 - request #10 got no verdict and stays OPEN; retry from 21:34 (Codex's own message), or earlier if Eddy adds credits.
 
-### #10 - re-review of #7's fixes only (branch `repair-dest`, code tip `c6d9d42`)
+### #10 - re-review of #7's fixes only (branch `repair-dest`, code tip `c6d9d42`) - **resolved: FINDINGS (3), all accepted → Dev fixes → request #15**
 
 **PM (2026-09-17T20:20:48-07:00):** Check the three #7 findings and B33 are closed, nothing else. Diff `git diff 6c52d37..c6d9d42 -- . ':!team'` (1 commit after Dev's merge of `main` at `6c52d37`; 7 files, +340/-62). Dev's note: `team/channels/dev-questions.md`, Dev 2026-09-17T20:20 (commit `ce79253` on that branch). PM independently at `c6d9d42`: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all seven test packages.
 
@@ -95,6 +95,19 @@ The case-fold and `..` examples are closed by the shared key function; the stagi
 **This is wrong if:** any `os.Stat`/`os.Open`/`os.ReadFile` on a candidate or its directory remains that follows a symlink before the `Lstat` check; `under()` can be satisfied by a path whose ancestor is a symlink pointing back inside the root (still outside the one-level rule); a directory at `dest_path` can still count as intact anywhere (including `Apply`'s post-check); `OWNED` keying differs from `scan`'s physical key; or `Apply` can write a row whose plan outcome is not `REPAIR`.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-17):** FINDINGS — request #10, exactly `git diff 6c52d37..c6d9d42 -- . ':!team'`, reviewed by source trace; line references are to `c6d9d42`. No build or tests run.
+
+1. **[P2] The intact fast path bypasses the new containment and ancestor checks.** `internal/repair/repair.go:95-100` calls `Lstat(root/dest_path)` and immediately counts a regular leaf as intact; `containedDir` and `under` run only later, inside `locate`. For `root/Videos -> /outside/videos`, an existing regular `/outside/videos/X.MP4` and a row with `dest_path=Videos/X.MP4`, `Lstat` follows the intermediate symlink and the command reports intact, with exit 0 if this is the only row. An existing `../X.MP4` similarly bypasses lexical containment. Validate the row's directory and containment before the intact check, and keep rejected paths unresolved. The new ancestor regression covers only a missing old destination, so it does not exercise this branch.
+
+2. **[P2] B33 ownership is a frozen snapshot, so two repairs can claim the same candidate in one run.** `internal/repair/repair.go:81` builds claims once; lines 107-111 and 154-164 never reserve a chosen `NewDest`. Concrete input: two rows on disk `sony`, distinct source paths `a/X.JPG` and `b/X.JPG`, both with missing `dest_path=X.JPG` and identical size/hash; the only matching file is `root/DCIM/X.JPG`. Both changes become `REPAIR`. `Apply` (lines 235-244) writes both, even though after its first update another row already claims `DCIM/X.JPG`. The schema permits this (only source disk/path is unique). Reserve candidates during planning or mark conflicting planned repairs unresolved, and ensure application cannot create this duplicate ownership; add a two-row regression.
+
+3. **[P2] The new containment predicate rejects valid repairs when the destination root is `.`.** `internal/repair/repair.go:195-204` compares resolved paths using `HasPrefix(f, r + separator)` without making them absolute. With `vault repair-dest sony .`, missing `X.JPG`, and a matching regular `./DCIM/X.JPG`, `EvalSymlinks(".")` returns `"."` while the joined candidate resolves to `"DCIM/X.JPG"`; it does not start with `"./"`. The candidate is skipped before hashing, reported `NOT FOUND`, and a real run exits 1. Root `/` also constructs the incorrect prefix `//`. Normalize to absolute paths and use a component-aware relative containment check; cover both root forms.
+
+The leaf/subdirectory candidate symlink guards, directory-at-destination outcome and CLI exit handling, dry-run wording, and `Apply`'s non-`REPAIR` exclusion trace correctly. These do not close the paths above.
+
+
+**PM (2026-09-17T21:37:50-07:00):** FINDINGS accepted, all three (all P2, all real): the intact fast path must run the same directory-walk + containment before counting a leaf intact; planned repairs must reserve their candidate so two rows cannot claim one file (conflict → unresolved); containment must work on absolute paths for roots `.` and `/`. Back to Dev on `repair-dest`, new commits only; re-review as **#15, fixes only**.
 
 ### #8 - numbers: `kipp` gap report (Tester #19) - **resolved: FINDINGS (1, breakdown only); headline numbers reproduced → delivered to Eddy with the corrected breakdown**
 
