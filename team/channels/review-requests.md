@@ -6,7 +6,7 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #9 - re-review of #6's fix only (branch `overwrite-guard`, code tip `abc863e`)
+### #9 - re-review of #6's fix only (branch `overwrite-guard`, code tip `abc863e`) - **resolved: FINDINGS (1), accepted → Dev fixes → request #11**
 
 **PM (2026-09-17T20:20:48-07:00):** Check that #6's one finding is closed, nothing else. Diff `git diff 539317c..abc863e -- . ':!team'` (1 commit after Dev's merge of `main` at `539317c`; 7 files, +399/-55; `internal/copy` now changes - the writer - which is expected). Dev's note: `team/channels/dev-questions.md`, Dev 2026-09-17T20:14 (worktree `~/Projects/media-vault-dev`, commit `34cc608` on that branch). PM independently at `abc863e` in a detached checkout: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all six test packages.
 
@@ -18,6 +18,14 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 **This is wrong if:** any write site in `copy.File` can open an existing path for writing (grep every `os.OpenFile`/`os.Create`/`os.Rename`); the key normalization differs between the index and the lookup (one cleaned, the other not; one folded, the other not); a path that `filepath.Join` does not clean identically on both sides exists (trailing slash, `//`); the recopy `Replace` path can replace a file owned by a verified row of another disk; or the case test can pass on a folding FS without the refusal actually happening.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-17):** FINDINGS — request #9, exactly `git diff 539317c..abc863e -- . ':!team'`, reviewed by source trace; references are to `abc863e`. No build or tests run.
+
+1. **[P1] A recopy through a symlinked parent directory can still overwrite another disk's verified destination.** `internal/scan/scan.go:380-381` only cleans and lowercases the pathname; it does not identify directory symlink aliases. Concrete input: `dst/real/x.mov` is a regular file owned by disk A's verified row with `dest_path=real/x.mov`; `dst/alias` is a symlink to `real`; disk B has a non-verified row for source `alias/x.mov`, and that source now has a different size. With no routing rules, `Build` sets `Replace=true` at line 263, but `owners.claims` compares `dst/alias/x.mov` against `dst/real/x.mov` and admits the recopy. In `internal/copy/copy.go:49-55`, `Lstat(dst/alias/x.mov)` follows the intermediate symlink and reports the regular final file, so the new guard permits replacement. The exclusive staging open at line 69 creates `dst/real/x.mov.vault-partial`, and the rename at line 102 replaces A's verified `dst/real/x.mov`. No race is required. Resolve existing parent-directory aliases consistently for ownership lookup, or reject symlinked destination directory components before admitting/writing a replacement; add this cross-disk recopy regression. This fails #9's explicit criterion that `Replace` cannot replace a file owned by another disk's verified row.
+
+The case-fold and `..` examples are closed by the shared key function; the staging open uses `O_EXCL`, with no cleanup on open refusal. The added folding-filesystem test explicitly requires refusal and checks preservation. Those fixes do not prevent the parent-directory alias bypass above.
+
+**PM (2026-09-17T20:22:28-07:00):** FINDING accepted. A symlinked *directory component* under the destination root aliases two spellings to one physical file, and neither the key nor the writer's `Lstat` (which follows intermediate links) sees it. Fix direction to Dev: the same discipline `repair-dest` now has - walk the destination path component by component from the root with `Lstat` and refuse any symlink component before admitting or writing (new file or recopy); ownership stays on the cleaned key. Back to Dev on `overwrite-guard`, new commits only; re-review as **#11, fixes only**. **Reviewer availability:** Codex hit its usage limit at 2026-09-17T20:22:28-07:00 right after writing #9 - request #10 got no verdict and stays OPEN; retry from 21:34 (Codex's own message), or earlier if Eddy adds credits.
 
 ### #10 - re-review of #7's fixes only (branch `repair-dest`, code tip `c6d9d42`)
 
