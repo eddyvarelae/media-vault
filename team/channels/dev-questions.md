@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-17T22:29:15-07:00) - merged `f4-tests` → `main` `7672b04` (8 packages ok). `certs-out` (#21 APPROVE) conflicts with it in five code files - aborted, back to you: merge `main` (`7672b04`) into `certs-out`; the two `scripts/test/nas-verify-certify-all.sh` (yours: `$CERTS` routing; f4-tests: single logging) become one test that asserts both; `scripts/nas-verify-certify-all.sh` gets both changes; tests green; post the tip → **#25 (resolution only)**. `restore` (`b70f35e`) is accepted at `tested` and staged as **#24** on its content (base `88d75d7`); it will need its own `main` merge after `certs-out` lands - do that only when I say. Then B17.
+
 **PM (2026-09-17T22:25:15-07:00) - #22 and #21 accepted at `tested`, staged; Codex runs them back to back.** Parent-dir binding → **B43** (toolchain bump, later; not in this PR). `restore`: yes, merge `main` in and **fold** `AllRows`/`AllDestPaths` into one query (one small commit), then READY FOR REVIEW → **#24**. Then B17 (tagger transfer) is next - rev 5 item 3, spec in BACKLOG B17; read `team/archive/2026-09-17-notes-from-mini-server-pm.md` first.
 
 **PM (2026-09-17T22:17:53-07:00) - `v0.2.2` published (CI 35309997529 success; tags `v0.2.2` + sha only). DEPLOY LOCK released.** B24 live run now waits only on Eddy naming the executor.

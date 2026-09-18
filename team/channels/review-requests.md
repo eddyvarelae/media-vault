@@ -6,6 +6,22 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #24 - B40 `vault restore` (branch `restore`, code tip `b70f35e`)
+
+**PM (2026-09-17T22:29:15-07:00):** Review `git diff 88d75d7..b70f35e -- . ':!team'` (8 files, +692/-29: new `internal/restore/{restore.go,restore_test.go}`, `cmd/vault/main.go` + test, `internal/manifest/manifest.go` (`AllRows` replaces `AllDestPaths`), `internal/repair/repair.go` + test, `CLAUDE.md`). Base `88d75d7` is `main`'s code tip when the branch merged it; `f4-tests` landed on `main` after (`7672b04`) and is independent. Design as approved in `team/channels/dev-questions.md` (Dev 2026-09-17T22:01 proposal, PM 22:03 GO with two additions). Context: one `verified` NAS file is a torn write (Tester #24); this command replaces a named destination deliberately, the one thing the v0.2.1 guard exists to forbid. PM at `b70f35e`: vet/gofmt clean, 8 packages ok.
+
+**Claims:**
+1. `vault restore <disk> <source-path> <replacement-file> <dest-root> --expect-sha <sha> [--dry-run]` refuses, exit 1, nothing written, at the first failure of: row exists; destination physically clean (no symlink component, regular file); no other row of any disk claims the same physical file (rows with empty `dest_path` claim `root/source_path`); `--expect-sha` present and equal to the replacement's hash; replacement ≠ current bytes (else exit 0, nothing written).
+2. `--dry-run` prints everything including `claimants: none`, writes nothing.
+3. The write goes through `copy.File` with `Replace: true` (O_EXCL staging, rename over the checked path; the writer re-walks); the landed sha must equal `--expect-sha` or the command dies after the rename (stated as the last check).
+4. The row is upserted with new sha/size/mtime, `copied_at = now`, `verified_at = 0`, `status = copied`; `source_disk`/`source_path`/`dest_path` unchanged; the `RESTORED` log line carries old and new sha:size, `expect=`, the prior `status`/`verified_at`, and the replacement path.
+5. The `AllRows` fold: `repair-dest`'s claim index now treats an empty-`dest_path` row as owning `root/source_path` (safe direction); `TestEmptyDestPathRowsClaimTheirSourcePath`.
+6. Tests cover the full B40 shape end to end (copy → verify → certify → corrupt tail → dry-run → restore → row `copied` → `verify --only-unverified` promotes only it → certify passes) and every refusal.
+
+**This is wrong if:** any refusal can be bypassed by argument order or a flag (`--force` must not exist); the claimants check misses a `deduped` row of another disk; the write can happen with `--dry-run`; the post-rename sha check can be skipped; the row can end `verified`; `repair-dest`'s behavior changed beyond claim 5; or the restore path can be used to write outside `dest-root` (symlink component, `..` in `source-path`).
+
+Verdict goes below this line.
+
 ### #22 - `f4-tests` merge resolution only, second attempt (branch tip `846c958`; approved content `dc36e5f` #13, resolution verified once #17) - **resolved: APPROVE → merged**
 
 **PM (2026-09-17T22:25:15-07:00):** Base pinned this time: `main`'s code tip is `88d75d7` (later `main` commits are team files only). Review `git diff 88d75d7..846c958 -- . ':!team'` - it must be exactly the approved `dc36e5f` content (F4 tests, B27 helper + shell test, `reports/` skip, docs) re-expressed on top of `88d75d7`, plus nothing. Dev's two conflict resolutions (`scripts/test/scripts_test.go`: `TestVerifyCertifyAllLogsEachLineOnce` beside `TestKippCopyAllShape`; `cmd/vault/main_test.go`: `TestVerifyOnlyUnverified` beside `TestRepairDest`) reconstruct both functions whole. PM at `846c958`: vet/gofmt/bash -n clean, 8 packages ok.
