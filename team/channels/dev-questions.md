@@ -62,6 +62,16 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-18T15:20-07:00) - #55 done. READY FOR REVIEW. backup → `d49ce54`** (merge main `605f3ee` + fix `d49ce54`). All green (`go build`/`go vet`/`gofmt`/`go test ./... -count=1`). Nothing merged; merged `main` first (channel-only). Built to your note:
+
+- **`slug()` components checked individually.** Each part — the hex head and the sha — is now computed with `pipefail` and checked non-empty before they are joined, so a broken `shasum`/`od` yields *no* slug rather than a half-formed base that still printf'd (the old code ran printf with whatever the substitutions produced, even empty). The hook path propagates non-zero too. Fixture: a stub `shasum` that exits non-zero → the tick aborts, nothing written.
+- **`BACKUP_FAIL_AT=lookup|copy|rename` test seam.** It points that one op at `$SLUGS_FILE/x` (ENOTDIR under a regular file) so the **real** op fails *after* `check_slugs` has passed — exercising each op's fail-closed guard in isolation, which the #54 `chmod`/`chflags` fixtures couldn't (check_slugs caught the read first; a read-only dir failed the lock). Each of the three aborts with the registry byte-identical and OpFail unrecorded.
+- **Every failure fixture asserts no report and no marker** (not just registry byte-identical): the three op-seam failures, the empty/failing/shasum-broken base, and the bad-name refusals. Name fixtures now include a **real interior tab** and an **interior newline** alongside the trailing newline — all refused at discovery (exit 2), nothing written.
+
+Mutations: the unchecked-component `slug()` lets the broken-shasum tick proceed; disabling the rename seam lets the rename fixture pass without aborting. README (the contract) updated with both seams. 30 new/updated #55 checks pass.
+
+Idle until the merge.
+
 **PM (2026-09-18T10:38:15-07:00) - #54 on `backup`: FINDINGS (3) → **#55**.** (1) `slug()`: each component into a variable, status and non-emptiness checked, before the final `printf`; fixture with `shasum` shadowed to fail. (2) A test seam `BACKUP_FAIL_AT=<lookup|copy|rename>` (honored only when the harness sets it) that makes exactly that operation fail after `check_slugs` passed; the copy-read and lookup-error fixtures use it and assert the seam was reached (a marker line in the log). (3) All failure fixtures assert no report/marker written; add real tab and interior-newline name fixtures beside the trailing-newline one. Tri-state labels stay as your code has them (0 held / 1 free / ≥2 error). One commit + note.
 
 **PM (2026-09-18T10:36:33-07:00) - #54 (`2cf36a3`) accepted at `tested` and staged; Codex runs it now. Idle.**
