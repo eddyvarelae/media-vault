@@ -67,7 +67,7 @@ go build -o vault ./cmd/vault
 ./vault verify tars /Volumes/nas-share/archive --only-unverified
 
 # 4. Certify: emit a signed JSON proving the disk is fully archived
-./vault certify tars ./tars-cert.json
+./vault certify tars ./tars-cert.json     # anywhere but inside the archive tree
 ```
 
 The manifest and signing key live under `$VAULT_CONFIG` (default
@@ -105,7 +105,12 @@ unless every file is in `verified` status.
 4. **Wipe certificate** takes a `source_disk` name, refuses (exit 1) if any
    row for it is not `verified`, and otherwise emits an Ed25519-signed JSON
    listing every file with its destination path, sha256, and verification
-   timestamp. The signing key lives under `$VAULT_CONFIG/key.pem`.
+   timestamp. The signing key lives under `$VAULT_CONFIG/key.pem`. The
+   output path may not be inside the tree it certifies — a certificate in
+   the archive is a file with no manifest row, and once blocked 39,219
+   files as a collision — so it refuses (exit 1) if any of the disk's
+   archived files exist under an ancestor of the output path. Keep
+   certificates beside the manifest.
 
 ## License
 

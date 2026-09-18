@@ -613,3 +613,72 @@ func TestExitCodeOrdering(t *testing.T) {
 		})
 	}
 }
+
+// TestCertifyRefusesOutputInsideArchive is B25 through main(): a certificate
+// written under the destination root exits 1 before signing; beside the
+// manifest it succeeds; stdout mode is untouched.
+func TestCertifyRefusesOutputInsideArchive(t *testing.T) {
+	cfg, src, dst, certs := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(src, "DCIM", "DSC0001.JPG"), "a photo", t0)
+	if _, _, code := vault(t, cfg, "copy", "sony", src, dst); code != 0 {
+		t.Fatalf("copy: exit %d", code)
+	}
+	if _, _, code := vault(t, cfg, "verify", "sony", dst); code != 0 {
+		t.Fatalf("verify: exit %d", code)
+	}
+	for _, out := range []string{
+		filepath.Join(dst, "media-sonya6700.cert.json"),
+		filepath.Join(dst, "DCIM", "cert.json"),
+	} {
+		_, errOut, code := vault(t, cfg, "certify", "sony", out)
+		if code != 1 || !strings.Contains(errOut, "Cannot certify: certificate output is inside the archive it certifies") {
+			t.Errorf("certify %s: exit %d, stderr %q", out, code, errOut)
+		}
+		if _, err := os.Stat(out); err == nil {
+			t.Errorf("certificate written anyway at %s", out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(cfg, "key.pem")); err == nil {
+		t.Errorf("refusal should happen before the signing key is created")
+	}
+	out := filepath.Join(certs, "media-sonya6700.cert.json")
+	if _, errOut, code := vault(t, cfg, "certify", "sony", out); code != 0 || !strings.Contains(errOut, "Wrote signed certificate") {
+		t.Fatalf("certify beside the manifest: exit %d, stderr %q", code, errOut)
+	}
+	if stdout, _, code := vault(t, cfg, "certify", "sony"); code != 0 || !strings.Contains(stdout, `"source_disk": "sony"`) {
+		t.Errorf("stdout certify: exit %d", code)
+	}
+	// The next scan of the tree finds no stray certificate.
+	if stdout, _, code := vault(t, cfg, "scan", "sony", src, dst); code != 0 || !strings.Contains(stdout, "Dst collisions:   0") {
+		t.Errorf("scan after certify: exit %d\n%s", code, stdout)
+	}
+}
+
+// TestRulesRefuseEscapes is B34 through main(): a --rule whose subdir
+// climbs out of the destination root, or is absolute, is a bad flag value
+// (exit 1) for scan, copy and move.
+func TestRulesRefuseEscapes(t *testing.T) {
+	cfg := t.TempDir()
+	for _, c := range []struct {
+		name string
+		args []string
+	}{
+		{"copy ..", []string{"copy", "--rule", "MP4=../archive", "d", "s", "x"}},
+		{"copy nested ..", []string{"copy", "--rule", "MP4=Videos/../../x", "d", "s", "x"}},
+		{"scan absolute", []string{"scan", "--rule", "MP4=/volume1/other", "d", "s", "x"}},
+		{"move ..", []string{"move", "--rule", "MP4=../x", "a", "b", t.TempDir(), t.TempDir()}},
+	} {
+		if _, errOut, code := vault(t, cfg, c.args...); code != 1 || !strings.Contains(errOut, "invalid rule") {
+			t.Errorf("%s: exit %d, stderr %q", c.name, code, errOut)
+		}
+	}
+	// A dot in the middle of a name is not a climb.
+	src, dst := t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(src, "a.MP4"), "clip", t0)
+	if _, _, code := vault(t, cfg, "copy", "--rule", "MP4=v..ideos/2024", "d", src, dst); code != 0 {
+		t.Errorf("rule with .. inside a component: exit %d, want 0", code)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "v..ideos", "2024", "a.MP4")); err != nil {
+		t.Errorf("routed file missing: %v", err)
+	}
+}

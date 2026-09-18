@@ -25,3 +25,13 @@ func TestTarsCopyAllLogsFailedCards(t *testing.T) {
 		t.Fatalf("shell test failed: %v", err)
 	}
 }
+
+func TestVerifyCertifyAllWritesCertsBesideTheManifest(t *testing.T) {
+	cmd := exec.Command("bash", "./nas-verify-certify-all.sh")
+	cmd.Env = append(os.Environ(), "TMPDIR="+t.TempDir())
+	out, err := cmd.CombinedOutput()
+	t.Logf("\n%s", out)
+	if err != nil {
+		t.Fatalf("shell test failed: %v", err)
+	}
+}

@@ -45,7 +45,7 @@ echo "=== CERTIFY ==="
 sudo docker run --rm \
   -v "$DST":/dest \
   -v "$CFG":/config \
-  "$IMG" certify tars /dest/tars-test.cert.json
+  "$IMG" certify tars /config/tars-test.cert.json   # beside the manifest, never under /dest (B25)
 
 echo
-echo "Done. Certificate at $DST/tars-test.cert.json"
+echo "Done. Certificate at $CFG/tars-test.cert.json"

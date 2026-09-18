@@ -71,10 +71,10 @@ command:
 
 | Command | Exits 1 when | Exits 0 even though |
 |---|---|---|
-| `scan` | scan error (unreadable source, cancelled) | collisions/recopies are predicted — it only reports |
+| `scan` | scan error (unreadable source, cancelled); a `--rule` whose subdir is absolute or has a `..` component (`invalid rule`, `die`) — same for `copy` and `move`, B34 | collisions/recopies are predicted — it only reports |
 | `copy` | run finished `INCOMPLETE:` — any file failed, any unresolved destination collision, any intra-run duplicate left unarchived (stderr names which); interrupted between files; `die` on scan or manifest-write error | no-op, `--dry-run` (even with predicted collisions) |
 | `verify` | any mismatch, missing, or read error; `die` on cancel | — |
-| `certify` | any row not `verified` (`Cannot certify: …`); no rows for the disk; key/sign/marshal/write error | — |
+| `certify` | output path inside the tree it certifies (`Cannot certify: certificate output is inside the archive …` — before signing, before the key is created; the tree is recognised by its own files: an ancestor of the output path under which a row's `dest_path` exists as a regular file of the row's size, `certify.InsideArchive`); any row not `verified` (`Cannot certify: …`); no rows for the disk; key/sign/marshal/write error | — |
 | `inventory` | `die` on walk error | per-file hash errors — counted in `Errors:`, exit 0 |
 | `dedup` | unknown arg or bad `--min-size` (`die`, not usage); query error | — |
 | `unique`, `tag`, `untag`, `tagged`, `tags` | query error | no matches (`No files tagged …`) |
@@ -105,6 +105,10 @@ number nobody can recompute is a finding, not a fact.
 ## Hard rules
 
 - Never write to a source disk. Containers mount `/sources` read-only.
+- Certificates live beside the manifest (`/volume1/docker/vault-certs/` on
+  the NAS, `VAULT_CERTS` in `nas-verify-certify-all.sh`), never inside the
+  tree they certify; `certify` refuses. A `--rule` never routes outside the
+  destination root.
 - Atomic destination writes only (`.vault-partial` → fsync → rename).
 - One `vault` process per config dir; read-only queries need `?mode=ro`.
 - Nothing secret in the repo. `vault-config/` is gitignored.

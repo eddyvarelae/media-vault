@@ -57,12 +57,20 @@ func InsideArchive(out string, rows []manifest.Entry) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Dir(abs)
-	// Physical, not spelled: resolve the directory the file would land in
-	// (it must exist for the write to succeed; if it does not, the lexical
-	// ancestors are the best available and the write fails anyway).
-	if r, err := filepath.EvalSymlinks(dir); err == nil {
-		dir = r
+	// Physical, not spelled: resolve the directory the file would land in.
+	// If it does not exist yet, resolve its longest existing ancestor and
+	// re-append the rest, so a link into the tree is seen either way.
+	dir, rest := filepath.Dir(abs), ""
+	for {
+		if r, err := filepath.EvalSymlinks(dir); err == nil {
+			dir = filepath.Join(r, rest)
+			break
+		}
+		if filepath.Dir(dir) == dir {
+			break
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
+		dir = filepath.Dir(dir)
 	}
 	for anc := dir; ; anc = filepath.Dir(anc) {
 		for _, e := range rows {
