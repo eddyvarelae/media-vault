@@ -20,6 +20,7 @@ import (
 	"github.com/eddyvarelae/media-vault/internal/inventory"
 	"github.com/eddyvarelae/media-vault/internal/manifest"
 	mvpkg "github.com/eddyvarelae/media-vault/internal/move"
+	"github.com/eddyvarelae/media-vault/internal/repair"
 	"github.com/eddyvarelae/media-vault/internal/scan"
 	"github.com/eddyvarelae/media-vault/internal/verify"
 )
@@ -37,6 +38,9 @@ Usage:
                                          is already archived under any disk)
   vault verify     <source-disk-name> <dest-dir> [--only-unverified]
   vault certify    <source-disk-name> [out.json]
+  vault repair-dest <source-disk-name> <dest-dir> [--dry-run]
+                   (rows whose dest_path is missing: point them at the same
+                    basename one directory down, only on a size+sha256 match)
   vault inventory  <source-disk-name> <dir>
   vault dedup      [--min-size <bytes>]
   vault unique     <source-disk-name>
@@ -94,6 +98,10 @@ func main() {
 		runVerify(ctx, m, args)
 	case "certify":
 		runCertify(m, configDir, args)
+	case "repair-dest":
+		if code := runRepairDest(ctx, m, args); code != 0 {
+			os.Exit(code)
+		}
 	case "inventory":
 		runInventory(ctx, m, args)
 	case "dedup":
@@ -495,6 +503,72 @@ func runCertify(m *manifest.Manifest, configDir string, args []string) {
 		fmt.Fprintf(os.Stderr, "Files: %d   Bytes: %s   Disk: %s\n",
 			cert.FileCount, human(cert.TotalBytes), cert.SourceDisk)
 	}
+}
+
+// runRepairDest is B24. It returns its status like runCopy: 0 when every
+// missing-dest row was repaired (or --dry-run, or nothing was missing), 1
+// when rows are left that this tool could not back with a hash. Those rows
+// are still `missing` to verify, which is the honest state.
+func runRepairDest(ctx context.Context, m *manifest.Manifest, args []string) int {
+	dryRun := false
+	var pos []string
+	for _, a := range args {
+		switch a {
+		case "--dry-run":
+			dryRun = true
+		default:
+			if strings.HasPrefix(a, "--") {
+				die("unknown flag: %s", a)
+			}
+			pos = append(pos, a)
+		}
+	}
+	if len(pos) != 2 {
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	disk, root := pos[0], pos[1]
+
+	plan, err := repair.Build(ctx, m, disk, root)
+	if err != nil {
+		die("repair-dest: %v", err)
+	}
+	repairable, notFound, ambiguous := plan.Counts()
+
+	fmt.Printf("Disk %s at %s: %d rows with a dest_path, %d intact, %d missing (%d inventoried rows have no dest_path and were not examined)\n",
+		disk, root, plan.Checked, plan.Intact, len(plan.Changes), plan.NoDest)
+	for _, c := range plan.Changes {
+		switch c.Outcome {
+		case repair.Repairable:
+			fmt.Printf("  %-9s %s : %s → %s\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath, c.NewDest)
+		case repair.Ambiguous:
+			fmt.Printf("  %-9s %s : %s → %s\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath, strings.Join(c.Candidates, " | "))
+		default:
+			fmt.Printf("  %-9s %s : %s\n", c.Outcome, c.Row.SourcePath, c.Row.DestPath)
+		}
+	}
+	fmt.Printf("\nRepairable: %d   Not found: %d   Ambiguous: %d   Bytes hashed: %s\n",
+		repairable, notFound, ambiguous, human(plan.BytesHashed))
+
+	if dryRun {
+		fmt.Println("(dry-run; nothing written)")
+		return 0
+	}
+	n, err := repair.Apply(m, plan, func(c repair.Change) {
+		fmt.Printf("  repaired  %s : %s → %s\n", c.Row.SourcePath, c.Row.DestPath, c.NewDest)
+	})
+	if err != nil {
+		// Rows already rewritten stay rewritten: each was backed by its
+		// hash before the write, so a partial run leaves nothing wrong.
+		die("repair-dest: after %d row(s) written: %v", n, err)
+	}
+	fmt.Printf("\nRepaired %d row(s). Status untouched — run `vault verify %s %s` to promote them.\n", n, disk, root)
+	if notFound > 0 || ambiguous > 0 {
+		fmt.Fprintf(os.Stderr, "\nINCOMPLETE: %d row(s) still without a destination this tool can back with a hash (%d not found, %d ambiguous).\n",
+			notFound+ambiguous, notFound, ambiguous)
+		return 1
+	}
+	return 0
 }
 
 func runInventory(ctx context.Context, m *manifest.Manifest, args []string) {

@@ -517,6 +517,23 @@ func (m *Manifest) MarkVerified(disk, sourcePath string, verifiedAt int64) error
 	return err
 }
 
+// UpdateDestPath moves a row's pointer and nothing else — size, hash,
+// status and timestamps stay, because the bytes it describes have not
+// changed, only where they are. `vault repair-dest` is the only caller.
+func (m *Manifest) UpdateDestPath(disk, sourcePath, destPath string) error {
+	res, err := m.db.Exec(`
+		UPDATE files SET dest_path = ?
+		WHERE source_disk = ? AND source_path = ?
+	`, destPath, disk, sourcePath)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return fmt.Errorf("update dest_path for %s/%s: %d rows affected, want 1", disk, sourcePath, n)
+	}
+	return nil
+}
+
 func (m *Manifest) MarkMismatch(disk, sourcePath string, verifiedAt int64) error {
 	_, err := m.db.Exec(`
 		UPDATE files SET verified_at = ?, status = 'mismatch'
