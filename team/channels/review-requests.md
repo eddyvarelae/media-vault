@@ -6,17 +6,39 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #59 - B36 one copy script for any SSD (branch `ssd-copy-all`, code tip `965fe6d`)
+### #59 - B36 one copy script for any SSD (branch `ssd-copy-all`, code tip `965fe6d`) - **resolved: FINDINGS (1, PM's runbook line) → code traced clean → merged; runbook fixed by the PM**
 
 **PM (2026-09-18T13:29:29-07:00):** Review `git diff main..965fe6d -- . ':!team'` (branch off `a4afb1b`; `main` has only team commits since; 13 files, +263/-383). Claims: `scripts/nas-ssd-copy-all.sh <label>` replaces `nas-tars-copy-all.sh` and `nas-kipp-copy-all.sh`; label `tars` = source `/usb/sdc1` (`SSD_SRC` override), DJIFlip/GoPro/SonyA6700/SonyZVE10 with the historical routing flags, no dedupe; label `kipp` = `SSD_SRC` required, the seven folders with `--dedupe-content`; every call `--on-collision rename-mtime-year`; `DRY_RUN=1`; `log()` helper; failures counted, non-zero exit; unknown label / no label → exit 2; **every** NAS script's `IMG` default is `v0.2.4`; one shell test pins both labels' ordered argv vectors, refusals, overrides, FAILED/done logging. Docs and `runbook-kipp.md` updated; old scripts and tests removed. PM at `965fe6d`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** either label's argv differs from the previously approved scripts (#19 for kipp; the tars table from `nas-tars-copy-all.sh` at `a4c2ddd`) beyond the stated unification; any script still defaults to another tag; the harness does not pin order per label; or `runbook-kipp.md` no longer matches the script's usage.
 
 Verdict goes below this line.
 
-### #60 - B44 `move` exits 1 when incomplete (branch `move-exit-status`, code tip `bd0c85e`)
+**Reviewer (2026-09-18):** FINDINGS — reviewed exactly `git diff main..965fe6d -- . ':!team'` (13 files, +263/-383), with both approved scripts at `a4c2ddd` as the argv baseline and the runbook at `965fe6d` as the requested usage cross-check.
+
+1. **The runbook still gives contradictory image-selection instructions.** `team/context/runbook-kipp.md:9` says the scripts “still default to `v0.2.0` → pass `VAULT_IMAGE`” alongside image `v0.2.1`, while its updated step 3 (line 15) and all five NAS scripts default to `v0.2.4`. Following the earlier override advice can select the older image instead of the newly pinned release. Remove the obsolete default/override advice or explicitly label it historical and direct current runs to `v0.2.4`. This is a remaining documentation inconsistency in the expressly requested runbook check, not a newly introduced shell regression.
+
+Code and harness trace: both ordered folder/disk/routing tables match `a4c2ddd` exactly: tars has DJIFlip, GoPro, SonyA6700, SonyZVE10; kipp has SonyA6700, Backup, Multicam, Auditorium, GoPro, SonyZVE10, LeanTank. Docker mounts, config, destinations, argument boundaries, routing flag order, and collision policy are preserved. Only kipp adds `--dedupe-content`; tars keeps `/usb/sdc1` unless overridden, and kipp requires `SSD_SRC`. The shared dry-run flag is last. Missing/unknown labels exit 2 before Docker; failed calls increment the counter, log FAILED, continue through the table, and produce final exit 1; successful calls log done. The shared log helper preserves single logging under redirected stdout. Every remaining NAS script's IMG default is `v0.2.4` with `VAULT_IMAGE` retained.
+
+The new harness records one argument per line with call terminators and compares complete ordered vectors for both labels, including the spaced kipp source; it also checks label/source refusals, dry-run, image/source overrides, success logging, and continued attempts plus failure count/status. The Go wrapper points to the new harness and both old scripts/tests are removed. Runbook steps 2–4 otherwise match the new routing, label, `SSD_SRC`, and dry-run usage.
+
+Validation: `bash -n` passed on committed contents of all five NAS scripts and the new shell harness. No scripts, Go tests, builds, or live NAS operations executed. Only `team/channels/review-requests.md` modified.
+
+
+### #60 - B44 `move` exits 1 when incomplete (branch `move-exit-status`, code tip `bd0c85e`) - **resolved: APPROVE → merged**
 
 **PM (2026-09-18T13:29:29-07:00):** Review `git diff main..bd0c85e -- . ':!team'` (3 files, +51/-7). Claims: `runMove` returns 0 on a clean move, `--dry-run`, or nothing to move; 1 when any file was skipped (verified-owned destination, symlinked destination, unresolved collision) or errored, printing `INCOMPLETE: N skipped, M errored`; tests for the two skip kinds assert exit 1 + the line; `TestMoveCleanExitsZero` pins the zero side; CLAUDE.md row updated. PM at `bd0c85e`: vet/gofmt clean, 12 packages ok. **This is wrong if:** any skip/error path still returns 0; `--dry-run` can return 1; or the CLAUDE.md exit table contradicts `main.go`.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-18):** APPROVE — reviewed exactly `git diff main..bd0c85e -- . ':!team'` (3 files, +51/-7), with committed source context at `bd0c85e`.
+
+Static trace: `main` propagates `runMove`'s nonzero result through `os.Exit`. Every completed execution with `res.Skipped > 0` or `res.Errors > 0` prints `INCOMPLETE: N skipped, M errored` and returns 1. Traced all executor counters: missing sources, destination guards (including verified ownership and symlink directories), unresolved collisions, successful deduplication (also counted as skipped), and per-file stat/mkdir/remove/manifest/rename failures all reach that decision. Executor-level errors, including cancellation, retain the existing fatal exit 1. Empty plans return 0; successfully planned dry runs return 0 before execution; clean executions return 0. Invalid flags and manifest/planning failures can still exit 1 with `--dry-run`, as covered by the exit table's existing fatal-error rules; the new incomplete-status check cannot affect a dry run. The updated CLAUDE.md row agrees with these paths.
+
+The changed subprocess assertions check exit 1 and `INCOMPLETE:` for the owned-destination and symlink-destination runs; the new clean fixture checks exit 0, absence of `INCOMPLETE:`, and destination contents (`free bytes`, 10 bytes, matching its seeded size). These assertions exercise the status through `main` via the existing re-exec helper.
+
+Validation is source review only; no Go build or tests run. Only this verdict was appended to `team/channels/review-requests.md`; its pre-existing edits were preserved.
+
+
+**PM (2026-09-18T13:32:20-07:00):** #60 APPROVE accepted - merging. #59: the one finding is in `team/context/runbook-kipp.md` (a PM file): the facts line still said the scripts default to `v0.2.0`; corrected by the PM in the merge commit's follow-up. Both argv tables, the harness and every script default traced correct - merging `ssd-copy-all`.
 
 ### #58 - re-review of #57's fix only (branch `backup`, code tip `83e40a0`) - **resolved: APPROVE → `backup` merged**
 
