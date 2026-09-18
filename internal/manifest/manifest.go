@@ -509,6 +509,35 @@ func (m *Manifest) listByDisk(disk string, onlyUnverified bool) ([]Entry, error)
 	return out, rows.Err()
 }
 
+// VerifiedRows returns every verified row, of every disk. scan.Build
+// indexes their dest_paths by physical location once per run, because the
+// writer touches physical paths and a spelling lookup cannot see that
+// `X.mov` and `x.mov` are one file on a case-insensitive root, or that a
+// `../archive/x` rule spelling is `archive/x`. dest_path is relative to a
+// root the manifest does not record; the caller joins it to its own.
+func (m *Manifest) VerifiedRows() ([]Entry, error) {
+	rows, err := m.db.Query(`
+		SELECT source_disk, source_path, dest_path, size, mtime_ns, sha256,
+		       copied_at, COALESCE(verified_at, 0), status
+		FROM files
+		WHERE status = 'verified'
+		ORDER BY source_disk, source_path`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Entry
+	for rows.Next() {
+		var e Entry
+		if err := rows.Scan(&e.SourceDisk, &e.SourcePath, &e.DestPath, &e.Size,
+			&e.MtimeNs, &e.SHA256, &e.CopiedAt, &e.VerifiedAt, &e.Status); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 func (m *Manifest) MarkVerified(disk, sourcePath string, verifiedAt int64) error {
 	_, err := m.db.Exec(`
 		UPDATE files SET verified_at = ?, status = 'verified'
