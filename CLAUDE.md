@@ -31,7 +31,7 @@ runs them, so `go test ./...` is still the one command.
 | `cmd/vault/main.go` | Hand-rolled arg parsing (`parseScanFlags` style — no flag frameworks), one `runX` per command, `die()` for fatal errors |
 | `internal/manifest` | SQLite schema + queries. Single writer per config dir (WAL, `busy_timeout`). Rows keyed `(source_disk, source_path)` |
 | `internal/scan` | Walk source, diff against manifest and destination → `Plan{ToCopy, ToRecopy, SkipCount, Deduped, DstCollisions, VerifiedChanged, Retouched, DstOwned}` |
-| `internal/copy` | One file: stream + sha256 → `<dst>.vault-partial`, fsync, chtimes, rename. A failed copy leaves no partial |
+| `internal/copy` | One file: `Lstat` both targets, stream + sha256 → `<dst>.vault-partial` (`O_EXCL`), fsync, chtimes, rename. A failed copy leaves no partial; a refused one touches nothing |
 | `internal/verify` | Re-hash destination rows → `verified` / `mismatch`; missing rows counted, not touched |
 | `internal/certify` | Refuses unless every row is `verified`; signs with `$VAULT_CONFIG/key.pem` (created on first use, mode 600) |
 | `internal/inventory` | NAS-side rows with no `dest_path` (`inventoried`) |
@@ -58,17 +58,33 @@ with `--on-collision rename-mtime-year` and they land beside the originals.
 Same size with a new mtime is hashed first: identical content is
 `Retouched` and skipped like an unchanged file, no row written.
 
-That check is by source row; the second one is by **destination**. Before
-a task is admitted to `ToCopy` or `ToRecopy`, both paths `copy.File` would
-write — the final `dest_path` and its `.vault-partial` staging name — are
-looked up in the manifest (`VerifiedOwner`): if a `verified` row of **any**
-disk records that path, the task goes to `DstOwned` and is never written,
-under any policy. This is what stops a `deduped` row's recopy (its own
-route lands on another disk's certified file), a new file whose staging
-name is an archived file, and a new file at a verified row's *missing*
-destination. `dest_path` is relative to a root the manifest does not
-record, so a hit from another disk under another root is a false refusal
-— accepted: it is the safe direction, and the output names the owning row.
+That check is by source row; the second one is by **destination**, and
+by **physical location**, not spelling. `Build` indexes every `verified`
+row of every disk (`VerifiedRows`) by `lower(clean(root/dest_path))`, and
+before a task is admitted to `ToCopy` or `ToRecopy` looks up both paths
+`copy.File` will touch — the `.vault-partial` staging name and the final
+name — the same way. A hit goes to `DstOwned` and is never written, under
+any policy. This is what stops a `deduped` row's recopy (its own route
+lands on another disk's certified file), a new file whose staging name is
+an archived file (also spelled `X.mov` on a case-folding root, also stored
+as `../archive/x.mov` by a routing rule), and a new file at a verified
+row's *missing* destination. The fold is unconditional: on a
+case-sensitive root it can only refuse a write that differs from a
+certified file by case alone. `dest_path` is relative to a root the
+manifest does not record, so a hit from another disk under another root is
+a false refusal — accepted: the safe direction, and the output names the
+owning row.
+
+The writer (`copy.File`) is the last line and checks the filesystem
+itself: `Lstat` on the staging path — anything there refuses the file
+(a leftover partial from a crash and an archived file that happens to end
+in `.vault-partial` are indistinguishable to the writer, so both refuse;
+the message says to look, then remove a leftover by hand); `Lstat` on the
+final path — anything there refuses a file planned as new, and only a
+regular file may be replaced by a recopy (`FileTask.Replace`); the
+staging file is opened `O_EXCL`, so nothing that exists is ever
+truncated, and a refused open removes nothing. A writer refusal is a
+per-file `FAIL`, counted in `INCOMPLETE:`, exit 1.
 
 The one invariant: the manifest never silently holds content it has no row
 for, and never claims a row it cannot back with a hash.
@@ -129,7 +145,8 @@ number nobody can recompute is a finding, not a fact.
 ## Hard rules
 
 - Never write to a source disk. Containers mount `/sources` read-only.
-- Atomic destination writes only (`.vault-partial` → fsync → rename).
+- Atomic destination writes only (`.vault-partial` created `O_EXCL` → fsync
+  → rename). The staging path must be empty; the writer never truncates.
 - A `verified` destination is never overwritten. Not by recopy, not by any
   collision policy, not through another row's route, not as a staging file.
   Both checks — by source row and by destination path — live in

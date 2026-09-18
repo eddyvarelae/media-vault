@@ -137,3 +137,123 @@ func TestFileMissingSourceLeavesNothing(t *testing.T) {
 	}
 	noPartials(t, dst)
 }
+
+// caseInsensitive reports whether dir's filesystem folds case: a file made
+// as "probe" is found as "PROBE". APFS defaults to insensitive; the test
+// that depends on it adapts rather than assuming.
+func caseInsensitive(t *testing.T, dir string) bool {
+	t.Helper()
+	writeFile(t, filepath.Join(dir, "probe"), "p", time.Now())
+	_, err := os.Lstat(filepath.Join(dir, "PROBE"))
+	return err == nil
+}
+
+// TestFileRefusesWhateverExists is review #6: the writer checks the
+// physical paths it touches. Nothing at the staging path is ever
+// truncated (Lstat, then O_EXCL); the final path may hold only a recopy's
+// own regular file.
+func TestFileRefusesWhateverExists(t *testing.T) {
+	mtime := time.Date(2024, 3, 9, 10, 0, 0, 0, time.UTC)
+	newTask := func(name string) scan.FileTask {
+		return scan.FileTask{RelPath: name, DstRel: name, Size: 8, MtimeNs: mtime.UnixNano()}
+	}
+
+	t.Run("staging path holds a file", func(t *testing.T) {
+		src, dst := t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(src, "x.mov"), "new clip", mtime)
+		writeFile(t, filepath.Join(dst, "x.mov.vault-partial"), "archived under an unlucky name", mtime)
+		_, err := File(context.Background(), src, dst, newTask("x.mov"), "B")
+		if err == nil || !strings.Contains(err.Error(), "already exists") || !strings.Contains(err.Error(), "interrupted run") {
+			t.Fatalf("err = %v, want a refusal that names the leftover-partial possibility", err)
+		}
+		if got, _ := os.ReadFile(filepath.Join(dst, "x.mov.vault-partial")); string(got) != "archived under an unlucky name" {
+			t.Errorf("staging-path file touched: %q", got)
+		}
+		if _, err := os.Stat(filepath.Join(dst, "x.mov")); err == nil {
+			t.Errorf("x.mov written anyway")
+		}
+	})
+
+	t.Run("staging path holds a symlink", func(t *testing.T) {
+		src, dst := t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(src, "x.mov"), "new clip", mtime)
+		writeFile(t, filepath.Join(dst, "elsewhere"), "precious", mtime)
+		if err := os.Symlink(filepath.Join(dst, "elsewhere"), filepath.Join(dst, "x.mov.vault-partial")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := File(context.Background(), src, dst, newTask("x.mov"), "B"); err == nil || !strings.Contains(err.Error(), "a symlink") {
+			t.Fatalf("err = %v, want refusal naming the symlink", err)
+		}
+		if got, _ := os.ReadFile(filepath.Join(dst, "elsewhere")); string(got) != "precious" {
+			t.Errorf("symlink target truncated through the staging path: %q", got)
+		}
+	})
+
+	t.Run("final path exists for a file planned as new", func(t *testing.T) {
+		src, dst := t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(src, "x.mov"), "new clip", mtime)
+		writeFile(t, filepath.Join(dst, "x.mov"), "already here", mtime)
+		if _, err := File(context.Background(), src, dst, newTask("x.mov"), "B"); err == nil || !strings.Contains(err.Error(), "planned as new") {
+			t.Fatalf("err = %v, want refusal", err)
+		}
+		if got, _ := os.ReadFile(filepath.Join(dst, "x.mov")); string(got) != "already here" {
+			t.Errorf("final overwritten: %q", got)
+		}
+		noPartials(t, dst)
+	})
+
+	t.Run("recopy replaces its own regular file", func(t *testing.T) {
+		src, dst := t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(src, "x.mov"), "new clip", mtime)
+		writeFile(t, filepath.Join(dst, "x.mov"), "old copy", mtime)
+		task := newTask("x.mov")
+		task.Replace = true
+		if _, err := File(context.Background(), src, dst, task, "B"); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := os.ReadFile(filepath.Join(dst, "x.mov")); string(got) != "new clip" {
+			t.Errorf("recopy did not replace: %q", got)
+		}
+		noPartials(t, dst)
+	})
+
+	t.Run("recopy refuses a non-regular final path", func(t *testing.T) {
+		src, dst := t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(src, "x.mov"), "new clip", mtime)
+		writeFile(t, filepath.Join(dst, "real"), "precious", mtime)
+		if err := os.Symlink(filepath.Join(dst, "real"), filepath.Join(dst, "x.mov")); err != nil {
+			t.Fatal(err)
+		}
+		task := newTask("x.mov")
+		task.Replace = true
+		if _, err := File(context.Background(), src, dst, task, "B"); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+			t.Fatalf("err = %v, want refusal", err)
+		}
+		if got, _ := os.ReadFile(filepath.Join(dst, "real")); string(got) != "precious" {
+			t.Errorf("symlink target replaced: %q", got)
+		}
+		noPartials(t, dst)
+	})
+
+	// The Reviewer's case-insensitive example at the writer: X.mov.vault-partial
+	// is on disk, the task wants x.mov. On a folding filesystem Lstat sees
+	// it and refuses; on a case-sensitive one the two names are two files
+	// and the copy proceeds beside it, which is also correct.
+	t.Run("case alias of the staging path", func(t *testing.T) {
+		src, dst := t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(src, "x.mov"), "new clip", mtime)
+		writeFile(t, filepath.Join(dst, "X.mov.vault-partial"), "archived, capital X", mtime)
+		folds := caseInsensitive(t, dst)
+		t.Logf("temp filesystem case-insensitive: %v", folds)
+		_, err := File(context.Background(), src, dst, newTask("x.mov"), "B")
+		if got, _ := os.ReadFile(filepath.Join(dst, "X.mov.vault-partial")); string(got) != "archived, capital X" {
+			t.Fatalf("archived file destroyed through its case alias: %q", got)
+		}
+		if folds && (err == nil || !strings.Contains(err.Error(), "already exists")) {
+			t.Errorf("folding filesystem: err = %v, want refusal", err)
+		}
+		if !folds && err != nil {
+			t.Errorf("case-sensitive filesystem: err = %v, want success beside the other file", err)
+		}
+	})
+}

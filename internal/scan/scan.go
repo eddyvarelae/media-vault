@@ -41,6 +41,10 @@ type FileTask struct {
 	DstRel  string // path relative to dstRoot (where the file should land)
 	Size    int64
 	MtimeNs int64
+	// Replace is set for a recopy: the row is not verified and its own
+	// destination file is expected to exist and be renamed over. For a new
+	// file the writer refuses anything at the final path.
+	Replace bool
 }
 
 // DedupeHit records a source file whose bytes are already archived.
@@ -82,11 +86,12 @@ type Plan struct {
 	Retouched            int
 
 	// DstOwned holds files whose destination - the final path or the
-	// .vault-partial staging path copy.File would truncate first - is the
+	// .vault-partial staging path copy.File creates first - is the
 	// dest_path of a verified row, of any disk. That row may not be this
 	// file's own (a deduped row points at another disk's file; a stray name
 	// can match an archived file), so the check is by destination, not by
-	// source row. Never written under any policy.
+	// source row, and by physical location, not spelling. Never written
+	// under any policy.
 	DstOwned []OwnedTask
 }
 
@@ -138,6 +143,10 @@ func Build(ctx context.Context, m *manifest.Manifest, disk, srcRoot, dstRoot, pr
 func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, dstRoot, prefix string, rules []Rule, onCollision CollisionStrategy, dedupeContent bool) (*Plan, error) {
 	p := &Plan{}
 	seenThisRun := map[string]string{} // sha256 -> source-relative path queued to copy
+	owners, err := verifiedOwners(m, dstRoot)
+	if err != nil {
+		return nil, err
+	}
 	sizeCount := map[int64]int{}
 	prefix = strings.TrimRight(prefix, "/")
 	if dedupeContent {
@@ -181,7 +190,7 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 			return nil, err
 		}
 	}
-	err := filepath.WalkDir(srcRoot, func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(srcRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -251,9 +260,8 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 				p.BytesVerifiedChanged += task.Size
 				return nil
 			}
-			if owned, err := ownedByVerified(m, task); err != nil {
-				return err
-			} else if owned != nil {
+			task.Replace = true
+			if owned := owners.claims(dstRoot, task); owned != nil {
 				p.DstOwned = append(p.DstOwned, *owned)
 				return nil
 			}
@@ -323,9 +331,7 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 		// reports it missing; writing other bytes there would make it a
 		// mismatch under a certified hash), and the staging path may be an
 		// archived file that merely ends in .vault-partial.
-		if owned, err := ownedByVerified(m, task); err != nil {
-			return err
-		} else if owned != nil {
+		if owned := owners.claims(dstRoot, task); owned != nil {
 			p.DstOwned = append(p.DstOwned, *owned)
 			return nil
 		}
@@ -343,20 +349,48 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 	return p, nil
 }
 
-// ownedByVerified reports whether either path copy.File would write for
-// task - the staging file first, then the final name - is the dest_path of
-// a verified row. Both are checked because both are truncated or replaced.
-func ownedByVerified(m *manifest.Manifest, task FileTask) (*OwnedTask, error) {
-	for _, path := range []string{task.DstRel + ".vault-partial", task.DstRel} {
-		owner, err := m.VerifiedOwner(path)
-		if err != nil {
-			return nil, err
+// ownerIndex maps the physical location of every verified destination to
+// its row. Physical means what the writer will touch: joined to this run's
+// root and cleaned, so a `..` in a routing rule collapses to where it
+// really lands, and case-folded, so `X.mov` and `x.mov` are one key. The
+// fold is unconditional rather than probed per filesystem: on a
+// case-sensitive root it can only refuse a write that differs from a
+// certified file by case alone, which is the safe mistake. (Unicode
+// normalization aliases are not folded; camera names are ASCII.)
+type ownerIndex map[string]manifest.Entry
+
+func verifiedOwners(m *manifest.Manifest, dstRoot string) (ownerIndex, error) {
+	rows, err := m.VerifiedRows()
+	if err != nil {
+		return nil, err
+	}
+	idx := make(ownerIndex, len(rows))
+	for _, e := range rows {
+		if e.DestPath == "" {
+			continue
 		}
-		if owner != nil {
-			return &OwnedTask{Task: task, Path: path, Owner: *owner}, nil
+		if _, dup := idx[physKey(dstRoot, e.DestPath)]; !dup {
+			idx[physKey(dstRoot, e.DestPath)] = e
 		}
 	}
-	return nil, nil
+	return idx, nil
+}
+
+// physKey is the identity two spellings share when they name one file.
+func physKey(root, rel string) string {
+	return strings.ToLower(filepath.Clean(filepath.Join(root, rel)))
+}
+
+// claims reports whether either path copy.File will touch for task - the
+// staging file it creates first, then the final name - is a verified
+// row's destination.
+func (idx ownerIndex) claims(dstRoot string, task FileTask) *OwnedTask {
+	for _, rel := range []string{task.DstRel + ".vault-partial", task.DstRel} {
+		if owner, ok := idx[physKey(dstRoot, rel)]; ok {
+			return &OwnedTask{Task: task, Path: rel, Owner: owner}
+		}
+	}
+	return nil
 }
 
 func renameWithMtimeYear(rel string, mtimeNs int64) string {

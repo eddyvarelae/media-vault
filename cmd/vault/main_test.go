@@ -850,3 +850,89 @@ func TestVerifiedDestinationOwnedByAnotherRow(t *testing.T) {
 		}
 	})
 }
+
+// TestVerifiedDestinationAliases is review #6: ownership is by physical
+// location. A verified file reachable under another spelling - a case
+// alias on a folding filesystem, a `..` in a routing rule - must still
+// refuse the write. The plan's fold is unconditional, so the refusal is
+// expected whatever the temp filesystem does; the writer's own Lstat is
+// the second line on a folding filesystem (internal/copy tests it).
+func TestVerifiedDestinationAliases(t *testing.T) {
+	t.Run("case alias of a verified staging-named file", func(t *testing.T) {
+		cfg, srcA, srcB, dst := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(srcA, "X.mov.vault-partial"), "archived, capital X", t0)
+		writeFile(t, filepath.Join(srcB, "x.mov"), "new clip", t0)
+		if _, _, code := vault(t, cfg, "copy", "A", srcA, dst); code != 0 {
+			t.Fatalf("copy A: exit %d", code)
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
+			t.Fatalf("verify A: exit %d", code)
+		}
+		for _, policy := range []string{"skip", "rename-mtime-year"} {
+			out, errOut, code := vault(t, cfg, "copy", "B", srcB, dst, "--on-collision", policy)
+			if got := readFile(t, filepath.Join(dst, "X.mov.vault-partial")); got != "archived, capital X" {
+				t.Fatalf("%s: verified file destroyed through its case alias: %q", policy, got)
+			}
+			if code != 1 || !strings.Contains(errOut, "verified row owns their destination path") {
+				t.Errorf("%s: exit %d, stderr %q", policy, code, errOut)
+			}
+			if !strings.Contains(out, "Dst owned:        1") {
+				t.Errorf("%s: not reported as owned:\n%s", policy, out)
+			}
+			if _, err := os.Stat(filepath.Join(dst, "x.mov")); err == nil {
+				t.Errorf("%s: x.mov written", policy)
+			}
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
+			t.Errorf("verify A afterwards: exit %d", code)
+		}
+	})
+
+	// --rule vault-partial=../archive: A's file is stored as
+	// ../archive/x.mov.vault-partial relative to base/archive, which is
+	// base/archive/x.mov.vault-partial on disk - exactly B's staging path.
+	t.Run("dot-dot in a routing rule", func(t *testing.T) {
+		cfg, srcA, srcB, base := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		dst := filepath.Join(base, "archive")
+		writeFile(t, filepath.Join(srcA, "x.mov.vault-partial"), "archived via a .. rule", t0)
+		writeFile(t, filepath.Join(srcB, "x.mov"), "new clip", t0)
+		if _, _, code := vault(t, cfg, "copy", "A", srcA, dst, "--rule", "vault-partial=../archive"); code != 0 {
+			t.Fatalf("copy A: exit %d", code)
+		}
+		if got := rowsOf(t, cfg, "A")["x.mov.vault-partial"].DestPath; got != "../archive/x.mov.vault-partial" {
+			t.Fatalf("A's stored dest_path = %q; the test needs the .. spelling", got)
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
+			t.Fatalf("verify A: exit %d", code)
+		}
+		_, errOut, code := vault(t, cfg, "copy", "B", srcB, dst)
+		if got := readFile(t, filepath.Join(dst, "x.mov.vault-partial")); got != "archived via a .. rule" {
+			t.Fatalf("verified file destroyed through its .. spelling: %q", got)
+		}
+		if code != 1 || !strings.Contains(errOut, "verified row owns their destination path") {
+			t.Errorf("exit %d, stderr %q", code, errOut)
+		}
+		if _, err := os.Stat(filepath.Join(dst, "x.mov")); err == nil {
+			t.Errorf("x.mov written")
+		}
+	})
+
+	// A leftover .vault-partial that no row owns: the plan lets the task
+	// through, the writer refuses it as a FAIL naming the path, and the run
+	// is INCOMPLETE. The leftover is not removed.
+	t.Run("unowned leftover partial", func(t *testing.T) {
+		cfg, src, dst := t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(src, "x.mov"), "new clip", t0)
+		writeFile(t, filepath.Join(dst, "x.mov.vault-partial"), "half of somethi", t0)
+		out, errOut, code := vault(t, cfg, "copy", "B", src, dst)
+		if code != 1 || !strings.Contains(errOut, "INCOMPLETE: 1 file(s) failed to copy") || !strings.Contains(out, "interrupted run") {
+			t.Errorf("exit %d, stderr %q\n%s", code, errOut, out)
+		}
+		if got := readFile(t, filepath.Join(dst, "x.mov.vault-partial")); got != "half of somethi" {
+			t.Errorf("leftover touched: %q", got)
+		}
+		if len(rowsOf(t, cfg, "B")) != 0 {
+			t.Errorf("row written for a refused file")
+		}
+	})
+}

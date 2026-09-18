@@ -191,6 +191,50 @@ func TestBuildRefusesDestinationsOwnedByVerifiedRows(t *testing.T) {
 	}
 }
 
+// TestBuildOwnershipIsPhysical is review #6 at the index level: a verified
+// row's dest_path and a task's target are compared as the writer would
+// touch them - joined to the root, cleaned, case-folded.
+func TestBuildOwnershipIsPhysical(t *testing.T) {
+	m := openManifest(t)
+	src, base := t.TempDir(), t.TempDir()
+	dst := filepath.Join(base, "archive")
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(src, "x.mov"), "new", t0)    // staging x.mov.vault-partial ~ A's "X.MOV.VAULT-PARTIAL"
+	writeFile(t, filepath.Join(src, "y.mov"), "new", t0)    // staging ~ A's "../archive/y.mov.vault-partial"
+	writeFile(t, filepath.Join(src, "z.mov"), "new", t0)    // final ~ A's "./sub/../Z.mov"
+	writeFile(t, filepath.Join(src, "free.mov"), "new", t0) // nobody
+	writeFile(t, filepath.Join(src, "w.mov"), "new", t0)    // A's "../other/w.mov" is a different physical file
+	for _, dest := range []string{"X.MOV.VAULT-PARTIAL", "../archive/y.mov.vault-partial", "./sub/../Z.mov", "../other/w.mov"} {
+		if err := m.Upsert(manifest.Entry{SourceDisk: "A", SourcePath: dest, DestPath: dest,
+			Size: 3, MtimeNs: 1, SHA256: "x", CopiedAt: 1, VerifiedAt: 2, Status: "verified"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := build(t, m, src, dst, CollisionSkip)
+	owned := map[string]string{}
+	for _, o := range p.DstOwned {
+		owned[o.Task.RelPath] = o.Owner.DestPath
+	}
+	want := map[string]string{
+		"x.mov": "X.MOV.VAULT-PARTIAL",
+		"y.mov": "../archive/y.mov.vault-partial",
+		"z.mov": "./sub/../Z.mov",
+	}
+	if len(owned) != len(want) {
+		t.Errorf("DstOwned = %v, want %v", owned, want)
+	}
+	for rel, owner := range want {
+		if owned[rel] != owner {
+			t.Errorf("%s owned by %q, want %q", rel, owned[rel], owner)
+		}
+	}
+	if got := rels(p.ToCopy); len(got) != 2 || got["free.mov"] == "" || got["w.mov"] == "" {
+		t.Errorf("ToCopy = %v, want free.mov + w.mov", got)
+	}
+}
+
 func sha(content string) string {
 	sum := sha256.Sum256([]byte(content))
 	return hex.EncodeToString(sum[:])
