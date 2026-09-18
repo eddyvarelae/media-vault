@@ -60,6 +60,52 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-17T19:20-07:00) - rev 4 item 1 (B23(b)) done. READY FOR REVIEW.** Branch **`overwrite-guard`**, code tip **`a6c74a5`**, two commits off `main` at `f21b4c5` (= `e4a4aed` + your team notes; `e4a4aed` is an ancestor). Worktree clean, live but idle. **Rung: `tested`.** `internal/verify`, `internal/copy`, `internal/manifest` untouched - the fix is in planning.
+
+**One thing to decide (not blocking - built the safe reading, say if you want the other):** the decision says the new file is *"renamed under `--on-collision rename-mtime-year`"* and *"the old row keeps its hash and status"*. Under the schema both cannot hold for one `<disk>` name: rows are `UNIQUE(source_disk, source_path)`, and the new file has the *same* `(source_disk, source_path)` as the verified row. Renaming the destination would leave the new bytes with no row (invariant broken) or make the old row take the new hash (the decision's second clause broken). So under **both** policies a verified-changed file is skipped, counted, exit 1, row and bytes untouched - and the output says how to get the rename: copy that card under its **own** `<disk>` name with `rename-mtime-year`. That is the ordinary new-file path, it already exists, and it is what the 2026-09-01 run should have been (`case` is a different card than the April source). Ran it by hand below: the new bytes land as `DSC06245_2026.ARW` with their own row under `case-sonya6700`; the `media-sonya6700` row stays `verified` with the April hash. The alternative is a schema change (a second row per `(disk, path)` - generation column or dropping the UNIQUE) touching Lookup/Upsert/verify/tags; not something to fold into a loss-prevention PR. If DECISIONS wants that, it is a new item.
+
+Commits:
+1. **`01d373c` - reproduction.** `TestVerifiedDestinationNeverOverwritten` in `cmd/vault`, through `main()`: copy → verify → certify, then the same source path with different (smaller) bytes and a later mtime, copied under `skip` and under `rename-mtime-year`. Asserts the decided behavior; **fails at that commit** exactly as the Tester described: `verified destination was overwritten: now "DSC06245 as shot in September"`, `verified row changed`, `exit 0, stderr ""` - both policies.
+2. **`a6c74a5` - fix.** `scan.Build`: a row with `status = verified` never enters `ToRecopy`. Same size + new mtime → hash the source first; equal → `Plan.Retouched++`, skipped like unchanged (no row written, no I/O beyond the read). Otherwise → `Plan.VerifiedChanged` (+ bytes), regardless of policy. `copy`: prints the bucket (count always when non-zero, list under `--dry-run`), `Nothing to copy` only when it is empty too, `INCOMPLETE: N file(s) skipped because their verified archive copy holds different content (kept)`, exit 1; `--dry-run` exits 0 per the contract and the summary line gains `, N verified kept`. `scan`: `Verified, changed:` and `Retouched:` lines. Recopy still applies to `copied` and `mismatch` rows (the repair path) - `TestRoundTrip` now recopies while the row is `copied`, then after certify exercises the retouched case (scan `Retouched: 1`, copy `Nothing to copy`, rows DeepEqual) and the changed case (exit 1, dest and rows DeepEqual, certify 0). `TestBuildVerifiedRowsAreNeverRecopied` covers the buckets at `Build` level under both policies: unchanged / touched-identical / same-size-different-bytes / bigger / `mismatch`-recopyable. **Mutation:** `verified` → `never-matches` in the status check fails `TestVerifiedDestinationNeverOverwritten` (both subtests), `TestRoundTrip`, `TestBuildVerifiedRowsAreNeverRecopied`; restored. CLAUDE.md: status vocabulary paragraph, package map, exit table (`scan`/`copy` rows), new hard rule; README step 1.
+
+Evidence (Mac mini, `2026-09-17T19:20-07:00`, go1.27.0, at `a6c74a5`):
+```
+$ gofmt -l .          → (empty)        $ go vet ./...   → clean
+$ go test ./... -count=1
+ok  	github.com/eddyvarelae/media-vault/cmd/vault	1.026s
+ok  	github.com/eddyvarelae/media-vault/internal/certify	0.505s
+ok  	github.com/eddyvarelae/media-vault/internal/copy	0.346s
+ok  	github.com/eddyvarelae/media-vault/internal/scan	0.954s
+ok  	github.com/eddyvarelae/media-vault/internal/testguard	0.773s
+ok  	github.com/eddyvarelae/media-vault/scripts/test	1.350s
+```
+By hand (`go build`, scratch dirs, `VAULT_CONFIG` in scratch): copy → verify → certify `DCIM/DSC06245.ARW` under `media-sonya6700`, then rewrite the source with other bytes:
+```
+$ vault copy media-sonya6700 src dst --on-collision rename-mtime-year
+Copying 0 files (0 B) from src → dst
+Verified, changed: 1  (10 B, source differs from the verified archive copy; never overwritten)
+  note: these are different files under a source path this disk already
+        archived and verified. The archived copy is kept. If they come from
+        another card, copy that card under its own <disk> name with
+        --on-collision rename-mtime-year so they land beside the originals.
+
+Done. Copied 0/0 files, 0 B.
+
+INCOMPLETE: 1 file(s) skipped because their verified archive copy holds different content (kept).
+exit 1
+dst content: April bytes of DSC06245        certify: exit 0
+$ vault copy case-sonya6700 src dst --on-collision rename-mtime-year
+  [1/1] DCIM/DSC06245.ARW ... ok (sha cb3e9a4b284f…)     exit 0
+dst/DCIM: DSC06245.ARW  DSC06245_2026.ARW
+case-sonya6700 |DCIM/DSC06245.ARW|DCIM/DSC06245_2026.ARW|copied
+media-sonya6700|DCIM/DSC06245.ARW|DCIM/DSC06245.ARW     |verified
+```
+
+Noticed, not acted on:
+- **Beyond the letter of the decision, on purpose:** the same-size hash check. Without it a card whose mtimes were reset (a plain `cp` of a card) would turn every verified file into a "changed" file and an INCOMPLETE run with no way through. One read per such file per run; nothing is written for it, so a touched card re-hashes on every scan. If that ever matters, `copy` could refresh the row's `mtime_ns` (hash and status untouched) - a manifest write I did not add unasked.
+- Recopy of a **`deduped`** row (pre-existing): its `dest_path` points at another row's file, but recopy writes to the routed path for *this* row's `rel`, without the existence check new files get. Not the B23 hazard (nothing verified is replaced) but a path that can land bytes on an unchecked name. Backlog candidate.
+- `copied`-row recopy over a destination that exists: also unchecked, by design (it is our own unverified copy). Stating it so the table is read right.
+
 **PM (2026-09-17T19:10:02-07:00) - #4 APPROVE; merged; v0.2.0 cut. Go to rev 4 item 1.** `tests-and-pinning` merged `--no-ff` as **`e4a4aed`** on `main`, pushed. **DEPLOY LOCK (PM) 2026-09-17T19:08:45-07:00 → released 2026-09-17T19:10:02-07:00:** `v0.2.0` tagged on `e4a4aed` and pushed; CI publishes `ghcr.io/eddyvarelae/media-vault:v0.2.0` (run 35298191638) - nothing on the NAS pulls it until B6 runs. Your branch is done; leave it. New branch **`overwrite-guard` off `main` at `e4a4aed`** in your worktree (`git checkout -b overwrite-guard main` after `git fetch`/`git merge` so `main` is current). Item 1 policy is now **decided** (DECISIONS.md 2026-09-17, last entry): a `verified` destination is never overwritten - build exactly that. Reproducing test first, fix second, one PR. READY FOR REVIEW with the tip SHA.
 
 **Dev (2026-09-17T18:52-07:00) - rev 4 item 0 done. READY FOR REVIEW.** **Code tip `52d30b0`** on `tests-and-pinning`: `git merge main` (`2eb2195`, one trivial conflict in this channel file - took `main`'s headings, both note sets kept) as `0510072`, then three fix commits. No rewrite (`c1f7fbd` and `main` are both ancestors). Worktree clean, live but idle. **Rung: `tested`.** Nothing under `internal/verify` touched; the merged F4 code is `main`'s, byte for byte.
