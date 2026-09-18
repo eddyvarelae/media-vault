@@ -6,7 +6,93 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #7 - B24 `repair-dest` (branch `repair-dest`, code tip `e3c694b`)
+### #9 - re-review of #6's fix only (branch `overwrite-guard`, code tip `abc863e`) - **resolved: FINDINGS (1), accepted → Dev fixes → request #11**
+
+**PM (2026-09-17T20:20:48-07:00):** Check that #6's one finding is closed, nothing else. Diff `git diff 539317c..abc863e -- . ':!team'` (1 commit after Dev's merge of `main` at `539317c`; 7 files, +399/-55; `internal/copy` now changes - the writer - which is expected). Dev's note: `team/channels/dev-questions.md`, Dev 2026-09-17T20:14 (worktree `~/Projects/media-vault-dev`, commit `34cc608` on that branch). PM independently at `abc863e` in a detached checkout: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all six test packages.
+
+**Claims:**
+1. Ownership is physical: `scan.Build` indexes every `verified` row (any disk) once per run by `lower(Clean(Join(dstRoot, dest_path)))` and looks up the task's staging and final targets by the same key; `..` collapses to where it lands, case folds unconditionally (no probe file is ever written). `VerifiedOwner` (spelling lookup) is gone.
+2. The writer never truncates: `copy.File` `Lstat`s the staging path and refuses anything there (it cannot distinguish a leftover partial, so it refuses both and says so); the staging file is opened `O_CREATE|O_EXCL|O_WRONLY`, no `O_TRUNC` anywhere; a new file whose final path exists is refused; a recopy (`Replace`) may replace only a regular file. A refused open removes nothing.
+3. Regression: the Reviewer's case-alias example and `--rule vault-partial=../archive` example through `main()`; `TestBuildOwnershipIsPhysical`; `TestFileRefusesWhateverExists` (adapts to the temp FS's case semantics rather than skipping).
+
+**This is wrong if:** any write site in `copy.File` can open an existing path for writing (grep every `os.OpenFile`/`os.Create`/`os.Rename`); the key normalization differs between the index and the lookup (one cleaned, the other not; one folded, the other not); a path that `filepath.Join` does not clean identically on both sides exists (trailing slash, `//`); the recopy `Replace` path can replace a file owned by a verified row of another disk; or the case test can pass on a folding FS without the refusal actually happening.
+
+Verdict goes below this line.
+
+**Reviewer (2026-09-17):** FINDINGS — request #9, exactly `git diff 539317c..abc863e -- . ':!team'`, reviewed by source trace; references are to `abc863e`. No build or tests run.
+
+1. **[P1] A recopy through a symlinked parent directory can still overwrite another disk's verified destination.** `internal/scan/scan.go:380-381` only cleans and lowercases the pathname; it does not identify directory symlink aliases. Concrete input: `dst/real/x.mov` is a regular file owned by disk A's verified row with `dest_path=real/x.mov`; `dst/alias` is a symlink to `real`; disk B has a non-verified row for source `alias/x.mov`, and that source now has a different size. With no routing rules, `Build` sets `Replace=true` at line 263, but `owners.claims` compares `dst/alias/x.mov` against `dst/real/x.mov` and admits the recopy. In `internal/copy/copy.go:49-55`, `Lstat(dst/alias/x.mov)` follows the intermediate symlink and reports the regular final file, so the new guard permits replacement. The exclusive staging open at line 69 creates `dst/real/x.mov.vault-partial`, and the rename at line 102 replaces A's verified `dst/real/x.mov`. No race is required. Resolve existing parent-directory aliases consistently for ownership lookup, or reject symlinked destination directory components before admitting/writing a replacement; add this cross-disk recopy regression. This fails #9's explicit criterion that `Replace` cannot replace a file owned by another disk's verified row.
+
+The case-fold and `..` examples are closed by the shared key function; the staging open uses `O_EXCL`, with no cleanup on open refusal. The added folding-filesystem test explicitly requires refusal and checks preservation. Those fixes do not prevent the parent-directory alias bypass above.
+
+**PM (2026-09-17T20:22:28-07:00):** FINDING accepted. A symlinked *directory component* under the destination root aliases two spellings to one physical file, and neither the key nor the writer's `Lstat` (which follows intermediate links) sees it. Fix direction to Dev: the same discipline `repair-dest` now has - walk the destination path component by component from the root with `Lstat` and refuse any symlink component before admitting or writing (new file or recopy); ownership stays on the cleaned key. Back to Dev on `overwrite-guard`, new commits only; re-review as **#11, fixes only**. **Reviewer availability:** Codex hit its usage limit at 2026-09-17T20:22:28-07:00 right after writing #9 - request #10 got no verdict and stays OPEN; retry from 21:34 (Codex's own message), or earlier if Eddy adds credits.
+
+### #10 - re-review of #7's fixes only (branch `repair-dest`, code tip `c6d9d42`)
+
+**PM (2026-09-17T20:20:48-07:00):** Check the three #7 findings and B33 are closed, nothing else. Diff `git diff 6c52d37..c6d9d42 -- . ':!team'` (1 commit after Dev's merge of `main` at `6c52d37`; 7 files, +340/-62). Dev's note: `team/channels/dev-questions.md`, Dev 2026-09-17T20:20 (commit `ce79253` on that branch). PM independently at `c6d9d42`: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all seven test packages.
+
+**Claims:**
+1. (#7-1) Every filesystem look is `Lstat`; a candidate must be a regular file; subdirectories come from `ReadDir` types (a symlinked dir is not a dir); the row's own directory is walked component by component from the root and refused on any symlink component or lexical escape; `under(root, full)` proves `EvalSymlinks(full)` is under `EvalSymlinks(root)` before hashing. Regression: leaf symlink outside, ancestor symlink outside; `BytesHashed` proves nothing behind a symlink was read.
+2. (#7-2) Intact requires a regular file at `root/dest_path`; anything else → `NOT A FILE`, unresolved, `INCOMPLETE:`, exit 1; CLI-tested.
+3. (#7-3) Dry-run output and `CLAUDE.md` say no manifest row written and no archive file ever; initialization is pre-existing (B31).
+4. (B33) `OWNED`: a hash-matching candidate that any row (any disk, any status) already claims by physical key is never chosen, even as the only match; `Apply` writes 0 for it.
+
+**This is wrong if:** any `os.Stat`/`os.Open`/`os.ReadFile` on a candidate or its directory remains that follows a symlink before the `Lstat` check; `under()` can be satisfied by a path whose ancestor is a symlink pointing back inside the root (still outside the one-level rule); a directory at `dest_path` can still count as intact anywhere (including `Apply`'s post-check); `OWNED` keying differs from `scan`'s physical key; or `Apply` can write a row whose plan outcome is not `REPAIR`.
+
+Verdict goes below this line.
+
+### #8 - numbers: `kipp` gap report (Tester #19) - **resolved: FINDINGS (1, breakdown only); headline numbers reproduced → delivered to Eddy with the corrected breakdown**
+
+**PM (2026-09-17T20:12:11-07:00):** Not code. The Tester (2026-09-17T20:09, `team/channels/tester-feedback.md` item 19) reports for the SSD `kipp` (`/Volumes/kipp`, attached to this Mac, read-only): **needs archiving: YES - 9,872 files, 1,921,695,784,449 bytes (1.92 TB)**, archived already: 521 files / 31,897,100,927 B. This figure decides which SSD Eddy plugs into the NAS next. Recompute it from the Tester's artifacts on `/Volumes/Scratch1/tester/` (read them; write nothing there): `gap-kipp.tsv` (10,393 rows: relpath, size, category, sha256, matched manifest rows), `gap-kipp.summary.txt`, `gap-kipp.ns-differs.tsv` (the 13), `gap-kipp.log`, scripts `gap-report.py` and `gap-confirm-ns.py`, manifest snapshot `manifest-2026-09-17.db` (open read-only: `sqlite3 'file:/Volumes/Scratch1/tester/manifest-2026-09-17.db?mode=ro&immutable=1'`).
+
+**Claims (Tester's arithmetic):**
+1. Files on the SSD = 10,393; bytes = 1,953,592,885,376. Categories: `NS_VERIFIED` 534 (32,171,903,625 B), `HASH_ARCHIVED` 0, `GAP` 9,859 (1,921,420,981,751 B); 534 + 0 + 9,859 = 10,393.
+2. Of the 534 name+size matches, hashing shows 521 sha-equal to a manifest row and 13 not (same name, same size, different bytes; none of the 13 shas on any manifest row).
+3. Therefore archived = 521 files / 31,897,100,927 B; **gap = 9,859 + 13 = 9,872 files, 1,921,420,981,751 + 274,802,698 = 1,921,695,784,449 B**.
+4. Gap by top folder: SonyA6700 5,971 / 582.3 GB; Backup 3,642 / 260.0 GB; Multicam 34 / 426.2 GB; Auditorium 10 / 336.2 GB; GoPro 184 / 230.9 GB; SonyZVE10 18 / 85.9 GB.
+
+**This is wrong if:** the TSV's per-category counts or byte sums differ from claim 1; any `GAP` row's sha256 appears on any row of the manifest snapshot; any of the 13 in `ns-differs.tsv` has a sha present in the snapshot; the 521/13 split does not reproduce from the TSV + `ns-differs.tsv`; the per-folder sums do not add to the gap total; the classification in `gap-report.py` can label a file `GAP` when its sha is in the manifest (read the code); or a file on the SSD was skipped (compare the TSV row count with a fresh `find /Volumes/kipp -type f | wc -l`, excluding dotfiles/`._*` as the script does - read-only). Report the recomputed numbers next to the claimed ones.
+
+Verdict goes below this line.
+
+**Reviewer (2026-09-17):** FINDINGS — request #8, independently recomputed from the artifacts, the read-only immutable manifest snapshot, and the SSD.
+
+1. **Claim 4 omits the 13 name+size false positives from the folder breakdown.** Its folder counts total **9,859**, not the corrected **9,872**; their underlying byte sums total **1,921,420,981,751 B**, short by **274,802,698 B**. Add seven files / 205,344,768 B to SonyA6700 and six files / 69,457,930 B to Backup. Corrected figures (decimal GB, rounded to one place):
+
+   | Folder | Claimed files / GB | Recomputed files / exact bytes / GB |
+   | --- | --- | --- |
+   | SonyA6700 | 5,971 / 582.3 | **5,978 / 582,500,142,174 / 582.5** |
+   | Backup | 3,642 / 260.0 | **3,648 / 260,029,966,795 / 260.0** |
+   | Multicam | 34 / 426.2 | 34 / 426,213,426,772 / 426.2 |
+   | Auditorium | 10 / 336.2 | 10 / 336,153,884,340 / 336.2 |
+   | GoPro | 184 / 230.9 | 184 / 230,939,809,540 / 230.9 |
+   | SonyZVE10 | 18 / 85.9 | 18 / 85,858,554,828 / 85.9 |
+   | Total | 9,859 / 1,921.5 (sum of displayed rounded GB) | **9,872 / 1,921,695,784,449 / 1,921.7** |
+
+Claims 1–3 reproduce:
+
+| Quantity | Claimed files / bytes | Recomputed files / bytes |
+| --- | --- | --- |
+| SSD total | 10,393 / 1,953,592,885,376 | 10,393 / 1,953,592,885,376 |
+| NS_VERIFIED before confirmation | 534 / 32,171,903,625 | 534 / 32,171,903,625 |
+| HASH_ARCHIVED | 0 / 0 | 0 / 0 |
+| Original GAP | 9,859 / 1,921,420,981,751 | 9,859 / 1,921,420,981,751 |
+| Confirmed archived | 521 / 31,897,100,927 | 521 / 31,897,100,927 |
+| Name+size false positives | 13 / 274,802,698 | 13 / 274,802,698 |
+| Corrected gap | 9,872 / 1,921,695,784,449 | 9,872 / 1,921,695,784,449 |
+
+Arithmetic: 534 + 0 + 9,859 = 10,393; 534 − 13 = 521; 32,171,903,625 − 274,802,698 = 31,897,100,927; 9,859 + 13 = 9,872; 1,921,420,981,751 + 274,802,698 = 1,921,695,784,449. Archived + gap = 10,393 files / 1,953,592,885,376 B. The gap is 1.921695784449 decimal TB, correctly rounded to **1.92 TB**; **needs archiving: YES** is supported relative to this manifest snapshot.
+
+Evidence checks: all 10,393 TSV paths are unique. The snapshot has 67,735 rows / 64,317 distinct nonempty hashes; **0 of 9,859 GAP hashes** occurs anywhere in it. All 534 NS rows reproduce their unique basename+size manifest hash. Independently reading and hashing all 534 SSD files reproduces **521 equal / 13 different**, with the different-path set exactly matching `gap-kipp.ns-differs.tsv`; **0 of those 13 freshly computed hashes** occurs anywhere in the snapshot. No hashing read failed. NS_UNVERIFIED is 0 / 0 B. The summary and log reproduce the original categories, but their gap totals and folder breakdown precede the 13-file correction.
+
+Source trace: `gap-report.py` builds `bysha` from every nonempty manifest hash without a status filter and emits `GAP` only in the `sha not in bysha` branch; a hash present in this snapshot cannot take that branch. Its NS categories alone do not establish content identity; the independent confirmation above supplies that check. `gap-confirm-ns.py` compares freshly read hashes with the recorded expected hash, but does not itself search the whole manifest for differing hashes; that search was independently performed here. Neither artifact script was executed, avoiding their output writes. The 9,859 original GAP files were checked through their recorded hashes, not rehashed from the SSD.
+
+Completeness: fresh `find /Volumes/kipp -name '.*' -prune -o -type f -print0` exited 0, with **10,393 files (claimed 10,393)** and an exact path-set match to the TSV. Fresh stat sizes matched every row and summed to **1,953,592,885,376 B (claimed the same)**. An initial unpruned find reported `Operation not permitted` for exactly `/Volumes/kipp/.Spotlight-V100` and `/Volumes/kipp/.Trashes`; both are excluded dot-directories under the stated counting rule, and pruning them eliminated all traversal errors. No required in-scope read was blocked. Only this review-channel file was modified.
+
+
+**PM (2026-09-17T20:15:20-07:00):** Accepted. The decision-driving figures (gap 9,872 files / 1,921,695,784,449 B; archived 521 / 31,897,100,927 B; 10,393 files on disk, fresh `find` match) reproduced exactly; the only finding is the per-folder table lacking the 13 corrected files, which the Reviewer's table fixes (SonyA6700 5,978 / 582.5 GB, Backup 3,648 / 260.0 GB). Delivered to Eddy with the Reviewer's table. `kipp` copy itself waits for the overwrite guard release (B23(b), v0.2.1) - under v0.2.0 a `media-sonya6700` copy from `kipp` would hit the exact recopy path that lost 2,668 files.
+
+### #7 - B24 `repair-dest` (branch `repair-dest`, code tip `e3c694b`) - **resolved: FINDINGS (3), all accepted → Dev fixes → request #10**
 
 **PM (2026-09-17T20:08:56-07:00):** Review `git diff 77964bd..e3c694b -- . ':!team'` (2 commits off `main` at `77964bd`, code-identical to `e4a4aed`; 7 files, +590/-1: new `internal/repair/{repair.go,repair_test.go}`, `cmd/vault/main.go`, `cmd/vault/main_test.go`, `internal/manifest/manifest.go`, `CLAUDE.md`, `README.md`). Independent of `overwrite-guard`. Context: 195 `media-sonya6700` rows have `dest_path` missing a `CLIP/` or `DCIM/` prefix (Tester #7); the bytes are on disk one directory down and hash-match the rows 195/195. This command rewrites `dest_path` only, one row at a time, after a size **and** sha256 match, and will run first on a snapshot by the Tester, then on the live manifest as a PM-logged act. Dev's note: `team/channels/dev-questions.md`, Dev 2026-09-17T20:08 (worktree `~/Projects/media-vault-dev`, commit `5307f64`). PM independently at `e3c694b` in a detached checkout: `go vet` clean, `gofmt -l` empty, `go test ./... -count=1` ok for all seven test packages.
 
@@ -20,6 +106,18 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 **This is wrong if:** any write reaches the manifest on `--dry-run` or from `Build`; `UpdateDestPath`'s SQL touches any column but `dest_path` or can match more than one row; a candidate can be accepted without reading its full content; the walk can descend more than one level or leave the row's own directory; a row of another disk or with an empty `dest_path` can be rewritten; the accepted candidate path can be a path the writer would later treat differently from the stored spelling (leading `./`, symlinked subdir); or the CLI exits 0 while a row is still unbacked.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-17):** FINDINGS — request #7, exactly `git diff 77964bd..e3c694b -- . ':!team'`, reviewed by source trace. References below are to `e3c694b`.
+
+1. **[P1] Candidate lookup can follow symlinks outside the permitted search area and accept a different object from the one the writer replaces.** `internal/repair/repair.go:114-118` uses `os.Stat` and `os.Open` on the candidate, following a final-component symlink. Concrete input: row `dest_path = X.JPG`, absent `root/X.JPG`, real directory `root/DCIM`, and `root/DCIM/X.JPG` a symlink to a size/hash-matching file outside the archive (or two levels deeper). The plan accepts `DCIM/X.JPG` and Apply persists it. The bytes read were outside the one-level search area; the writer's `os.Rename` at `internal/copy/copy.go:74` would replace the symlink itself, whereas repair hashed its target. `e.IsDir()` excludes symlinks only among the newly enumerated subdirectories: a nested row `Videos/X.JPG` with `root/Videos` itself symlinked outside the root also searches and accepts external files. Reject symlink candidates and symlinked directory components, and validate root containment before accepting a path; add leaf-symlink and ancestor-symlink regression cases. `filepath.Join` does clean leading `./`, but it does not establish physical containment.
+2. **[P2] A directory at the old destination produces a false successful repair run.** `internal/repair/repair.go:83-85` treats any successful `os.Stat` as intact, without checking file type. With a row for `X.JPG` and an empty directory at `root/X.JPG`, Build reports one intact row and no changes; `cmd/vault/main.go:566-571` returns 0 without `INCOMPLETE:`, although no file backs that row and verify will encounter a read error. This falsifies the request's explicit zero-exit/unbacked-row criterion. Check that an intact destination is a regular file and report a non-file destination as unresolved or an error; cover this through the CLI.
+3. **[P2] The literal dry-run no-write claim is not met by CLI initialization.** `cmd/vault/main.go:75-79` creates the config directory and calls `manifest.Open` before parsing `--dry-run`. With a fresh `VAULT_CONFIG`, `vault repair-dest sony <root> --dry-run` creates `manifest.db` and its schema/WAL configuration, then reports `(dry-run; nothing written)`. This is pre-existing shared initialization, but the new command and claim 3 inherit it. The CLI test first runs copy and compares rows in an already initialized manifest, so it cannot catch this case. Either initialize read-only for dry-run or explicitly narrow this command's contract and output to no archive-file or manifest-row changes, acknowledging initialization.
+
+Other requested checks pass by source trace: Build contains no manifest write; ListByDisk filters by disk, and empty destinations are skipped. Candidate hashing reads through EOF and only admits equal SHA-256 after the size check; zero/one/multiple matches map to NOT FOUND/REPAIR/AMBIGUOUS. UpdateDestPath changes only `dest_path`, and the schema's unique `(source_disk, source_path)` constraint limits the update to at most one row; zero affected rows errors. Apply writes only repairable entries and stops on the first SQL error. The tests assert all other row fields unchanged and the other disk untouched. The size-only mutation would break the DSC0002 NOT FOUND assertion, plan counts, and CLI unresolved-row assertions. Fixture arithmetic is consistent: 9 destinations = 1 intact + 8 changes; changes = 3 repairable + 4 not found + 1 ambiguous; bytes hashed = 13 + 7 + 9 + 9 + 9 + 5 = 52. Arity, unknown flag, empty disk, and unresolved outcomes have the claimed exit paths.
+
+Scope confirmed: seven files, +590/-1. No build, test, or mutation experiment was run; PM's execution results are supplied evidence, not independently rerun. Only this review channel was modified by this review; the pre-existing modification to `team/channels/tester-feedback.md` was left untouched.
+
+**PM (2026-09-17T20:12:11-07:00):** FINDINGS accepted, all three. #1 (symlinks: `Lstat`, reject symlink leaves and symlinked directory components, prove containment under the root before accepting) and #2 (an intact destination must be a regular file; anything else is unresolved → `INCOMPLETE:`) are code + tests. #3 is the same pre-existing initialization as #5-2: the command's contract narrows to "no archive file, no manifest row" and says so in its dry-run output; B31 stays the real fix. Back to Dev on `repair-dest`, new commits only, after its `overwrite-guard` fixes; re-review as **#10, fixes only**. (#8 = the Tester's `kipp` numbers, #9 = `overwrite-guard` fixes.)
 
 ### #6 - re-review of #5's fixes only (branch `overwrite-guard`, code tip `c03eb68`) - **resolved: FINDINGS (1), accepted → Dev fixes → request #8**
 
