@@ -217,68 +217,56 @@ func TestApplyRewritesOnlyTheByteFacts(t *testing.T) {
 	}
 }
 
-// Review #30: the ENOENT fallback (spelling-key match when a row's file
-// cannot be stat'ed) applies only to a row of the SAME disk as the target,
-// which shares this destRoot. A different-disk row folded-equal but living
-// under another root is not flagged - that would refuse a valid restore.
-// The false positive only arises on a case-sensitive filesystem (where a
-// folded spelling is genuinely ENOENT under the root); this test builds it
-// there and, on a case-insensitive filesystem, checks the alias path
-// instead.
-func TestBuildEnoentFallbackIsSameDiskOnly(t *testing.T) {
+// Review #39: claimants are by file identity only - no spelling fallback.
+// A row whose file is not under this root (ENOENT) is not a claimant; a row
+// whose file cannot be stat'ed for another reason (permission/I/O) leaves
+// it unknown, so the restore is refused rather than risk an unseen alias.
+func TestBuildClaimantsIdentityOnly(t *testing.T) {
 	m := open(t)
-	rootA, outside := t.TempDir(), t.TempDir()
-	write(t, filepath.Join(rootA, "real", "x.JPG"), "torn")
+	root, outside := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(root, "real", "x.JPG"), "torn")
 	write(t, filepath.Join(outside, "good.JPG"), "good")
-	// Case sensitivity of rootA: does REAL/X.jpg resolve to real/x.JPG?
-	_, insErr := os.Stat(filepath.Join(rootA, "REAL", "X.jpg"))
-	caseInsensitive := insErr == nil
-
 	if err := m.Upsert(manifest.Entry{SourceDisk: "A", SourcePath: "x.JPG", DestPath: "real/x.JPG", Size: 4, MtimeNs: 1,
 		SHA256: sha("torn"), CopiedAt: 1, VerifiedAt: 2, Status: "verified"}); err != nil {
 		t.Fatal(err)
 	}
-	// A different disk B, folded-equal spelling, whose file is NOT under
-	// rootA (it lives under B's own root, which restore does not know).
-	if err := m.Upsert(manifest.Entry{SourceDisk: "B", SourcePath: "b", DestPath: "real/X.jpg", Size: 28, MtimeNs: 1,
-		SHA256: sha("elsewhere"), CopiedAt: 1, Status: "deduped"}); err != nil {
+	// A folded-equal row of another disk whose file is simply not under this
+	// root: ENOENT, so not a claimant (no spelling guess).
+	if err := m.Upsert(manifest.Entry{SourceDisk: "B", SourcePath: "b", DestPath: "gone/elsewhere.JPG", Size: 4, MtimeNs: 1,
+		SHA256: sha("torn"), CopiedAt: 1, Status: "deduped"}); err != nil {
 		t.Fatal(err)
 	}
-	p, err := Build(context.Background(), m, "A", "x.JPG", filepath.Join(outside, "good.JPG"), rootA, sha("good"))
-	got := map[string]bool{}
-	for _, c := range p.Claimants {
-		got[c.SourceDisk+":"+c.SourcePath] = true
-	}
-	if caseInsensitive {
-		// real/X.jpg resolves to A's file: a genuine alias, caught by
-		// stat+SameFile, correctly a claimant.
-		if !errors.Is(err, ErrRefused) || !got["B:b"] {
-			t.Errorf("case-insensitive: B's folded alias should be a claimant via SameFile; got %v, %v", got, err)
-		}
-	} else {
-		// real/X.jpg is ENOENT under rootA; B belongs to another root and
-		// must NOT be flagged on the folded key alone (the #30 false
-		// positive), so this valid restore is not refused by B.
-		if got["B:b"] {
-			t.Errorf("case-sensitive: B (another disk under another root) was falsely claimed - the #30 false positive")
-		}
+	p, err := Build(context.Background(), m, "A", "x.JPG", filepath.Join(outside, "good.JPG"), root, sha("good"))
+	// No claimant, and the row is not refused for claimants (it is
+	// AlreadyThere=false, so it would proceed past this check).
+	if errors.Is(err, ErrRefused) && len(p.Claimants) > 0 {
+		t.Errorf("an ENOENT row was flagged as a claimant: %+v", p.Claimants)
 	}
 
-	// A missing sibling of the SAME disk, folded-equal, is still a claimant
-	// (it shares this root). On a case-insensitive fs it resolves and is
-	// caught by SameFile; on a case-sensitive one by the same-disk fallback.
-	if err := m.Upsert(manifest.Entry{SourceDisk: "A", SourcePath: "sib", DestPath: "real/X.jpg", Size: 4, MtimeNs: 1,
-		SHA256: sha("torn"), CopiedAt: 1, Status: "mismatch"}); err != nil {
+	// A row whose file cannot be stat'ed for a reason other than ENOENT:
+	// make its parent directory unreadable so stat returns EACCES. The
+	// restore is then refused, naming the row.
+	blocked := filepath.Join(root, "blocked")
+	if err := os.MkdirAll(blocked, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	p, _ = Build(context.Background(), m, "A", "x.JPG", filepath.Join(outside, "good.JPG"), rootA, sha("good"))
-	sib := false
-	for _, c := range p.Claimants {
-		if c.SourceDisk == "A" && c.SourcePath == "sib" {
-			sib = true
-		}
+	write(t, filepath.Join(blocked, "c.JPG"), "torn")
+	if err := m.Upsert(manifest.Entry{SourceDisk: "C", SourcePath: "c", DestPath: "blocked/c.JPG", Size: 4, MtimeNs: 1,
+		SHA256: sha("torn"), CopiedAt: 1, Status: "deduped"}); err != nil {
+		t.Fatal(err)
 	}
-	if !sib {
-		t.Errorf("a same-disk missing sibling should be a claimant")
+	if err := os.Chmod(blocked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(blocked, 0o755) })
+	// Only assert refusal if this environment actually denies the stat
+	// (not root); the skip is decided by a direct probe, not by Build's
+	// result, so a Build that wrongly IGNORES the error is still caught.
+	if _, probe := os.Stat(filepath.Join(blocked, "c.JPG")); probe == nil || os.IsNotExist(probe) {
+		t.Skip("this environment can stat under a 0000 dir (running as root?); the EACCES path is not exercised")
+	}
+	_, err = Build(context.Background(), m, "A", "x.JPG", filepath.Join(outside, "good.JPG"), root, sha("good"))
+	if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "cannot rule out claimant C:c") {
+		t.Errorf("a non-ENOENT stat error should refuse naming the row: %v", err)
 	}
 }

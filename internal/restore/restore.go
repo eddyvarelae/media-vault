@@ -101,16 +101,19 @@ func Build(ctx context.Context, m *manifest.Manifest, disk, sourcePath, replacem
 
 	// Other rows resolving to the same physical file would attest old bytes
 	// under a path holding new ones. "Same file" is decided by identity
-	// (os.SameFile on the path each row names, symlinks followed): a
-	// directory symlink alias, a leaf symlink, a hard link and a case alias
-	// all count. A row whose file cannot be stat'ed is compared by the
-	// textual key instead, so a missing alias is still a claimant when its
-	// spelling says so - the safe mistake, and the refusal names the rows.
+	// only (os.SameFile on the path each row names under this destRoot,
+	// symlinks followed): a directory-symlink alias, a leaf symlink, a hard
+	// link and a case alias all count. There is no spelling fallback (review
+	// #39): a row's dest_path is relative to a root the manifest does not
+	// record, so a folded-key guess is meaningless across roots. A stat that
+	// fails with ENOENT means the row's file is not under this root and
+	// cannot be the target - not a claimant. Any other stat error (a
+	// permission or I/O fault) leaves it unknown, so the restore is refused
+	// rather than risk writing over an alias we could not read.
 	all, err := m.AllRows()
 	if err != nil {
 		return nil, err
 	}
-	target := physKey(destRoot, p.DestRel)
 	for _, e := range all {
 		if e.SourceDisk == row.SourceDisk && e.SourcePath == row.SourcePath {
 			continue
@@ -119,22 +122,15 @@ func Build(ctx context.Context, m *manifest.Manifest, disk, sourcePath, replacem
 		if rel == "" {
 			rel = e.SourcePath
 		}
-		if other, err := os.Stat(filepath.Join(destRoot, rel)); err == nil {
+		other, statErr := os.Stat(filepath.Join(destRoot, rel))
+		if statErr == nil {
 			if os.SameFile(fi, other) {
 				p.Claimants = append(p.Claimants, e)
 			}
 			continue
 		}
-		// The file is not there to compare by identity. Fall back to the
-		// spelling key ONLY for a row of the same disk as the target: it
-		// shares this destRoot, so a folded-key match is a real (missing)
-		// sibling. A row of another disk is relative to a root we do not
-		// record; flagging it on a folded-key match falsely refuses a valid
-		// restore when that row's file lives under a different root (review
-		// #30). Its aliases into THIS root are caught by the stat+SameFile
-		// path above.
-		if e.SourceDisk == row.SourceDisk && physKey(destRoot, rel) == target {
-			p.Claimants = append(p.Claimants, e)
+		if !os.IsNotExist(statErr) {
+			return p, fmt.Errorf("%w: cannot rule out claimant %s:%s: %v", ErrRefused, e.SourceDisk, e.SourcePath, statErr)
 		}
 	}
 	if len(p.Claimants) > 0 {
