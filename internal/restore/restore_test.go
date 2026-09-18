@@ -41,6 +41,23 @@ func open(t *testing.T) *manifest.Manifest {
 	return m
 }
 
+// caseFolds reports whether dir's filesystem folds case: a file created
+// lowercase is found spelled uppercase (APFS on the dev Mac folds; ext4 in the
+// linux CI does not). A case-alias claimant only exists where the FS folds, so
+// the tests that rely on it probe first and assert conditionally.
+func caseFolds(t *testing.T, dir string) bool {
+	t.Helper()
+	probe := filepath.Join(dir, "case-probe")
+	if err := os.WriteFile(probe, []byte("p"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, statErr := os.Stat(filepath.Join(dir, "CASE-PROBE"))
+	if err := os.Remove(probe); err != nil {
+		t.Fatal(err)
+	}
+	return statErr == nil
+}
+
 // The physical checks restore makes on the destination, and the empty
 // dest_path rule (verify's), without the CLI.
 func TestBuildChecksTheDestinationPhysically(t *testing.T) {
@@ -140,11 +157,16 @@ func TestBuildFindsClaimantsByIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	write(t, filepath.Join(root, "real", "unrelated.JPG"), "torn") // same bytes, different file: not a claimant
-	claimants := map[string]string{                                // other rows: source_path -> dest_path
+	claimants := map[string]string{ // other rows: source_path -> dest_path
 		"B:dir-alias":  "alias/x.JPG",
 		"B:leaf-alias": "leaf.JPG",
 		"B:hard-link":  "hard.JPG",
-		"B:case-alias": "REAL/X.jpg",
+	}
+	// A case-alias is one physical file only where the FS folds case; on a
+	// case-sensitive FS (the linux CI) REAL/X.jpg is simply a different path
+	// that does not exist, so it is neither created nor expected there.
+	if caseFolds(t, root) {
+		claimants["B:case-alias"] = "REAL/X.jpg"
 	}
 	for k, dest := range claimants {
 		disk, src, _ := strings.Cut(k, ":")

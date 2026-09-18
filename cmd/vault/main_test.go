@@ -1248,12 +1248,17 @@ func TestRestore(t *testing.T) {
 		other := t.TempDir()
 		writeFile(t, filepath.Join(other, "wrong.JPG"), "not the original", t0)
 		writeFile(t, filepath.Join(dst, "DCIM", "orphan.JPG"), "no row", t0)
-		// A deduped row of another disk resolving to the same file.
+		// A deduped row of another disk resolving to the same file. The alias is
+		// the identical dest spelling (one physical file, two rows) so it is a
+		// claimant on every filesystem; a case-variant spelling would only
+		// collide where the FS folds case (it did not in the linux CI). The
+		// dir-symlink / leaf-symlink / hard-link / case-fold identities are
+		// covered exhaustively at package level (TestBuildFindsClaimantsByIdentity).
 		m, err := manifest.Open(filepath.Join(cfg, "manifest.db"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := m.Upsert(manifest.Entry{SourceDisk: "kipp", SourcePath: "x/DSC04868_2025.JPG", DestPath: "dcim/DSC04868_2025.JPG",
+		if err := m.Upsert(manifest.Entry{SourceDisk: "kipp", SourcePath: "x/DSC04868_2025.JPG", DestPath: "DCIM/DSC04868_2025.JPG",
 			Size: int64(len(torn)), MtimeNs: 1, SHA256: sha(torn), CopiedAt: 1, Status: "deduped"}); err != nil {
 			t.Fatal(err)
 		}

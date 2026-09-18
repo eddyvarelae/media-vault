@@ -178,6 +178,10 @@ func TestReadTailRefusesOpenSubstitution(t *testing.T) {
 		t.Errorf("readTail followed a symlink leaf; O_NOFOLLOW should refuse it")
 	}
 	// (b) the file at the path is swapped for a different inode after Lstat.
+	// Rename the original aside (never Remove): its inode stays live under the
+	// new name, so the file written back at the path is guaranteed a fresh
+	// inode. A remove+create can reuse the freed inode on Linux (it did in the
+	// first alpine CI run), let SameFile pass, and make the test lie.
 	swap := filepath.Join(dir, "swap")
 	if err := os.WriteFile(swap, []byte("first"), 0o644); err != nil {
 		t.Fatal(err)
@@ -186,10 +190,10 @@ func TestReadTailRefusesOpenSubstitution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(swap); err != nil {
+	if err := os.Rename(swap, swap+".aside"); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(swap, []byte("second"), 0o644); err != nil { // new inode
+	if err := os.WriteFile(swap, []byte("second"), 0o644); err != nil { // fresh inode
 		t.Fatal(err)
 	}
 	if _, _, err := readTail(swap, first); err == nil {
