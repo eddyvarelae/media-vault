@@ -97,7 +97,8 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 	cleanup := func() { os.Remove(tmpPath) }
 
 	hasher := sha256.New()
-	tee := io.TeeReader(&ctxReader{ctx: ctx, r: in}, hasher)
+	hashed := &byteCounter{}
+	tee := io.TeeReader(&ctxReader{ctx: ctx, r: in}, io.MultiWriter(hasher, hashed))
 
 	written, err := io.Copy(out, tee)
 	if err != nil {
@@ -126,9 +127,12 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 	// rows and the B40 torn write). copy.File is the only path that mints a row;
 	// refuse to return one whose hash was not computed here.
 	sum := hex.EncodeToString(hasher.Sum(nil))
-	if sum == "" {
+	// The tee fed the hasher and the destination from one source reader, so the
+	// bytes the hasher saw must equal the bytes written; if they ever diverge
+	// the sha is not the hash of what landed, and no row may be recorded.
+	if sum == "" || hashed.n != written {
 		cleanup()
-		return manifest.Entry{}, fmt.Errorf("refusing to record a row not backed by a source-compared hash")
+		return manifest.Entry{}, fmt.Errorf("refusing to record a row: hashed %d bytes but wrote %d", hashed.n, written)
 	}
 	mt := time.Unix(0, task.MtimeNs)
 	if err := os.Chtimes(tmpPath, mt, mt); err != nil {
@@ -151,6 +155,12 @@ func File(ctx context.Context, srcRoot, dstRoot string, task scan.FileTask, disk
 		Status:     "copied",
 	}, nil
 }
+
+// byteCounter counts the bytes written through it — the tee writes every byte
+// it reads here as well as to the hasher, so it counts exactly what was hashed.
+type byteCounter struct{ n int64 }
+
+func (c *byteCounter) Write(p []byte) (int, error) { c.n += int64(len(p)); return len(p), nil }
 
 type ctxReader struct {
 	ctx context.Context

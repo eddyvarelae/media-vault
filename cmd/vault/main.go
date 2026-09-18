@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -849,8 +850,17 @@ func runAudit(ctx context.Context, m *manifest.Manifest, args []string) int {
 	fmt.Printf("\nAUDIT %s: %d rows — %d plausible, %d suspect, %d review, %d skipped, %d error\n",
 		disk, r.Rows, r.Plausible, r.Suspect, r.Review, r.Skipped, r.Errors)
 	if r.Skipped > 0 {
-		// Announce what was not checked as loudly as what was.
-		fmt.Printf("(%d rows were a type audit does not check — not examined)\n", r.Skipped)
+		// Announce what was not checked as loudly as what was, named by type.
+		exts := make([]string, 0, len(r.SkippedExt))
+		for e := range r.SkippedExt {
+			exts = append(exts, e)
+		}
+		sort.Strings(exts)
+		var parts []string
+		for _, e := range exts {
+			parts = append(parts, fmt.Sprintf("%s:%d", e, r.SkippedExt[e]))
+		}
+		fmt.Printf("SKIPPED (type not audited): %s\n", strings.Join(parts, " "))
 	}
 	if tsv != "" {
 		// O_EXCL|O_NOFOLLOW: report-only, so --tsv must never truncate an

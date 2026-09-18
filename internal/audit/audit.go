@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/eddyvarelae/media-vault/internal/copy"
 	"github.com/eddyvarelae/media-vault/internal/manifest"
@@ -41,6 +42,13 @@ const (
 	ErrorV    Verdict = "ERROR"     // the file could not be read for auditing
 )
 
+// videoExts are the extensions whose presence makes a file a plausible twin of
+// a sidecar (an empty .SRT telemetry track belongs to one of these).
+var videoExts = map[string]bool{
+	".mp4": true, ".mov": true, ".avi": true, ".mts": true, ".m2ts": true,
+	".m4v": true, ".lrv": true, ".insv": true, ".mkv": true,
+}
+
 // Finding is one row's verdict and why.
 type Finding struct {
 	Entry   manifest.Entry
@@ -50,21 +58,25 @@ type Finding struct {
 }
 
 // Result tallies a run. Findings holds the SUSPECT / REVIEW / ERROR rows — the
-// ones worth listing; PLAUSIBLE and SKIPPED are counted, not listed.
+// ones worth listing; PLAUSIBLE and SKIPPED are counted, not listed. SkippedExt
+// breaks the SKIPPED count down by extension so the report can name what it did
+// not check.
 type Result struct {
-	Rows      int
-	Plausible int
-	Suspect   int
-	Review    int
-	Skipped   int
-	Errors    int
-	Findings  []Finding
+	Rows       int
+	Plausible  int
+	Suspect    int
+	Review     int
+	Skipped    int
+	Errors     int
+	Findings   []Finding
+	SkippedExt map[string]int
 }
 
-// Classify judges a file from its name, size and tail (the last TailBytes, or
-// the whole file when shorter). It is pure — no I/O — so the type rules are
-// unit-testable on bytes alone.
-func Classify(rel string, size int64, tail []byte) (Verdict, string) {
+// Classify judges a file from its name, size, tail (the last TailBytes, or the
+// whole file when shorter) and whether a media twin exists (only consulted for
+// an empty .SRT). It is pure — no I/O — so the type rules are unit-testable on
+// bytes alone.
+func Classify(rel string, size int64, tail []byte, hasTwin bool) (Verdict, string) {
 	base := filepath.Base(rel)
 	ext := strings.ToLower(filepath.Ext(rel))
 	switch {
@@ -72,13 +84,21 @@ func Classify(rel string, size int64, tail []byte) (Verdict, string) {
 		if size == 0 {
 			return Suspect, "zero-length JPEG"
 		}
-		// A whole JPEG ends in the EOI marker FF D9, optionally followed by
-		// camera/DJI zero padding (DJI pads to 4 KiB multiples). The one torn
-		// file had no EOI anywhere in its last 64 KiB — just zeros.
-		if bytes.Contains(tail, []byte{0xFF, 0xD9}) {
-			return Plausible, "JPEG EOI (FF D9) present in the tail"
+		// A whole JPEG ends in the EOI marker FF D9, optionally followed by only
+		// zero padding to EOF (cameras/DJI pad, DJI to 4 KiB multiples). The
+		// tail ends at EOF, so the bytes after the LAST EOI in the tail are the
+		// bytes from the EOI to EOF. The torn file had no EOI at all — just
+		// zeros; a file with an EOI but non-zero data after it is not a clean end.
+		i := bytes.LastIndex(tail, []byte{0xFF, 0xD9})
+		if i < 0 {
+			return Suspect, "no JPEG EOI (FF D9) in the last 64 KiB — possible torn write"
 		}
-		return Suspect, "no JPEG EOI (FF D9) in the last 64 KiB — possible torn write"
+		for _, b := range tail[i+2:] {
+			if b != 0x00 {
+				return Suspect, "JPEG EOI is followed by non-zero data before EOF — not a clean end"
+			}
+		}
+		return Plausible, "JPEG EOI (FF D9) then only zero padding to EOF"
 	case ext == ".arw":
 		// Sony pre-allocates raw at fixed sizes — every whole ARW the scan saw
 		// was an exact number of MiB (27/28/29/30). A short one would not be.
@@ -91,10 +111,14 @@ func Classify(rel string, size int64, tail []byte) (Verdict, string) {
 	case strings.EqualFold(base, "DATABASE.BIN"):
 		return Plausible, "Sony camera database (zero-padded by design)"
 	case ext == ".srt":
-		// An empty subtitle/telemetry track is a DJI aborted-recording twin,
-		// not a torn write (a torn write is full-size with a zero tail).
+		// An empty telemetry/subtitle track is a DJI aborted-recording twin —
+		// but only if the media it belongs to is actually here. A lone empty
+		// .SRT is worth a look, not a pass.
 		if size == 0 {
-			return Plausible, "empty SRT (aborted/short recording twin)"
+			if hasTwin {
+				return Plausible, "empty SRT with a media twin (aborted/short recording)"
+			}
+			return Review, "empty SRT with no media twin on the disk"
 		}
 		return Skipped, "SRT text not audited"
 	default:
@@ -110,18 +134,24 @@ func Run(ctx context.Context, m *manifest.Manifest, disk, dstRoot string, onFind
 	if err != nil {
 		return nil, err
 	}
-	res := &Result{}
+	// A first pass over the rows records the stem of every video file, so an
+	// empty .SRT can be judged against whether its media is actually archived.
+	videoStems := map[string]bool{}
+	for _, e := range rows {
+		rel := relOf(e)
+		if videoExts[strings.ToLower(filepath.Ext(rel))] {
+			videoStems[stem(rel)] = true
+		}
+	}
+
+	res := &Result{SkippedExt: map[string]int{}}
 	for _, e := range rows {
 		if err := ctx.Err(); err != nil {
 			return res, err
 		}
 		res.Rows++
-		rel := e.DestPath
-		if rel == "" {
-			rel = e.SourcePath // verify's rule: an empty dest_path falls back to source_path
-		}
+		rel := relOf(e)
 		record := func(v Verdict, reason string) {
-			f := Finding{Entry: e, Rel: rel, Verdict: v, Reason: reason}
 			switch v {
 			case Plausible:
 				res.Plausible++
@@ -131,10 +161,16 @@ func Run(ctx context.Context, m *manifest.Manifest, disk, dstRoot string, onFind
 				res.Review++
 			case Skipped:
 				res.Skipped++
+				ext := strings.ToLower(filepath.Ext(rel))
+				if ext == "" {
+					ext = "(no ext)"
+				}
+				res.SkippedExt[ext]++
 			case ErrorV:
 				res.Errors++
 			}
 			if v != Plausible && v != Skipped {
+				f := Finding{Entry: e, Rel: rel, Verdict: v, Reason: reason}
 				res.Findings = append(res.Findings, f)
 				onFinding(f)
 			}
@@ -155,12 +191,12 @@ func Run(ctx context.Context, m *manifest.Manifest, disk, dstRoot string, onFind
 			continue
 		}
 		full := filepath.Join(dstRoot, rel)
-		fi, err := os.Lstat(full)
+		li, err := os.Lstat(full)
 		if err != nil {
 			record(ErrorV, fmt.Sprintf("cannot stat: %v", err))
 			continue
 		}
-		if !fi.Mode().IsRegular() {
+		if !li.Mode().IsRegular() {
 			record(ErrorV, "not a regular file")
 			continue
 		}
@@ -168,35 +204,65 @@ func Run(ctx context.Context, m *manifest.Manifest, disk, dstRoot string, onFind
 			record(ErrorV, "resolves outside the root")
 			continue
 		}
-		tail, err := readTail(full, fi.Size())
+		tail, size, err := readTail(full, li)
 		if err != nil {
 			record(ErrorV, fmt.Sprintf("cannot read tail: %v", err))
 			continue
 		}
-		v, reason := Classify(rel, fi.Size(), tail)
+		v, reason := Classify(rel, size, tail, videoStems[stem(rel)])
 		record(v, reason)
 	}
 	return res, nil
 }
 
+func relOf(e manifest.Entry) string {
+	if e.DestPath != "" {
+		return e.DestPath
+	}
+	return e.SourcePath // verify's rule: an empty dest_path falls back to source_path
+}
+
+// stem is the lowercased basename without its extension, so a .SRT and its
+// media twin (DJI_..._D.SRT / DJI_..._D.MP4) share one key.
+func stem(rel string) string {
+	b := filepath.Base(rel)
+	return strings.ToLower(strings.TrimSuffix(b, filepath.Ext(b)))
+}
+
 // readTail returns the last TailBytes of the file (or the whole file when it is
-// shorter). Read-only.
-func readTail(path string, size int64) ([]byte, error) {
+// shorter) and the size read from the OPEN fd. It opens O_NOFOLLOW (the leaf
+// must not be a symlink), confirms via SameFile that the opened file is the one
+// Lstat saw (no swap between stat and open), sizes the read from the fd, and
+// treats a short read as an error — a file that shrank mid-read is not audited
+// on a partial tail. Read-only.
+func readTail(path string, lstatInfo os.FileInfo) ([]byte, int64, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, 0, err
+	}
+	if !os.SameFile(lstatInfo, fi) {
+		return nil, 0, fmt.Errorf("file changed between stat and open")
+	}
+	size := fi.Size()
 	n := int64(TailBytes)
 	if n > size {
 		n = size
 	}
 	if n == 0 {
-		return nil, nil
+		return nil, size, nil
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
 	buf := make([]byte, n)
-	if _, err := f.ReadAt(buf, size-n); err != nil && err != io.EOF {
-		return nil, err
+	k, err := f.ReadAt(buf, size-n)
+	if err != nil && err != io.EOF {
+		return nil, size, err
 	}
-	return buf, nil
+	if int64(k) != n {
+		return nil, size, fmt.Errorf("short tail read: got %d of %d bytes", k, n)
+	}
+	return buf, size, nil
 }
