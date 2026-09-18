@@ -62,6 +62,33 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-17T22:01-07:00) - tips for #17/#15/#16 against `main` `c66a612`, and the B40 shape for your say-so before I build.**
+
+Tips (each re-merged with `origin/main` `c66a612`, channel-only, both sides kept; `go test ./... -count=1` → 7 ok at each): **#17 `f4-tests` `f54eb59`** · **#15 `repair-dest` `ca8e6b7`** (code `0555c53`) · **#16 `certs-out` `82d1539`** (code `7066711`). `kipp-script` `293bcd1` (#19, code `70854af`) untouched. Worktree clean, idle on code until you answer below.
+
+**B40 proposal - `vault restore` (rev 5 item 2). Not built yet.** The one thing the v0.2.1 guard must not forbid by accident is exactly the one thing it exists to forbid: replacing a `verified` destination. So this is a *separate command* that does it deliberately, on one named row, with every fact stated up front and checked, and it does not go through `scan.Build` at all (so no `VerifiedChanged`/`DstOwned` bucket applies) - but it does reuse the writer, so the physical checks still hold.
+
+```
+vault restore <disk> <source-path> <replacement-file> <dest-root> --expect-sha <sha256> [--dry-run]
+```
+B40's call: `vault restore media-sonya6700 DCIM/DSC04868_2025.JPG /usb/emv/Backups/SonyA6700/DCIM/DSC04868.JPG /volume1/media/SonyA6700 --expect-sha b7ecf808…`.
+
+What it does, in order, refusing (exit 1, nothing written) at the first failure:
+1. **The row.** `Lookup(disk, source-path)` must exist. Destination = `dest-root/dest_path`, or `dest-root/source_path` when `dest_path` is empty (the B39 rows; verify's own rule). Print the row: `dest_path`, size, sha, status, `verified_at`, `copied_at`.
+2. **The destination, physically.** `SymlinkComponent` clean, `Lstat` regular file (a missing destination is *not* this tool's case - that is `copy`; say so). Hash it and print `current bytes: <sha> (<n> B)`; report whether that equals the row's sha (`row attests these bytes: yes/no` - informational, both are logged either way, because the point is to record what was replaced).
+3. **Other claimants.** Every row of any disk whose `dest_path` (or `source_path` when empty) resolves to the same physical file (the `certs`/`scan` key discipline). If any: list them and **refuse** - they would attest old bytes under a path that now holds new ones. (`deduped` rows pointing at this file are the realistic case; B40's file has none per #24, so this should not fire.) Override: none. If it fires, that is a decision, not a flag.
+4. **The replacement, stated up front.** `--expect-sha` is mandatory. Hash `<replacement-file>`; it must equal `--expect-sha` exactly or refuse - the operator states what they verified elsewhere (the Tester's `b7ecf808…`), the tool proves the file in hand is that. Size printed. If `--expect-sha` equals the current destination's hash → "already those bytes", exit 0, nothing written.
+5. **`--dry-run` stops here**, exit 0, having printed everything above (no archive file, no manifest row; manifest open as always, B31).
+6. **Write** through `copy.File` with `Replace: true` (staging `O_EXCL`, fsync, chtimes to the replacement's mtime, rename over the row's own file - the exact path checked in 2; the writer re-checks the leaf and the directory walk). The returned entry's sha must equal `--expect-sha` (the bytes that landed are the bytes stated) or `die` - after the rename this cannot un-write, so it is the last line, not the first.
+7. **The row**: `Upsert` with the new sha, size, mtime, `copied_at = now`, `verified_at = 0`, **`status = copied`**; `source_disk`/`source_path`/`dest_path` unchanged (an empty `dest_path` stays empty - filling it is B39's repair, same shape as B24, not this tool's job). Print before/after and `next: vault verify <disk> <dest-root> --only-unverified` - restore never promotes; verify does, by hashing.
+8. **Log line** on stdout, one line, machine-parseable: `RESTORED <disk> <source-path> old=<sha>:<size> new=<sha>:<size> from=<replacement-file>` - the "logs both hashes" requirement, in the NAS log via the usual `>> $LOG`.
+
+Not in it, on purpose: no wildcard/batch (one row per invocation - B40 is one file; a batch is a different risk), no keeping the corrupt bytes (an unrecorded file in the archive is the invariant this project keeps paying for; the old sha/size are in the log), no `--force` past the claimants check, no promotion to `verified`.
+
+Tests (temp dirs, through `main()` + a package `internal/restore`): the B40 shape end to end (copy → verify → certify → corrupt the tail with zeros → `restore --dry-run` writes nothing → `restore` → row `copied` with the new sha → `verify --only-unverified` promotes only it → `certify` passes with the new sha); refusals: unknown row, wrong `--expect-sha`, missing `--expect-sha`, replacement missing, destination missing / directory / symlink leaf / symlinked dir, another row (deduped, other disk) claiming the same file, already-those-bytes → 0 with nothing written; the log line; exit codes. Mutation per refusal.
+
+Two questions, then I build: (a) `dest-root` as a positional (it is needed because the manifest does not record roots) - fine, or would you rather `--root` like `certify`? I lean positional: it is not optional here. (b) The claimants refusal with **no** override - agree? If a `deduped` row ever points at a restored file the right move is to restore *its* view too, which is a second invocation the tool could name in the refusal text.
+
 **PM (2026-09-17T21:59:26-07:00) - #19 fixes accepted at `tested`, staged; Codex runs #19 then #20 (numbers).** Order after this: **#17** (`f4-tests` merge - post its tip), **#15**, **#16**. Then **rev 5 item 2 = B40** (read BACKLOG): the Tester found a `verified` NAS file that is a torn write (3 MiB image + 4.1 MB of zeros) whose row and certificate attest the corrupt bytes; the intact original is on an SSD. We need a deliberate, narrow recovery path that the guard does not forbid by accident - propose the shape in your channel before building (one paragraph), I answer within the hour.
 
 **PM (2026-09-17T21:55:58-07:00) - #18 on `kipp-script`: FINDINGS (2), small. After #17, before #15.** (1) Usage comment line 7: `KIPP_SRC=… DRY_RUN=1 sudo -E ./nas-kipp-copy-all.sh` (root needed for docker on the NAS), and replace "writes nothing" with "no archive file, no manifest row (the log and the manifest open still happen)". (2) Stub test: record argv with boundaries (one arg per line, or NUL-separated), assert the **seven ordered** argument vectors exactly, assert the mounts on all seven, and add a `KIPP_SRC` containing a space. New commits → READY FOR REVIEW → **#19**.
