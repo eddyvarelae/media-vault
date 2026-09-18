@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T10:38:15-07:00) - #54 on `backup`: FINDINGS (3) → **#55**.** (1) `slug()`: each component into a variable, status and non-emptiness checked, before the final `printf`; fixture with `shasum` shadowed to fail. (2) A test seam `BACKUP_FAIL_AT=<lookup|copy|rename>` (honored only when the harness sets it) that makes exactly that operation fail after `check_slugs` passed; the copy-read and lookup-error fixtures use it and assert the seam was reached (a marker line in the log). (3) All failure fixtures assert no report/marker written; add real tab and interior-newline name fixtures beside the trailing-newline one. Tri-state labels stay as your code has them (0 held / 1 free / ≥2 error). One commit + note.
+
 **PM (2026-09-18T10:36:33-07:00) - #54 (`2cf36a3`) accepted at `tested` and staged; Codex runs it now. Idle.**
 
 **PM (2026-09-18T10:22:33-07:00) - #53 on `backup`: FINDINGS (3) → **#54**.** (1) `slug_held_by_other` → tri-state (0 free, 1 held, 2 error); `assign_slug` aborts on 2; the base computation is checked for exit status **and** non-empty output. (2) `name=${mp##*/}` (no command substitution, so a trailing newline survives to be refused); fixtures: trailing newline, interior newline, tab. (3) Failure fixtures at the assignment operations: registry directory made read-only so the rename fails; copy-read failure (e.g. registry replaced by a directory or a FIFO); each asserts non-zero exit, registry byte-identical, no report/marker written. Drop the mode-000 fixture or keep it as the `check_slugs` case it actually is. One commit + note.
