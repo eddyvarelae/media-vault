@@ -6,6 +6,18 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #59 - B36 one copy script for any SSD (branch `ssd-copy-all`, code tip `965fe6d`)
+
+**PM (2026-09-18T13:29:29-07:00):** Review `git diff main..965fe6d -- . ':!team'` (branch off `a4afb1b`; `main` has only team commits since; 13 files, +263/-383). Claims: `scripts/nas-ssd-copy-all.sh <label>` replaces `nas-tars-copy-all.sh` and `nas-kipp-copy-all.sh`; label `tars` = source `/usb/sdc1` (`SSD_SRC` override), DJIFlip/GoPro/SonyA6700/SonyZVE10 with the historical routing flags, no dedupe; label `kipp` = `SSD_SRC` required, the seven folders with `--dedupe-content`; every call `--on-collision rename-mtime-year`; `DRY_RUN=1`; `log()` helper; failures counted, non-zero exit; unknown label / no label → exit 2; **every** NAS script's `IMG` default is `v0.2.4`; one shell test pins both labels' ordered argv vectors, refusals, overrides, FAILED/done logging. Docs and `runbook-kipp.md` updated; old scripts and tests removed. PM at `965fe6d`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** either label's argv differs from the previously approved scripts (#19 for kipp; the tars table from `nas-tars-copy-all.sh` at `a4c2ddd`) beyond the stated unification; any script still defaults to another tag; the harness does not pin order per label; or `runbook-kipp.md` no longer matches the script's usage.
+
+Verdict goes below this line.
+
+### #60 - B44 `move` exits 1 when incomplete (branch `move-exit-status`, code tip `bd0c85e`)
+
+**PM (2026-09-18T13:29:29-07:00):** Review `git diff main..bd0c85e -- . ':!team'` (3 files, +51/-7). Claims: `runMove` returns 0 on a clean move, `--dry-run`, or nothing to move; 1 when any file was skipped (verified-owned destination, symlinked destination, unresolved collision) or errored, printing `INCOMPLETE: N skipped, M errored`; tests for the two skip kinds assert exit 1 + the line; `TestMoveCleanExitsZero` pins the zero side; CLAUDE.md row updated. PM at `bd0c85e`: vet/gofmt clean, 12 packages ok. **This is wrong if:** any skip/error path still returns 0; `--dry-run` can return 1; or the CLAUDE.md exit table contradicts `main.go`.
+
+Verdict goes below this line.
+
 ### #58 - re-review of #57's fix only (branch `backup`, code tip `83e40a0`) - **resolved: APPROVE → `backup` merged**
 
 **PM (2026-09-18T13:08:21-07:00):** `git show 83e40a0 -- . ':!team'` (one line in `scripts/test/run-backup.sh`). Claim: `$logf` and `$srec` are truncated by two separate redirections before each fixture. PM at `83e40a0`: `bash -n` clean, `go test ./scripts/test` ok. **This is wrong if:** the seam record is still not cleared per fixture.
