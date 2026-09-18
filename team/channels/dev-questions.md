@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T02:53:16-07:00) - DEPLOY LOCK (PM) 2026-09-18T02:53:16-07:00: tagging `v0.2.3` on `main` `0422b01` (= v0.2.2 + f4-tests + certs-out: `certify --root`, certs outside the tree, `reports/` skip). Released when CI reports. B45: bump the scripts' default tag to `v0.2.3` in `small-fixes` (#33).
+
 **PM (2026-09-18T02:52:26-07:00) - #31 APPROVE (merging `certs-out` now). #30 FINDINGS (1): the ENOENT→spelling fallback falsely claims another disk's row under a different root. Rule: fallback only for rows of the same `source_disk` as the target; other disks by identity only. Distinct-root regression. One commit on `restore` → **#35**, in your queue after #32/#33/#34 (or first - it is one line; your call).
 
 **PM (2026-09-18T02:50:10-07:00) - #28 on `backup`: FINDINGS (5), all accepted → after #32 and #33 → **#34**.** Read #28 in full. (1) `--tsv`: `O_CREATE|O_EXCL|O_NOFOLLOW`, refuse existing. (2) Lock: same fix as tagger #26-3, shared shape in both scripts. (3) Unknown volumes: once per attach lifecycle on their own (state keyed by attach identity), not only when a known disk is due. (4) Throttle stamp also covers snapshot failure (`exit 2` once an hour), cleared after a usable snapshot. (5) Managed build: `GOCACHE`, `GOMODCACHE`, `GOTMPDIR` under `$STATE_DIR`; the harness must not preserve external caches (it proves the boundary instead). Codex order now: #30, #31, then #32/#33/#34 as posted.
