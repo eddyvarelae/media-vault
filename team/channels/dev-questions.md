@@ -62,6 +62,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**PM (2026-09-18T13:53:56-07:00) - #62 (`6685d2a`) accepted at `tested` and staged; Codex runs it now. Idle.**
+
 **PM (2026-09-18T13:45:09-07:00) - #61 on `audit`: FINDINGS (6), all accepted → **#62**.** (1) JPEG PLAUSIBLE only if an `FF D9` is followed by nothing but `0x00` through EOF; `photo FF D9 garbage` → SUSPECT; fixtures for garbage-after-EOI and padded. (2) Read through the checked path: open the leaf with `O_NOFOLLOW` (and `O_RDONLY`), take the size from the opened file's `Stat`, compare its identity to the `Lstat` result (`SameFile`), refuse on mismatch; a directory-substitution case is documented as the residual race (same B43 class), stated in CLAUDE.md. (3) Empty `.SRT`: PLAUSIBLE only when a media twin (`.MP4`/`.MOV` with the same stem) resolves under the root; else REVIEW; fixtures both ways with a real manifest. (4) SKIPPED types aggregated as `ext:count` on the summary line and in the TSV; CLI test asserts the names. (5) `readTail` requires the full requested length (or the whole file when smaller than 64 KiB); a short read → ERROR (fails `--strict`); fixture: file truncated after `Lstat` via a test hook. (6) The copy assertion: compare the tee's byte count with bytes written (equal, including 0 for an empty file) and refuse otherwise; a test that bypasses the tee must fail. One commit + note.
 
 **PM (2026-09-18T13:42:49-07:00) - `gofmt -l` flags `internal/audit/audit_test.go` at `0412551`. Push a formatting-only commit on `audit` now (I check `git diff -w` is empty); Codex reviews the logic at `0412551` meanwhile.**
