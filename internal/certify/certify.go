@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/eddyvarelae/media-vault/internal/manifest"
@@ -35,6 +37,175 @@ type FileRef struct {
 	Size       int64     `json:"size"`
 	SHA256     string    `json:"sha256"`
 	VerifiedAt time.Time `json:"verified_at"`
+}
+
+// ErrInsideArchive is returned when the certificate would be written into
+// the tree it certifies.
+var ErrInsideArchive = errors.New("certificate output is inside the archive it certifies")
+
+// ErrOutputNotAFile is returned when something other than a regular file
+// already sits at the output path.
+var ErrOutputNotAFile = errors.New("certificate output path is not a regular file")
+
+// CheckOutput is every placement check a certificate output path must pass
+// before anything is signed. Physical, in this order:
+//
+//  1. The leaf itself: os.WriteFile follows a symlink, so a link at the
+//     output name - dangling or not - would write wherever it points
+//     (a verified photo, a path inside the tree). Lstat; a symlink, a
+//     directory or anything but a regular file or nothing is refused.
+//  2. Containment under root when the caller knows it (--root): resolved
+//     paths, component-wise. This is the real check; a tree whose files
+//     have all been damaged is still the tree.
+//  3. Otherwise the tree is recognised by its contents (InsideArchive) -
+//     a fallback for callers that do not pass --root, and only as good as
+//     the files still matching their rows.
+//
+// The returned string names the root the output was found inside, "" if
+// clear.
+func CheckOutput(out, root string, rows []manifest.Entry) (string, error) {
+	if fi, err := os.Lstat(out); err == nil {
+		if !fi.Mode().IsRegular() {
+			return "", fmt.Errorf("%w: %s is %s", ErrOutputNotAFile, out, describe(fi))
+		}
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	if root != "" {
+		in, err := under(root, out)
+		if err != nil {
+			return "", err
+		}
+		if in {
+			r, _ := filepath.Abs(root)
+			return r, nil
+		}
+	}
+	return InsideArchive(out, rows)
+}
+
+// under reports whether path lies under root, both made absolute and
+// resolved (path by its longest existing ancestor), compared with
+// filepath.Rel so "." and "/" roots work.
+func under(root, path string) (bool, error) {
+	r, err := filepath.Abs(root)
+	if err != nil {
+		return false, err
+	}
+	if rr, err := filepath.EvalSymlinks(r); err == nil {
+		r = rr
+	}
+	p, err := filepath.Abs(path)
+	if err != nil {
+		return false, err
+	}
+	p = resolveExisting(p)
+	rel, err := filepath.Rel(r, p)
+	if err != nil {
+		return false, nil
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)), nil
+}
+
+// resolveExisting resolves symlinks in the longest existing ancestor of p
+// and re-appends the rest, so a path that does not exist yet still gets
+// the physical directory it would land in.
+func resolveExisting(p string) string {
+	dir, rest := p, ""
+	for {
+		if r, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(r, rest)
+		}
+		if filepath.Dir(dir) == dir {
+			return p
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
+		dir = filepath.Dir(dir)
+	}
+}
+
+func describe(fi os.FileInfo) string {
+	switch {
+	case fi.Mode()&os.ModeSymlink != 0:
+		return "a symlink"
+	case fi.IsDir():
+		return "a directory"
+	default:
+		return fi.Mode().String()
+	}
+}
+
+// WriteOutput writes data to out without ever following what is at out.
+// os.WriteFile opens the leaf itself, so a symlink substituted there
+// between CheckOutput and the write would be followed - into a verified
+// photo, or into the tree. Instead the bytes go to a temporary name beside
+// out, created O_CREATE|O_EXCL|O_NOFOLLOW (nothing that exists is truncated
+// and no link at the temp name is followed), fsynced, and renamed over the
+// leaf: rename replaces whatever directory entry is at out, symlink or
+// file, and follows nothing. What this does not bind is the parent
+// directory itself between check and write; binding that needs openat
+// (os.Root, Go 1.25) and is noted in the backlog.
+func WriteOutput(out string, data []byte) error {
+	tmp := out + ".vault-partial"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
+	if err != nil {
+		return fmt.Errorf("create %s: %w (a leftover from an interrupted run? look, then remove it by hand)", tmp, err)
+	}
+	cleanup := func() { os.Remove(tmp) }
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		cleanup()
+		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		cleanup()
+		return fmt.Errorf("sync %s: %w", tmp, err)
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("close %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, out); err != nil {
+		cleanup()
+		return fmt.Errorf("rename %s: %w", out, err)
+	}
+	return nil
+}
+
+// InsideArchive reports the ancestor directory of out under which one of
+// the disk's archived files physically exists - i.e. the destination root,
+// or a directory below it - or "" when out is clear of the tree. certify
+// takes no destination root, so the tree is recognised by its contents:
+// every ancestor of out is tried as a root for every row's dest_path,
+// Lstat only, regular file, size equal. The check stops at the first hit.
+//
+// Why it matters (B25): a certificate written into its own tree is a file
+// the next scan finds with no row - it once blocked 39,219 files as a
+// collision - and a cert row would then attest itself. Certificates live
+// beside the manifest, not beside the footage.
+func InsideArchive(out string, rows []manifest.Entry) (string, error) {
+	abs, err := filepath.Abs(out)
+	if err != nil {
+		return "", err
+	}
+	// Physical, not spelled: the directory the file would land in, with
+	// symlinks in its existing part resolved.
+	dir := filepath.Dir(resolveExisting(abs))
+	for anc := dir; ; anc = filepath.Dir(anc) {
+		for _, e := range rows {
+			if e.DestPath == "" {
+				continue
+			}
+			fi, err := os.Lstat(filepath.Join(anc, e.DestPath))
+			if err == nil && fi.Mode().IsRegular() && fi.Size() == e.Size {
+				return anc, nil
+			}
+		}
+		if filepath.Dir(anc) == anc {
+			return "", nil
+		}
+	}
 }
 
 // ErrNotCertifiable is returned when at least one file in the manifest is not
