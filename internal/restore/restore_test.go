@@ -145,7 +145,6 @@ func TestBuildFindsClaimantsByIdentity(t *testing.T) {
 		"B:leaf-alias": "leaf.JPG",
 		"B:hard-link":  "hard.JPG",
 		"B:case-alias": "REAL/X.jpg",
-		"C:missing":    "real/x.jpg", // no such spelling on disk (case-sensitive fs) or the same file (folding): claimant either way
 	}
 	for k, dest := range claimants {
 		disk, src, _ := strings.Cut(k, ":")
@@ -215,5 +214,71 @@ func TestApplyRewritesOnlyTheByteFacts(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(filepath.Join(root, "DCIM")); len(entries) != 1 {
 		t.Errorf("leftovers in DCIM: %v", entries)
+	}
+}
+
+// Review #30: the ENOENT fallback (spelling-key match when a row's file
+// cannot be stat'ed) applies only to a row of the SAME disk as the target,
+// which shares this destRoot. A different-disk row folded-equal but living
+// under another root is not flagged - that would refuse a valid restore.
+// The false positive only arises on a case-sensitive filesystem (where a
+// folded spelling is genuinely ENOENT under the root); this test builds it
+// there and, on a case-insensitive filesystem, checks the alias path
+// instead.
+func TestBuildEnoentFallbackIsSameDiskOnly(t *testing.T) {
+	m := open(t)
+	rootA, outside := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(rootA, "real", "x.JPG"), "torn")
+	write(t, filepath.Join(outside, "good.JPG"), "good")
+	// Case sensitivity of rootA: does REAL/X.jpg resolve to real/x.JPG?
+	_, insErr := os.Stat(filepath.Join(rootA, "REAL", "X.jpg"))
+	caseInsensitive := insErr == nil
+
+	if err := m.Upsert(manifest.Entry{SourceDisk: "A", SourcePath: "x.JPG", DestPath: "real/x.JPG", Size: 4, MtimeNs: 1,
+		SHA256: sha("torn"), CopiedAt: 1, VerifiedAt: 2, Status: "verified"}); err != nil {
+		t.Fatal(err)
+	}
+	// A different disk B, folded-equal spelling, whose file is NOT under
+	// rootA (it lives under B's own root, which restore does not know).
+	if err := m.Upsert(manifest.Entry{SourceDisk: "B", SourcePath: "b", DestPath: "real/X.jpg", Size: 28, MtimeNs: 1,
+		SHA256: sha("elsewhere"), CopiedAt: 1, Status: "deduped"}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := Build(context.Background(), m, "A", "x.JPG", filepath.Join(outside, "good.JPG"), rootA, sha("good"))
+	got := map[string]bool{}
+	for _, c := range p.Claimants {
+		got[c.SourceDisk+":"+c.SourcePath] = true
+	}
+	if caseInsensitive {
+		// real/X.jpg resolves to A's file: a genuine alias, caught by
+		// stat+SameFile, correctly a claimant.
+		if !errors.Is(err, ErrRefused) || !got["B:b"] {
+			t.Errorf("case-insensitive: B's folded alias should be a claimant via SameFile; got %v, %v", got, err)
+		}
+	} else {
+		// real/X.jpg is ENOENT under rootA; B belongs to another root and
+		// must NOT be flagged on the folded key alone (the #30 false
+		// positive), so this valid restore is not refused by B.
+		if got["B:b"] {
+			t.Errorf("case-sensitive: B (another disk under another root) was falsely claimed - the #30 false positive")
+		}
+	}
+
+	// A missing sibling of the SAME disk, folded-equal, is still a claimant
+	// (it shares this root). On a case-insensitive fs it resolves and is
+	// caught by SameFile; on a case-sensitive one by the same-disk fallback.
+	if err := m.Upsert(manifest.Entry{SourceDisk: "A", SourcePath: "sib", DestPath: "real/X.jpg", Size: 4, MtimeNs: 1,
+		SHA256: sha("torn"), CopiedAt: 1, Status: "mismatch"}); err != nil {
+		t.Fatal(err)
+	}
+	p, _ = Build(context.Background(), m, "A", "x.JPG", filepath.Join(outside, "good.JPG"), rootA, sha("good"))
+	sib := false
+	for _, c := range p.Claimants {
+		if c.SourceDisk == "A" && c.SourcePath == "sib" {
+			sib = true
+		}
+	}
+	if !sib {
+		t.Errorf("a same-disk missing sibling should be a claimant")
 	}
 }

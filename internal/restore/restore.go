@@ -125,7 +125,15 @@ func Build(ctx context.Context, m *manifest.Manifest, disk, sourcePath, replacem
 			}
 			continue
 		}
-		if physKey(destRoot, rel) == target {
+		// The file is not there to compare by identity. Fall back to the
+		// spelling key ONLY for a row of the same disk as the target: it
+		// shares this destRoot, so a folded-key match is a real (missing)
+		// sibling. A row of another disk is relative to a root we do not
+		// record; flagging it on a folded-key match falsely refuses a valid
+		// restore when that row's file lives under a different root (review
+		// #30). Its aliases into THIS root are caught by the stat+SameFile
+		// path above.
+		if e.SourceDisk == row.SourceDisk && physKey(destRoot, rel) == target {
 			p.Claimants = append(p.Claimants, e)
 		}
 	}
