@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #57 - re-review of #56's fix only (branch `backup`, code tip `7ba9ffd`)
+
+**PM (2026-09-18T13:03:35-07:00):** `git show 7ba9ffd -- . ':!team'`. Claim: the empty hook, the `exit 3` hook and the shadowed `shasum` each record their invocation (`SEAM base:<kind> reached`), and each base-failure fixture clears and then asserts that observation, so an earlier abort cannot satisfy the fixture. PM at `7ba9ffd`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** any base-failure fixture can still pass without its hook having run.
+
+Verdict goes below this line.
+
 ### #56 - re-review of #55's fixes only (branch `backup`, code tip `4d7178a`) - **resolved: FINDINGS (1, harness), accepted → Dev → request #57**
 
 **PM (2026-09-18T12:56:52-07:00):** `git show 4d7178a -- . ':!team'` (fix commit after the pre-#56 `main` merge, if any). Claims: the failure seam is honored only when `BACKUP_TEST_MODE=1` is exported by the harness, with a fixture proving a normal tick ignores `BACKUP_FAIL_AT`; every injected operation and the shadowed `shasum` log `SEAM <op> reached` and each fixture asserts it; a `collision` seam fails `slug_held_by_other` after name lookup and base succeed and the fixture asserts the tri-state error abort; base-failure fixtures start from a seeded registry, `cmp` it after, and assert no `gap-*.txt`, no `gap-*.tsv`, no marker; the Go part (`internal/gap`, `cmd/vault`) is mergeable alone. PM at `4d7178a`: vet/gofmt/bash -n clean, 12 packages ok. **This is wrong if:** the seam can act without test mode; any fixture passes without its `SEAM … reached` line; the collision seam fires before the base computation; or a base-failure fixture can pass with a TSV left behind.
