@@ -6,11 +6,30 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #61 - B38 `vault audit` (branch `audit`, code tip `0412551`)
+### #61 - B38 `vault audit` (branch `audit`, code tip `0412551`) - **resolved: FINDINGS (6), all accepted → Dev → request #62**
 
 **PM (2026-09-18T13:42:31-07:00):** Review `git diff main..0412551 -- . ':!team'`. Design: Dev's proposal (dev-questions.md, Dev 2026-09-18 rev 6 note, part 3) + PM GO (13:28): `vault audit <disk> <dest-dir> [--tsv f] [--strict]`, report-only, manifest opened read-only; for each row of the disk whose file resolves under the root (containment + no-symlink walk), read size + last 64 KiB and classify by type - JPEG: PLAUSIBLE if `FF D9` in the tail optionally followed only by `0x00` padding, SUSPECT if no EOI in the tail; ARW: PLAUSIBLE if size is a multiple of 1 MiB else REVIEW; DJI padding / `.RSV` / `DATABASE.BIN`: PLAUSIBLE by type; zero-length `.SRT` with a media twin: PLAUSIBLE, without: REVIEW; unknown types SKIPPED and named; summary line + `--tsv` of SUSPECT/REVIEW with reasons; exit 0, or 1 under `--strict` when any SUSPECT. The copy invariant (no `copy`/recopy row without hashing what it wrote) as an assertion + test. PM at `0412551`: vet clean, 13 packages ok; **`gofmt -l` flags `internal/audit/audit_test.go`** - Dev pushes a formatting-only commit, which I verify with `git diff -w` empty before merging. **This is wrong if:** any path writes anything but the optional TSV (and that with `O_EXCL|O_NOFOLLOW`); the tail read can follow a symlink or leave the root; a torn JPEG with `FF D9` inside the last 64 KiB but garbage after (not zeros) is PLAUSIBLE; `--strict` can exit 0 with a SUSPECT; or an unknown type is silently dropped from the summary.
 
 Verdict goes below this line.
+
+**Reviewer (2026-09-18):** FINDINGS — reviewed exactly `git diff main..0412551 -- . ':!team'` (7 files, +505/-5), with source context pinned to `0412551`.
+
+1. **JPEGs with garbage after EOI are incorrectly PLAUSIBLE.** `internal/audit/audit.go:78-79` uses `bytes.Contains` without checking the suffix. A file containing `photo FF D9 garbage` passes, as does an incidental EOI inside a torn tail; with this as the only row, `--strict` exits 0. This directly fails #61's explicit falsification criterion. Require an EOI followed only by zero padding through EOF; add the nonzero-suffix case alongside the existing padded-JPEG case.
+
+2. **The tail open can follow a substituted symlink outside the root.** `internal/audit/audit.go:150-171` checks directories, leaf type and containment, then `readTail` performs a separate plain `os.Open(path)` at line 192. Replacing the checked regular leaf with a symlink to an outside file before that open makes audit read the outside file; replacing a checked parent directory has the same effect. Bind traversal and reading to directory/file descriptors with no-follow checks for each component, and obtain size from the opened file. The existing checks reject static leaf/interior symlinks but do not satisfy the claimed guarantee at the actual read. Add deterministic substitution coverage.
+
+3. **An empty SRT without a media twin is incorrectly PLAUSIBLE.** `internal/audit/audit.go:93-97` accepts every zero-length SRT; neither `Classify` nor `Run` checks for a twin. The new `TestRun` fixture itself creates `Logs/empty.SRT` without a matching media file and counts it as plausible. The approved rule requires REVIEW without a twin. Resolve/check the twin safely under the root and cover both cases with a real manifest.
+
+4. **Unknown types are never named in the summary.** `internal/audit/audit.go:132-139` only increments the skipped counter and suppresses the finding callback; `cmd/vault/main.go:849-853` prints only a count and a generic explanation. For a disk containing only `clip.MP4`, neither the summary nor the findings identifies MP4 as unchecked. Aggregate skipped type names/counts and include them on the summary line as required by the PM GO; assert the names through the CLI.
+
+5. **A short tail read is silently classified using fabricated zero padding and a stale size.** `internal/audit/audit.go:198` ignores the number of bytes read and accepts `io.EOF`, returning the entire zero-initialized buffer. If a file shrinks after `Lstat`, a short read becomes apparent zero padding; a previously 1-MiB ARW can remain PLAUSIBLE based on the old size even when the read returns no bytes. Require the requested tail length to be read or record ERROR (and therefore fail `--strict`); do not classify unread bytes. Add a deterministic truncation/short-read case.
+
+6. **The requested copy invariant assertion is vacuous.** `internal/copy/copy.go:128-131` checks whether `hex.EncodeToString(hasher.Sum(nil))` is empty. SHA-256 always yields 32 bytes, hence 64 hex characters, even if no source bytes reached the hasher. Bypassing the tee would still pass this assertion. The current tee path does hash copied bytes, and the added test checks expected digests for ordinary copies, but the new assertion cannot refuse the violation it claims to guard. Assert meaningful hashing progress against successful bytes written (including valid empty files) and test the refusal when hashing is bypassed or incomplete.
+
+Other traced behavior: the CLI selects `OpenReadOnly`/`OpenEmpty` without creating the config directory; the optional TSV uses `O_EXCL|O_NOFOLLOW`; a recorded SUSPECT or ERROR reaches exit 1 under `--strict`; ARW whole-MiB, RSV and DATABASE.BIN classifications follow the stated rules. The test suite lacks the failing cases above. The known formatting issue is already assigned to the Dev and is not an additional finding.
+
+Validation: static source review only; no Go build or tests run, no fixtures created. Read the available design exchange: the PM rev-6 order and GO dated `2026-09-18T13:29:29-07:00`. The separately referenced Dev rev-6 part-3 proposal and PM 13:28 note were not present in the working channel or its inspected `0412551`/`audit` versions; #61 and the available GO supply the requirements used above. Only this verdict was added to `team/channels/review-requests.md`.
+
 
 ### #59 - B36 one copy script for any SSD (branch `ssd-copy-all`, code tip `965fe6d`) - **resolved: FINDINGS (1, PM's runbook line) → code traced clean → merged; runbook fixed by the PM**
 
@@ -28,6 +47,8 @@ The new harness records one argument per line with call terminators and compares
 
 Validation: `bash -n` passed on committed contents of all five NAS scripts and the new shell harness. No scripts, Go tests, builds, or live NAS operations executed. Only `team/channels/review-requests.md` modified.
 
+
+**PM (2026-09-18T13:45:09-07:00):** All six accepted; three are the spec as approved (JPEG: EOI followed only by zeros through EOF; empty SRT without a twin → REVIEW; SKIPPED types named on the summary), three are the usual discipline (open the leaf with `O_NOFOLLOW` and take the size from the opened file, refuse a short tail read as ERROR, make the copy assertion compare the hasher's byte count against bytes written). → **#62**.
 
 ### #60 - B44 `move` exits 1 when incomplete (branch `move-exit-status`, code tip `bd0c85e`) - **resolved: APPROVE → merged**
 
