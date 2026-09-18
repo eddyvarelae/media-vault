@@ -62,6 +62,19 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-18T16:10-07:00) - #56 done. READY FOR REVIEW. backup → `4d7178a`** (merge main `d3c4d0d` + fix `4d7178a`). All green (`go build`/`go vet`/`gofmt`/`go test ./... -count=1`). Nothing merged; merged `main` first (channel-only). Built to your note:
+
+- **Seams gated by `BACKUP_TEST_MODE=1`.** `BACKUP_SLUG_HOOK` and `BACKUP_FAIL_AT` are inert without it, so a stray env var in production cannot alter the job. Fixture: a normal tick with `BACKUP_FAIL_AT=copy` but the mode unset reports as usual, records the disk, and logs **no SEAM line**.
+- **`SEAM <op> reached` logged and asserted.** Every fail-at fixture asserts the line, proving the failure hit the intended real op (not something incidental).
+- **`held` seam for the tri-state branch.** It forces `slug_held_by_other` into its error state, so the tri-state fail-closed branch is exercised on its own — no longer masked by the copy-read guard. A binary held-check now fails the fixture (the mutation is caught).
+- **Base-failure fixtures seeded.** Empty base, failing hook, and broken `shasum` now run against a **seeded** registry and assert it stays byte-identical (`cmp`), with no report at **either** extension and no marker.
+
+**Go-part-mergeable-alone (as you asked):** confirmed. The Go portion — `internal/gap` (+ its test), `cmd/vault`'s `gap` command and `TestGap`, and the CLAUDE.md gap rows (498 lines total) — references nothing in the shell (`grep` for `run-backup`/`scripts/backup` in the Go tree is empty) and builds/tests standalone (`go build ./... && go test ./internal/gap ./cmd/vault`). So `vault gap` can go to `main` on its own as a fallback while `run-backup.sh` keeps iterating; the churn is all in the shell + its harness.
+
+Mutations: an ungated seam logs SEAM on a production tick; a binary held-check lets the held fixture proceed. README documents the gate and the seams.
+
+Idle until the merge.
+
 **PM (2026-09-18T12:46:06-07:00) - #55 on `backup`: FINDINGS (4) → **#56**.** (1) Seam only under `BACKUP_TEST_MODE=1` (exported by the harness); a fixture runs a normal tick with `BACKUP_FAIL_AT=lookup` in the environment and no test mode → unaffected. (2) Each injected op and the shadowed `shasum` write `SEAM <op> reached` to the log; every failure fixture asserts it. (3) Add `BACKUP_FAIL_AT=collision` failing `slug_held_by_other` after name lookup and base succeed; fixture asserts the tri-state error abort. (4) Base-failure fixtures seed a valid registry, `cmp` it after, and assert no `gap-*.txt`, no `gap-*.tsv`, no marker. Also, in the same commit, make the branch splittable: keep `vault gap` (Go) and `scripts/backup/*` in separable commits or confirm `git diff main..backup -- internal/gap cmd/vault` is mergeable alone - if #56 fails I merge the Go part and B22's script stays on the branch. One commit + note.
 
 **PM (2026-09-18T10:50:03-07:00) - Codex is out until 12:41; #55 waits. Idle.**
