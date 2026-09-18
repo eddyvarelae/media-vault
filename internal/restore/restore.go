@@ -69,8 +69,13 @@ func Build(ctx context.Context, m *manifest.Manifest, disk, sourcePath, replacem
 	}
 	p.DestFull = filepath.Join(destRoot, p.DestRel)
 
-	// The destination, physically: reached through real directories, a
+	// The destination, physically: inside the root (a row path spelled
+	// `../x` or absolute names a file the root does not contain - refused
+	// before anything is read), reached through real directories, a
 	// regular file, its bytes hashed and recorded whatever they are.
+	if why := copy.Escapes(destRoot, p.DestRel); why != "" {
+		return nil, fmt.Errorf("%w: %s", ErrRefused, why)
+	}
 	if link, err := scan.SymlinkComponent(destRoot, p.DestRel); err != nil {
 		return nil, err
 	} else if link != "" {
@@ -86,16 +91,21 @@ func Build(ctx context.Context, m *manifest.Manifest, disk, sourcePath, replacem
 	if !fi.Mode().IsRegular() {
 		return nil, fmt.Errorf("%w: %s is %s, not a regular file", ErrRefused, p.DestFull, describe(fi))
 	}
+	if !copy.Under(destRoot, p.DestFull) {
+		return nil, fmt.Errorf("%w: %s resolves outside %s", ErrRefused, p.DestFull, destRoot)
+	}
 	if p.CurrentSHA, p.CurrentSize, err = hashFile(ctx, p.DestFull); err != nil {
 		return nil, err
 	}
 	p.RowAttests = p.CurrentSHA == row.SHA256
 
 	// Other rows resolving to the same physical file would attest old bytes
-	// under a path holding new ones. Physical as in scan: root-joined,
-	// cleaned, case-folded - which also means a row of another disk under
-	// another root with the same relative path is a false claimant; that is
-	// the safe mistake, and the refusal names the rows.
+	// under a path holding new ones. "Same file" is decided by identity
+	// (os.SameFile on the path each row names, symlinks followed): a
+	// directory symlink alias, a leaf symlink, a hard link and a case alias
+	// all count. A row whose file cannot be stat'ed is compared by the
+	// textual key instead, so a missing alias is still a claimant when its
+	// spelling says so - the safe mistake, and the refusal names the rows.
 	all, err := m.AllRows()
 	if err != nil {
 		return nil, err
@@ -108,6 +118,12 @@ func Build(ctx context.Context, m *manifest.Manifest, disk, sourcePath, replacem
 		rel := e.DestPath
 		if rel == "" {
 			rel = e.SourcePath
+		}
+		if other, err := os.Stat(filepath.Join(destRoot, rel)); err == nil {
+			if os.SameFile(fi, other) {
+				p.Claimants = append(p.Claimants, e)
+			}
+			continue
 		}
 		if physKey(destRoot, rel) == target {
 			p.Claimants = append(p.Claimants, e)

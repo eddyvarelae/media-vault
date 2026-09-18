@@ -889,22 +889,29 @@ func TestVerifiedDestinationAliases(t *testing.T) {
 		}
 	})
 
-	// --rule vault-partial=../archive: A's file is stored as
-	// ../archive/x.mov.vault-partial relative to base/archive, which is
-	// base/archive/x.mov.vault-partial on disk - exactly B's staging path.
-	t.Run("dot-dot in a routing rule", func(t *testing.T) {
-		cfg, srcA, srcB, base := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+	// A row stored as ../archive/x.mov.vault-partial relative to
+	// base/archive is base/archive/x.mov.vault-partial on disk - exactly
+	// B's staging path. Such a row used to come from
+	// `--rule vault-partial=../archive`; the writer refuses a climbing
+	// route now (review #24 / B34), so the row is seeded directly: what
+	// this case tests is the ownership key, and rows written before exist.
+	t.Run("dot-dot in a stored dest_path", func(t *testing.T) {
+		cfg, srcB, base := t.TempDir(), t.TempDir(), t.TempDir()
 		dst := filepath.Join(base, "archive")
-		writeFile(t, filepath.Join(srcA, "x.mov.vault-partial"), "archived via a .. rule", t0)
+		writeFile(t, filepath.Join(dst, "x.mov.vault-partial"), "archived via a .. rule", t0)
 		writeFile(t, filepath.Join(srcB, "x.mov"), "new clip", t0)
-		if _, _, code := vault(t, cfg, "copy", "A", srcA, dst, "--rule", "vault-partial=../archive"); code != 0 {
-			t.Fatalf("copy A: exit %d", code)
+		m, err := manifest.Open(filepath.Join(cfg, "manifest.db"))
+		if err != nil {
+			t.Fatal(err)
 		}
-		if got := rowsOf(t, cfg, "A")["x.mov.vault-partial"].DestPath; got != "../archive/x.mov.vault-partial" {
-			t.Fatalf("A's stored dest_path = %q; the test needs the .. spelling", got)
+		if err := m.Upsert(manifest.Entry{SourceDisk: "A", SourcePath: "x.mov.vault-partial", DestPath: "../archive/x.mov.vault-partial",
+			Size: int64(len("archived via a .. rule")), MtimeNs: t0.UnixNano(), SHA256: sha("archived via a .. rule"),
+			CopiedAt: 1, VerifiedAt: 2, Status: "verified"}); err != nil {
+			t.Fatal(err)
 		}
+		m.Close()
 		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
-			t.Fatalf("verify A: exit %d", code)
+			t.Fatalf("verify A through the .. spelling: exit %d", code)
 		}
 		_, errOut, code := vault(t, cfg, "copy", "B", srcB, dst)
 		if got := readFile(t, filepath.Join(dst, "x.mov.vault-partial")); got != "archived via a .. rule" {
@@ -1300,5 +1307,76 @@ func TestRestore(t *testing.T) {
 			t.Errorf("a refusal changed rows")
 		}
 		noPartials(t, dst)
+	})
+}
+
+// TestRestoreContainmentAndAliases is review #24 through main(): a row path
+// that climbs out of dest-root is refused with the outside file untouched
+// (both row-path forms), and a row of another disk reaching the target
+// through a directory symlink is a claimant.
+func TestRestoreContainmentAndAliases(t *testing.T) {
+	t.Run("row path outside the root", func(t *testing.T) {
+		cfg, base := t.TempDir(), t.TempDir()
+		dst := filepath.Join(base, "archive")
+		if err := os.MkdirAll(dst, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(base, "outside.JPG"), "outside bytes", t0)
+		writeFile(t, filepath.Join(base, "good.JPG"), "good bytes!!!", t0)
+		m, err := manifest.Open(filepath.Join(cfg, "manifest.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for src, dest := range map[string]string{"../outside.JPG": "", "escape.JPG": "../outside.JPG"} {
+			if err := m.Upsert(manifest.Entry{SourceDisk: "sony", SourcePath: src, DestPath: dest, Size: 13, MtimeNs: 1,
+				SHA256: sha("outside bytes"), CopiedAt: 1, VerifiedAt: 2, Status: "verified"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		m.Close()
+		for _, src := range []string{"../outside.JPG", "escape.JPG"} {
+			_, errOut, code := vault(t, cfg, "restore", "sony", src, filepath.Join(base, "good.JPG"), dst, "--expect-sha", sha("good bytes!!!"))
+			if code != 1 || !strings.Contains(errOut, "Cannot restore") || !strings.Contains(errOut, "climbs out of") {
+				t.Errorf("%s: exit %d, stderr %q", src, code, errOut)
+			}
+		}
+		if got := readFile(t, filepath.Join(base, "outside.JPG")); got != "outside bytes" {
+			t.Fatalf("the file outside the root was replaced: %q", got)
+		}
+		noPartials(t, base)
+	})
+
+	t.Run("claimant through a directory symlink alias", func(t *testing.T) {
+		cfg, srcA, dst, emv := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(srcA, "real", "x.JPG"), "torn bytes", t0)
+		if _, _, code := vault(t, cfg, "copy", "A", srcA, dst); code != 0 {
+			t.Fatalf("copy A: exit %d", code)
+		}
+		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
+			t.Fatalf("verify A: exit %d", code)
+		}
+		if err := os.Symlink(filepath.Join(dst, "real"), filepath.Join(dst, "alias")); err != nil {
+			t.Fatal(err)
+		}
+		m, err := manifest.Open(filepath.Join(cfg, "manifest.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Upsert(manifest.Entry{SourceDisk: "B", SourcePath: "b/x.JPG", DestPath: "alias/x.JPG", Size: 10, MtimeNs: 1,
+			SHA256: sha("torn bytes"), CopiedAt: 1, Status: "deduped"}); err != nil {
+			t.Fatal(err)
+		}
+		m.Close()
+		writeFile(t, filepath.Join(emv, "x.JPG"), "good bytes", t0)
+		out, errOut, code := vault(t, cfg, "restore", "A", "real/x.JPG", filepath.Join(emv, "x.JPG"), dst, "--expect-sha", sha("good bytes"))
+		if code != 1 || !strings.Contains(errOut, "1 other row(s) resolve to") || !strings.Contains(errOut, "B:b/x.JPG (deduped)") {
+			t.Errorf("exit %d, stderr %q", code, errOut)
+		}
+		if !strings.Contains(out, "Claimants:  1") {
+			t.Errorf("claimant not listed:\n%s", out)
+		}
+		if got := readFile(t, filepath.Join(dst, "real", "x.JPG")); got != "torn bytes" {
+			t.Fatalf("target replaced under B's alias: %q", got)
+		}
 	})
 }
