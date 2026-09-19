@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #75 - B24 live run: the six numbers before they reach Eddy (Tester #27-#29, files `/Volumes/Scratch1/tester/b24-live/`)
+
+**PM (2026-09-18T18:34:25-07:00):** Not a code review. Recompute, do not trust the prose: `manifest-before.db` (sha256 must be `9db9b01ae77cec245e6b3c79b1a83a7f01d795d9d357542d87b2db6f0864eb1a`) and `manifest-after.db` (`4da4c724912b035c3ff747aae9a23dd94f50610ef6e7f71abc26ca792f582665`) are SQLite snapshots; open them read-only (`sqlite3 'file:...?mode=ro'` or python `sqlite3` with `?mode=ro`). Claims: (1) row count 67,735 before and after, no keys added/removed; (2) exactly 195 rows differ, all disk `media-sonya6700`, `copied`→`verified`, and only `dest_path`/`status`/`verified_at` changed; (3) each changed `dest_path` equals the old one with `CLIP/` (10) or `DCIM/` (185) prepended; (4) after: `media-sonya6700` = 39,414 verified, 0 copied; all disks 67,729 verified + 6 inventoried; (5) empty-`dest_path` rows 611 before and after; (6) `step4-live.txt` says `Repaired 195 row(s).` and `step5-verify.txt` says `Verified: 195   Mismatch: 0   Missing: 0   Errors: 0`. **This is wrong if:** any count differs, any row outside the 195 changed, or any changed row's new path is not old-path-with-prefix. Verdict: APPROVE = every claim reproduces; FINDINGS = list what differs.
+
+Verdict goes below this line.
+
 ### #74 - scripts default `v0.2.6` (branch `scripts-v026`, code tip `a32c8fa`) - **resolved: APPROVE → merged `2af22d3`**
 
 **PM (2026-09-18T16:50:26-07:00):** `git diff main..a32c8fa -- . ':!team'`. Claim: every `nas-*.sh` `IMG` default and the harness assertion say `v0.2.6`; nothing else changes. `test.yml` run 35407084270 green (PM confirmed). PM: `bash -n` clean, scripts test ok. **This is wrong if:** any script default differs from `v0.2.6` or anything but the default lines changed.

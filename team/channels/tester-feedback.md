@@ -321,3 +321,83 @@ Report each as a numbered item below: outcome first, then evidence (the query an
     **STOP at step 2, 2026-09-18T18:03:04-07:00 - deviation: `sudo -n cp -p manifest.db manifest.db.bak-b24-…` → `sudo: a password is required` (exit 1). Nothing written; no backup exists yet; no vault process started.** Cause is known from #18: `figmaboi`'s NOPASSWD rule covers only `/usr/bin/docker`, `/usr/bin/nohup`, `/usr/bin/bash` - a bare `sudo cp` prompts. Two ways to do step 2 with the same effect, **PM/Eddy pick one, I will not choose:** (a) `sudo -n bash -c 'cp -p /volume1/docker/vault-nas-config/manifest.db /volume1/docker/vault-nas-config/manifest.db.bak-b24-$(date +%Y%m%d-%H%M%S)'` - root-owned backup exactly as the runbook intends, via the NOPASSWD `bash` (the same fact I flagged as "password-less root" in #18); or (b) plain `cp -p` as `figmaboi` - works because the dir and file are mode 777, but the backup would be `figmaboi`-owned like the four existing `.bak` files, and the runbook's rollback line (`sudo cp -p`) has the same problem. Waiting here; steps 3-6 not started.
 
 **PM (2026-09-18T18:30:45-07:00) - #27 answer: (a).** Step 2 as `sudo -n bash -c 'cp -p /volume1/docker/vault-nas-config/manifest.db /volume1/docker/vault-nas-config/manifest.db.bak-b24-$(date +%Y%m%d-%H%M%S)'` (root-owned backup, runbook intent; the rollback line uses the same `sudo -n bash -c`). Sorry for the 26-minute gap - I was provisioning the NAS agent account. Resume at step 2; the lock stands. Stay `figmaboi` for all of B24 (no credential change mid-operation). Runbook-b24 step 2 and Rollback amended the same way. New facts, not for this run: (1) NAS account `vaultagent` (uid 1001, admin group, key-only login, `sudo docker` NOPASSWD and nothing else) is live - every NAS command from the kipp dry-run onward uses it; (2) Eddy plugged `kipp` into the NAS (USB-C): PM sees `/mnt/@usb/sdc1` 1.9T/1.8T used with top-level `Auditorium Backup GoPro LeanTank Multicam` - identify by content/volume label, never by device letter (tars was `sdc1` last time); (3) Eddy's precaution copy from kipp lives on `Scratch1` - never delete or modify it.
+
+28. **Step 2 done (option a), 18:31:01 → 18:31:02 - backup `manifest.db.bak-b24-20260918-193102` (NAS time), root-owned, sha256 identical to the live manifest.** Pre-check in the same call: `sudo -n docker ps` → no containers; no vault process. Verbatim:
+    ```
+    $ sudo -n bash -c 'set -e; cd /volume1/docker/vault-nas-config; B=manifest.db.bak-b24-$(date +%Y%m%d-%H%M%S); cp -p manifest.db "$B"; echo "backup: $B"'
+    backup: manifest.db.bak-b24-20260918-193102        (cp exit=0)
+    $ sha256sum manifest.db manifest.db.bak-b24-*
+    9db9b01ae77cec245e6b3c79b1a83a7f01d795d9d357542d87b2db6f0864eb1a  manifest.db
+    9db9b01ae77cec245e6b3c79b1a83a7f01d795d9d357542d87b2db6f0864eb1a  manifest.db.bak-b24-20260918-193102
+    -rwxrwxrwx+ 1 root root 77832192 Sep 13 12:50 manifest.db
+    -rwxrwxrwx+ 1 root root 77832192 Sep 13 12:50 manifest.db.bak-b24-20260918-193102
+    ```
+    Same sha as every snapshot since 2026-09-17 → the live manifest is unchanged since Sep 13.
+    **HEARTBEAT START 2026-09-18T18:31:17-07:00 - step 3: dry-run on the live manifest (`v0.2.6`, `--dry-run`, writes no row).**
+    **HEARTBEAT FINISH - step 3 done, 18:31:18 → 18:31:23 (5 s): the required line printed exactly; manifest sha unchanged.** Full output at `/Volumes/Scratch1/tester/b24-live/step3-dryrun.txt` (200 lines). Verbatim head/tail:
+    ```
+    $ sudo -n docker run --rm -v /volume1:/volume1 -e VAULT_CONFIG=/volume1/docker/vault-nas-config ghcr.io/eddyvarelae/media-vault:v0.2.6 repair-dest media-sonya6700 /volume1/media/SonyA6700 --dry-run
+    Disk media-sonya6700 at /volume1/media/SonyA6700: 38809 rows with a dest_path, 38614 intact, 195 unresolved (605 rows have no dest_path — located by source_path, any status — and were not examined)
+      REPAIR     C2286M01.XML : C2286M01_2025.XML → CLIP/C2286M01_2025.XML
+      … 195 REPAIR lines, no other outcome …
+    Repairable: 195   Not found: 0   Ambiguous: 0   Owned: 0   Not a file: 0   Unsafe: 0   Conflict: 0   Bytes hashed: 1.1 GiB
+    (dry-run; no manifest row written, and repair-dest never writes archive files)
+    exit=0
+    $ sha256sum manifest.db → 9db9b01ae77cec245e6b3c79b1a83a7f01d795d9d357542d87b2db6f0864eb1a (unchanged)
+    ```
+    Same 38,809 / 38,614 / 195 / 605 as the snapshot dry-run (#26); the 605 label is the B42 wording, now "rows have no dest_path — located by source_path, any status". Observation, not an output deviation: after the container exited, `manifest.db-wal` (0 bytes) and `manifest.db-shm` (32 KiB), both root-owned, dated 19:31 NAS-time, remain next to the manifest - SQLite WAL-mode housekeeping the container did not clean up (past runs left none). The WAL is empty, so no pending data; noting it for B31 and proceeding.
+    **HEARTBEAT START 2026-09-18T18:31:49-07:00 - step 4: LIVE RUN, same command without `--dry-run`. The only manifest write of this operation.**
+    **HEARTBEAT FINISH - step 4 done, 18:31:49 → 18:31:53 (4 s): `Repaired 195 row(s).`, exit 0.** Full output `/Volumes/Scratch1/tester/b24-live/step4-live.txt` (397 lines: header, 195 `REPAIR` plan lines, 195 `repaired` lines, summary). Pre-check in the same call: `docker ps -q | wc -l` → 0. Verbatim head/tail:
+    ```
+    $ sudo -n docker run --rm -v /volume1:/volume1 -e VAULT_CONFIG=/volume1/docker/vault-nas-config ghcr.io/eddyvarelae/media-vault:v0.2.6 repair-dest media-sonya6700 /volume1/media/SonyA6700
+    Disk media-sonya6700 at /volume1/media/SonyA6700: 38809 rows with a dest_path, 38614 intact, 195 unresolved (605 rows have no dest_path — located by source_path, any status — and were not examined)
+      REPAIR     C2286M01.XML : C2286M01_2025.XML → CLIP/C2286M01_2025.XML
+      … 195 REPAIR, then 195 repaired …
+      repaired  DSC04958.JPG : DSC04958_2025.JPG → DCIM/DSC04958_2025.JPG
+    Repaired 195 row(s). Status untouched — run `vault verify media-sonya6700 /volume1/media/SonyA6700` to promote them.
+    exit=0
+    $ ls / sha256sum after:
+    -rwxrwxrwx+ 1 root root 77832192 Sep 18 19:31 manifest.db                          92ef717639f3903c7ed5c056576eb950a9c102e6f18f05a372899d56fdc7f026
+    -rwxrwxrwx+ 1 root root 77832192 Sep 13 12:50 manifest.db.bak-b24-20260918-193102  9db9b01ae77cec245e6b3c79b1a83a7f01d795d9d357542d87b2db6f0864eb1a
+    ```
+    The `-wal`/`-shm` files from step 3 are gone after this run (checkpointed on close). Backup sha unchanged.
+    **HEARTBEAT START 2026-09-18T18:32:11-07:00 - step 5: `verify media-sonya6700 /volume1/media/SonyA6700 --only-unverified` (hashes the 195, ~1.15 GB).**
+    **HEARTBEAT FINISH - step 5 done, 18:32:11 → 18:32:13: `Verified: 195   Mismatch: 0   Missing: 0   Errors: 0   Bytes read: 1.1 GiB`, exit 0.** Full output `/Volumes/Scratch1/tester/b24-live/step5-verify.txt` (202 lines). Verbatim head/tail:
+    ```
+    $ sudo -n docker run --rm -v /volume1:/volume1 -e VAULT_CONFIG=/volume1/docker/vault-nas-config ghcr.io/eddyvarelae/media-vault:v0.2.6 verify media-sonya6700 /volume1/media/SonyA6700 --only-unverified
+    Re-hashing ONLY unverified rows for disk "media-sonya6700" at /volume1/media/SonyA6700
+      skipping 39219 already-verified row(s) — NOT an integrity check.
+      newest verified row: 2026-09-13 13:14 (the newest single row, not a full-sweep date). Run without --only-unverified for a full sweep.
+      … 195 `verified` lines …
+      verified   DSC04958.JPG → DCIM/DSC04958_2025.JPG
+    Verified: 195   Mismatch: 0   Missing: 0   Errors: 0   Bytes read: 1.1 GiB
+    exit=0
+    manifest.db after: 77832192 Sep 18 19:32 (NAS time), sha256 4da4c724912b035c3ff747aae9a23dd94f50610ef6e7f71abc26ca792f582665; no -wal/-shm
+    ```
+    (2 s for 1.1 GiB: the 195 files were just hashed twice by steps 3-4 and were in the NAS page cache.)
+    **HEARTBEAT START 2026-09-18T18:32:29-07:00 - step 6: witness - snapshot the manifest and the backup over SMB (`cp`) to `/Volumes/Scratch1/tester/b24-live/`, compare row by row.**
+    **HEARTBEAT FINISH - step 6 done, 2026-09-18T18:33:17-07:00: exactly 195 rows changed and nothing else; all 195 now `verified` with `CLIP/`/`DCIM/`; 0 `copied` rows left on `media-sonya6700`.** Snapshots via SMB `cp`: `/Volumes/Scratch1/tester/b24-live/manifest-after.db` (sha `4da4c724…` = the NAS file) and `manifest-before.db` (= the step-2 backup, sha `9db9b01a…`); comparison script output `step6-witness.txt`:
+    ```
+    rows before: 67735  after: 67735  keys added: 0  keys removed: 0
+    rows changed: 195   → all ('media-sonya6700', copied → verified, fields changed: dest_path, status, verified_at)
+    new dest_path prefixes among changed rows: {'CLIP': 10, 'DCIM': 185}   (each new dest_path == old prefix-less dest_path with CLIP/ or DCIM/ prepended - asserted per row)
+    after: media-sonya6700 status counts: {'verified': 39414}     (before: 39,219 verified + 195 copied = 39,414)
+    after: status totals all disks: {'inventoried': 6, 'verified': 67729}
+    after: rows with empty dest_path: 611 (before: 611)           (= 605 B39 rows + 6 files-kolab-videos; untouched)
+    after: verified_at of the 195 (UTC): 2026-09-19 01:32:12 … 01:32:13   (= step 5, 18:32 Mini-time)
+    tags / metadata row counts identical before and after
+    ```
+
+29. **B24 LIVE RUN COMPLETE - the six numbers, in one block for the Reviewer (all from #27-#28 above; files under `/Volumes/Scratch1/tester/b24-live/`):**
+    ```
+    1. backup pair (step 2):   manifest.db.bak-b24-20260918-193102  sha256 9db9b01ae77cec245e6b3c79b1a83a7f01d795d9d357542d87b2db6f0864eb1a
+                               manifest.db (before)                 sha256 9db9b01ae77cec245e6b3c79b1a83a7f01d795d9d357542d87b2db6f0864eb1a   (identical)
+    2. dry-run summary (step 3): Repairable: 195   Not found: 0   Ambiguous: 0   Owned: 0   Not a file: 0   Unsafe: 0   Conflict: 0   Bytes hashed: 1.1 GiB   exit 0
+    3. live run (step 4):        Repaired 195 row(s).   exit 0   (195 REPAIR + 195 repaired lines)   manifest sha after → 92ef717639f3903c7ed5c056576eb950a9c102e6f18f05a372899d56fdc7f026
+    4. verify (step 5):          Verified: 195   Mismatch: 0   Missing: 0   Errors: 0   Bytes read: 1.1 GiB   exit 0   manifest sha after → 4da4c724912b035c3ff747aae9a23dd94f50610ef6e7f71abc26ca792f582665
+    5. post-run rows (step 6):   media-sonya6700: verified 39,414 / copied 0 (before 39,219 / 195); all disks: verified 67,729 + inventoried 6 = 67,735 rows, unchanged count
+    6. post-run prefixes:        the 195 changed rows' dest_path now CLIP/ 10 + DCIM/ 185 = 195; 0 other rows changed; 611 empty-dest_path rows before and after
+    ```
+    Image: `ghcr.io/eddyvarelae/media-vault:v0.2.6` @ `sha256:9412af8c…` (#27). Executed as `figmaboi` throughout; writes on the NAS: the step-2 backup and the step-4/5 manifest updates, nothing else; `kipp` not read; Scratch1 writes confined to `/Volumes/Scratch1/tester/`. Timeline: step 0 18:02:22, step 2 18:31:01, step 3 18:31:18-23, step 4 18:31:49-53, step 5 18:32:11-13, step 6 2026-09-18T18:33:17-07:00 (Mini time, UTC-7). Deviations: one, the step-2 `sudo cp` prompt (#27), resolved by the PM as option (a) before anything was written. The lock is the PM's to release. Rung: `witnessed` for the numbers above (I ran and observed; the Reviewer recomputes from the files).
+
+**STOPPED HERE (2026-09-18T18:33:17-07:00):** B24 live run done (#27-#29). Nothing running on the NAS. Next per DECISIONS 2026-09-18: rev-2 item 7(b) - identify `kipp`'s mount on the NAS by content/label - once the PM says go and with which account (`vaultagent` from here on, per the PM's #27 answer; my key is not on that account yet as far as I know - say so if it is).
