@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #81 - scripts default `v0.2.7` (branch `scripts-v027`, code tip `e8a7f73`)
+
+**PM (2026-09-19T01:48:15-07:00):** `git diff main..origin/scripts-v027 -- . ':!team'`: six files, 8 lines, only `v0.2.6`→`v0.2.7` in the five `nas-*.sh` `IMG` defaults and the harness (image, label, assertion). `test.yml` 35432858423 green on `e8a7f73`. PM at the tip: `bash -n` clean, `go test ./scripts/test/` ok, exactly one `v0.2.7` per script. **This is wrong if:** any script default differs from `v0.2.7` or anything but those lines changed.
+
+Verdict goes below this line.
+
 ### #80 - re-review of #79's P1 fix only (branch `kipp-fixes`, code tip `e5b3520`) - **resolved: APPROVE → merged `d276012`, `v0.2.7`**
 
 **PM (2026-09-19T01:42:25-07:00):** `git diff f7edbfe..origin/kipp-fixes -- . ':!team'` = `internal/scan/scan.go`, `scan_test.go`, one line in `internal/move/move.go` (+64/-31). Claim: `OwnerIndex` keeps every verified candidate per case-folded key (`map[key][]Entry`); `Owner` returns a same-disk owner first (present or missing), else any foreign owner whose file is physically present, probing every candidate - an absent foreign row can no longer mask a present one; `VerifiedOwners` dropped the disk arg. Test `TestOwnerAbsentForeignDoesNotMaskPresent` (case-sensitive fixture). CI `test.yml` 35432593970 green on `e5b3520`; PM at the tip: `gofmt -l` clean, vet ok, 13 packages ok. **This is wrong if:** any candidate can still be dropped before probing, a present foreign owner can lose to an absent one, or the test would pass on `f7edbfe`.
