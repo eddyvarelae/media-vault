@@ -575,3 +575,20 @@ Report each as a numbered item below: outcome first, then evidence (the query an
     Recommendation (verification lane, not a decision): resolve (A) before "rev 8 GO" - as written, the pass leaves the disk with the most files uncertified and the runbook's finish criteria (`0 copied` rows, seven certs) unmet by construction. Idle until the GO line.
 
 **PM (2026-09-19T13:47:13-07:00) - #42 accepted: (A)/(B) are real and decided (DECISIONS 2026-09-19 13:47): `deduped` rows become by-reference in `v0.2.8` (B51, Dev now); (C)(i)/(ii) folded into the runbook; (D) noted. Eddy said "go". Rev 8 is split: **rev 8a GO NOW** - pass A per `team/context/runbook-b6-kipp.md` step 2 (the five copied-only disks: `kipp-sonya6700`, `kipp-multicam`, `kipp-auditorium`, `kipp-gopro`, `kipp-sonyzve10`; `ssh -n`, `</dev/null`, explicit `exit=` lines), steps 0-1 first (backup as `vaultagent`, sha both), lock posted in dev-questions.md. Witness per step 3, finish per step 4 for those five (expected `Verified:` 5978 / 34 / 10 / 184 / 18, five new certs). `kipp-backup` and `kipp-leantank` are pass B after `v0.2.8` - do not run them. Rung `witnessed` → Reviewer.**
+
+**Tester (2026-09-19, 2026-09-19T13:48:10-07:00):** WORK ORDER rev 8a - B6 pass A on the five copied-only `kipp-*` disks, as `vaultagent`, per `runbook-b6-kipp.md` step 2 as amended. `main` pulled (`303e155`). PM lock 2026-09-19T13:47:13.
+
+43. **Steps 0-1 done, 13:47:34 → 13:47:49.** Verbatim:
+    ```
+    containers=0
+    dd29e115bb007cdd4406dfc24b90b4e6eecf3a894c58f25fe7d989f44c6c2758  manifest.db   (77832192 B, Sep 19 12:03; no -wal/-shm)
+    vault-certs/: the five media-* certs of Sep 2 (backup 8952, djiflip 221815, leantank 145612, sonya6700 10098068, sonyzve10 6744914), nothing else
+    verify-certify.log bytes: 17935203   (pass A starts at this offset)
+    image v0.2.7 = ghcr.io/eddyvarelae/media-vault@sha256:ae03023c88c609f054c2273b95cf70b34910b084ebe5fc774944417dc870b1cd
+    $ cp -p manifest.db manifest.db.bak-b6kipp-$(date +%Y%m%d-%H%M%S)   → backup: manifest.db.bak-b6kipp-20260919-144748 (cp exit=0)
+    dd29e115bb007cdd4406dfc24b90b4e6eecf3a894c58f25fe7d989f44c6c2758  manifest.db
+    dd29e115bb007cdd4406dfc24b90b4e6eecf3a894c58f25fe7d989f44c6c2758  manifest.db.bak-b6kipp-20260919-144748   (vaultagent-owned, mtime preserved)
+    ```
+    **HEARTBEAT START 2026-09-19T13:48:10-07:00 - step 2: pass A launched (verify `--only-unverified` then certify for kipp-sonya6700, kipp-multicam, kipp-auditorium, kipp-gopro, kipp-sonyzve10; `kipp-backup`/`kipp-leantank` NOT included).** Command = the runbook's amended step-2 block verbatim.
+    **HEARTBEAT 13:50 - pass A running.** Launched 13:48:10; NAS log line 1 of the slice: `[Sat Sep 19 02:48:11 PM MDT 2026] === VERIFY kipp-sonya6700 at /volume1/media/SonyA6700 ===`, then `Re-hashing ONLY unverified rows for disk "kipp-sonya6700" … (no verified rows to skip — this is a full sweep)` and `verified` lines flowing (`CLIP/C2677.MP4 → CLIP/C2677_2026.MP4` first). Container `83e25d427db9` (`vault verify kipp-s…`). Note on (C)(i): even with `ssh -n … </dev/null` the local `ssh` did not return - it sits in a background task on the Mini; the loop is under `nohup` on the NAS, so this is cosmetic, but the runbook's "so the call returns" is not achieved (likely the `sudo`/docker child keeping the session's fds; `ssh -f` or `setsid` next time). Heartbeat script `/Volumes/Scratch1/tester/b6-kipp/hb.sh`; next ~14:20.
+    **HEARTBEAT 14:19:56 (NAS 15:19:59) - running, kipp-sonya6700 verify in progress.** Container `83e25d427db9` Up 31 min; containers=1. Log 17,948,628 B, last write 15:19:36 NAS. Pass-A slice: 442 `verified` lines (the CLIP videos - big-file phase), no summary yet, alarm lines: none. Next ~14:50.
