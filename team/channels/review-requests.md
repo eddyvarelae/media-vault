@@ -6,11 +6,15 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #82 - kipp dry-run 2 (`v0.2.7`) vs gap report - the numbers Eddy will act on (Tester #33; `/Volumes/Scratch1/tester/kipp-dryrun2/`: `run2.log` = bytes 600,563→1,169,402 of the NAS log, `plan.txt`, `run2-table.txt`)
+### #82 - kipp dry-run 2 (`v0.2.7`) vs gap report - the numbers Eddy will act on (Tester #33; `/Volumes/Scratch1/tester/kipp-dryrun2/`: `run2.log` = bytes 600,563→1,169,402 of the NAS log, `plan.txt`, `run2-table.txt`) - **resolved: FINDINGS (1, rounding) accepted → numbers released to Eddy as 1,789.7 GiB; copy awaits Eddy's go**
 
 **PM (2026-09-19T01:58:49-07:00):** Not a code review. (1) Recompute from `run2.log` the per-folder table in Tester #33: would-copy 9,872 files / 1,789.8 GiB (SonyA6700 5,978; Backup 3,648; Multicam 34; Auditorium 10; GoPro 184; SonyZVE10 18; LeanTank 0), of which 5,012 land renamed `_2026`, 521 deduped (520 LeanTank + 1 Backup), 0 kept, 0 owned, 0 `INCOMPLETE`, every folder exit 0; disk names `kipp-<folder>`; 9,872 + 521 = 10,393; 1,789.8 GiB = 1,921,695,784,449 B. (2) One code question: dry-run leaves an empty `manifest.db-wal` (0 B) and a `manifest.db-shm` (32 KiB) next to the live manifest (`manifest.db` sha unchanged before/after). From `internal/manifest` and the dry-run open path on `main` (`9997363`), say whether a dry-run opens the manifest read-only and whether an empty `-wal` + `-shm` is SQLite's normal reader housekeeping in WAL mode (harmless, checkpoint-on-close by a later writer) or evidence of a write. **This is wrong if:** any recomputed count differs, any folder is not `kipp-*`, any `INCOMPLETE` or kept/owned line exists in run 2, or the dry-run path can write rows.
 
 Verdict goes below this line.
+
+**Reviewer (Codex, 2026-09-19T02:00:55-07:00) - FINDINGS (1).** Rounding only: 1,921,695,784,449 B / 2^30 = 1,789.7 GiB, not 1,789.8 (the latter sums rounded per-folder figures). Every other number recounted from `run2.log` and identical to Tester #33: per-folder would-copy 5,978 / 3,648 / 34 / 10 / 184 / 18 / 0 = 9,872; renamed `_2026` 5,012; deduped 521; plain 4,860; 0 kept / 0 owned / 0 INCOMPLETE / exit 0 in every folder; disk names `kipp-*`; 9,872 + 521 = 10,393. Code: `cmd/vault/main.go:96` selects `manifest.OpenReadOnly` (`mode=ro`, no schema init, no journal-mode change); the dry-run returns before dedupe upserts and `copy.File` - it cannot write rows. Empty `-wal` + 32 KiB `-shm` after a read-only open is normal SQLite WAL reader housekeeping, not evidence of a write (sqlite.org/wal.html, read-only databases).
+
+**PM (2026-09-19T02:00:55-07:00):** accepted; Eddy gets 1,789.7 GiB. The `-wal`/`-shm` question is settled (DECISIONS 2026-09-19 02:00). Kipp copy is cleared for Eddy's go.
 
 ### #81 - scripts default `v0.2.7` (branch `scripts-v027`, code tip `e8a7f73`) - **resolved: APPROVE → merged `9997363`**
 
