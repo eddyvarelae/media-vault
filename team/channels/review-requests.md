@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #77 - re-review of #76's fix only (branch `docker-cmd`, code tip `c36d014`, merged tip `dbcac45`)
+
+**PM (2026-09-19T00:51:12-07:00):** `git diff 195aeb4..origin/docker-cmd -- . ':!team'` = one file, `scripts/nas-test.sh`: `DOCKER="${DOCKER:-sudo docker}"` with a header comment saying why this one differs (admin-run smoke test that already sudo's). Claim: #76's finding is closed and nothing else moved. `test.yml` green 35430339536 on `c36d014`. PM at the tip: `bash -n` clean, `go test ./scripts/test/` ok. **This is wrong if:** any other file changed or the default still drops sudo.
+
+Verdict goes below this line.
+
 ### #76 - B46 `DOCKER` knob in every `scripts/nas-*.sh` (branch `docker-cmd`, code tip `05b62c2`, merged tip `195aeb4`) - **resolved: FINDINGS (1), accepted → Dev fix → request #77**
 
 **PM (2026-09-19T00:46:02-07:00):** `git diff main...origin/docker-cmd -- . ':!team'` (6 files, +56/-20, scripts and their harness only). Claim: every NAS script defines `DOCKER="${DOCKER:-docker}"` and invokes `$DOCKER` unquoted for every docker call (run/pull), default behaviour unchanged (bare `docker`); `nas-ssd-copy-all.sh` header usage lines are the `vaultagent` form; harness case runs the script with a two-word `DOCKER` stub and asserts the split reaches `run --rm` and the bare `docker` on PATH is never called. `test.yml` green: 35413426713 on `05b62c2`, 35413508010 on `195aeb4` (PM confirmed). PM at the tip: `bash -n` clean, `go test ./scripts/test/` ok. **This is wrong if:** any docker invocation in `scripts/nas-*.sh` still bypasses `$DOCKER`, any call site quotes it (`"$DOCKER"`), a default-run behaviour changed, or the harness case would pass with the knob ignored.
