@@ -60,3 +60,6 @@ Dev offered two routes for the cross-root "Dst owned" bug: (a) probe ownership p
 ## 2026-09-19 02:00 - kipp copy cleared for launch; empty `-wal`/`-shm` after a dry-run is not a write (PM, Reviewer #82)
 - Dry-run 2 on `v0.2.7` (Tester #33, Reviewer #82) plans exactly the gap report: 9,872 files / 1,789.7 GiB copied (5,012 of them landing as `_2026` beside same-named originals), 521 recorded as already archived by content, 0 kept / owned / INCOMPLETE. The real copy is the same command without `DRY_RUN=1`; **who types it is Eddy's call** (Eddy, or the Tester as `vaultagent` under lock).
 - A dry-run opens the manifest with `mode=ro` and returns before any upsert (Reviewer #82, `cmd/vault/main.go:96`, `manifest.OpenReadOnly`). The empty `manifest.db-wal` and 32 KiB `-shm` it leaves are SQLite reader housekeeping; the next writer checkpoints and removes them. Not a deviation; the "no persisting -wal/-shm" check is dropped from the runbooks for dry-runs.
+
+## 2026-09-19 07:37 - kipp copy launched by Eddy (human-launched `vault copy`, TEAM.md sacred-path rule satisfied)
+Eddy pasted the runbook-kipp step-5 line in a Mini Terminal at 07:36; PM confirmed the container on the NAS at 07:37. Tester witnesses (rev 7, read-only); PM lock in dev-questions.md; nothing else runs against the NAS until `all kipp copies done`.
