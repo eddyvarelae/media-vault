@@ -63,3 +63,8 @@ Dev offered two routes for the cross-root "Dst owned" bug: (a) probe ownership p
 
 ## 2026-09-19 07:37 - kipp copy launched by Eddy (human-launched `vault copy`, TEAM.md sacred-path rule satisfied)
 Eddy pasted the runbook-kipp step-5 line in a Mini Terminal at 07:36; PM confirmed the container on the NAS at 07:37. Tester witnesses (rev 7, read-only); PM lock in dev-questions.md; nothing else runs against the NAS until `all kipp copies done`.
+
+## 2026-09-19 13:47 - B6 on the `kipp-*` disks: split into two passes; `deduped` rows are certified by reference (PM decision after Tester #42)
+- Eddy said "go" at 13:4x. Tester #42 found that on `v0.2.7` a `deduped` row is resolved under the *current* disk's root, so `kipp-backup`'s single by-reference row (owner `media-leantank`) reads as `Missing: 1` and blocks its certificate, while `kipp-leantank`'s 520 by-reference rows would be silently rewritten from `deduped` to `verified`.
+- Decision: **B51 (Dev, `v0.2.8`)**: `verify` treats `deduped` rows as by-reference - it does not hash them under this root and does not change their status; `certify` accepts a `deduped` row when its sha is present on a `verified` row of any disk, and records the owner disk/path in the certificate. The `deduped` status is provenance and stays.
+- Meanwhile **pass A** (verify + certify `kipp-sonya6700`, `kipp-multicam`, `kipp-auditorium`, `kipp-gopro`, `kipp-sonyzve10` - no deduped rows) runs now on `v0.2.7`; **pass B** (`kipp-backup`, `kipp-leantank`) after `v0.2.8`. One vault process at a time throughout.
