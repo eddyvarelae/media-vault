@@ -403,3 +403,39 @@ Report each as a numbered item below: outcome first, then evidence (the query an
 **STOPPED HERE (2026-09-18T18:33:17-07:00):** B24 live run done (#27-#29). Nothing running on the NAS. Next per DECISIONS 2026-09-18: rev-2 item 7(b) - identify `kipp`'s mount on the NAS by content/label - once the PM says go and with which account (`vaultagent` from here on, per the PM's #27 answer; my key is not on that account yet as far as I know - say so if it is).
 
 **PM (2026-09-18T18:35:34-07:00) - #27-#29 accepted at `witnessed`; staged as review #75 (Reviewer recomputes from `b24-live/`); DEPLOY LOCK released 2026-09-18T18:35:34-07:00. B24 is done - thank you, that was clean.** WORK ORDER rev 4, read-only, as **`vaultagent`** from here on: your key IS on that account - it is the Mini's `~/.ssh/id_ed25519`, shared by every seat on this machine, installed by Eddy 18:09 (`ssh -o BatchMode=yes vaultagent@192.168.1.167 id` → uid 1001). Its sudo is `sudo -n docker` only; no `bash`, no `nohup`. (1) Confirm the login and `sudo -n docker ps` as an item. (2) Rev-2 item 7(b): identify `kipp`'s mount on the NAS **by content and volume label**, never by device letter - `ls -la /mnt/@usb/`, `mount | grep usb`, `lsblk -o NAME,SIZE,LABEL,FSTYPE,MOUNTPOINT` if present, top-level listing and file counts of the candidate; PM saw `/mnt/@usb/sdc1` 1.9T (99 % used) with `Auditorium Backup GoPro LeanTank Multicam` at the top and `sda1`/`sdc2` empty. Match against your #19 kipp inventory (10,393 files / 1.95 TB, 7 folders: SonyA6700, SonyZVE10 expected too - check whether they are there or the listing was truncated). Report the container path (`/usb/<dev>`) as an item. (3) STOP there. The dry-run waits for B46 (Dev: `DOCKER` knob in the scripts, since `vaultagent` can't `sudo -E` the script) and the copy script is not on the NAS yet (`/volume1/docker` has only the April `nas-tars-copy-all.sh`) - placing it is a write and will be a separate, explicit line from me. Do not read `kipp` beyond listings and counts; Eddy's precaution copy on Scratch1 stays untouched.
+
+**Tester (2026-09-18, 2026-09-18T18:36:39-07:00):** WORK ORDER rev 4, as `vaultagent`, read-only. Detached checkout unchanged (`88d75d7`).
+
+30. **Rev-4 (1) - `vaultagent` login works with the Mini's shared key; `sudo -n docker` is its only password-less command.** 18:35:45. Verbatim:
+    ```
+    $ ssh -o BatchMode=yes vaultagent@192.168.1.167 id
+    uid=1001(vaultagent) gid=10(admin) groups=10(admin),100(users)
+    $ … 'sudo -n docker ps'
+    CONTAINER ID   IMAGE     COMMAND   CREATED   STATUS    PORTS     NAMES          (zero containers)
+    $ … 'sudo -n -l' (tail)
+    User vaultagent may run the following commands on DXP2800-43F8:
+        (ALL : ALL) ALL
+        (root) NOPASSWD: /usr/bin/docker
+    $ … 'sudo -n true'  →  sudo: a password is required   (exit 1)
+    ~/.ssh/authorized_keys 93 B, mode 600, Sep 18 19:09 NAS-time; home /home/vaultagent; groups admin users
+    ```
+    So: no `bash`, no `nohup`, no `cp` as root - anything beyond `docker run` (backups, placing a script under `/volume1/docker`) is not this account's to do; the PM's B46 note is right that a script needing `sudo -E` cannot run under it.
+
+31. **Rev-2 item 7(b) done - `kipp` is `/dev/sdc1` → `/mnt/@usb/sdc1` on the NAS, container path `/usb/sdc1`; identified by volume label AND by content, both exact.** 18:35:54 → 18:36:09. Verbatim (trimmed to the USB lines):
+    ```
+    $ ls -la /mnt/@usb/          → sda1 (empty, Nov 21 2024), sdc1 (131072 B dir, Sep 18 19:29), sdc2 (empty, Feb 10 2026)
+    $ mount | grep usb           → /dev/sdc1 on /mnt/@usb/sdc1 type exfat (rw,relatime,fmask=0000,dmask=0000,…)
+    $ lsblk -o NAME,SIZE,LABEL,FSTYPE,MOUNTPOINT
+    sdc                                        1.8T
+    └─sdc1                                     1.8T kipp                      exfat             /mnt/@usb/sdc1
+    $ df -h /mnt/@usb/sdc1       → /dev/sdc1  1.9T  1.8T  30G  99%
+    $ ls -la /mnt/@usb/sdc1/     → Auditorium Backup GoPro LeanTank Multicam SonyA6700 SonyZVE10 (+ .Spotlight-V100, .Trashes)
+    $ per-folder counts (find -type f, excluding dotfiles and ._*):
+    Auditorium 10   Backup 3649   GoPro 184   LeanTank 520   Multicam 34   SonyA6700 5978   SonyZVE10 18
+    all 10393 files 1953592885376 bytes
+    ```
+    Match against #19 (Mini-side walk of `/Volumes/kipp`): 10 + 3,649 + 184 + 520 + 34 + 5,978 + 18 = **10,393 files, 1,953,592,885,376 bytes - identical, folder by folder.** The PM's earlier five-folder view was a truncated listing; `SonyA6700` and `SonyZVE10` are there. `sda1` and `sdc2` are empty leftover mountpoints (`sdc2` = where `noahsarc` sat in April; `sda1` dated Nov 2024), not disks. Device letter caveat stands: `tars` was `sdc1` in April - the runbook must key on the label `kipp` (`lsblk`/`mount`), not on `sdc1`. **Container path for `KIPP_SRC`: `/usb/sdc1` under `-v /mnt/@usb:/usb:ro`** - as of now; re-check `lsblk` label at run time.
+
+**STOPPED HERE (2026-09-18T18:36:39-07:00) per rev 4 (3).** Nothing running. Waiting on B46 (Dev `DOCKER` knob) and the PM's explicit line for placing the copy script / the kipp dry-run. Eddy's Scratch1 precaution copy untouched; `kipp` read only via listings and counts.
+
+**PM (2026-09-18T18:37:46-07:00) - #30-#31 accepted at `tested`.** `kipp` = `/usb/sdc1` by label and by content, identical to #19 folder by folder; my five-folder view was a truncated listing, thank you for catching it. Runbook-kipp updated (step 1 done, new step 3a: you place the script on the NAS as `vaultagent` via `scp` - `/volume1/docker/` is mode 777 so no sudo is needed - **but only on my explicit line after B46 merges**; step 4 now in the `DOCKER="sudo -n docker"` form). Nothing for you until then; stay idle.
