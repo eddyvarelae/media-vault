@@ -11,7 +11,7 @@
 
 set -u
 # Pinned release tag; override with VAULT_IMAGE=... for a one-off run.
-IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.6}"
+IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.7}"
 # docker command; vaultagent sets DOCKER="sudo -n docker" (its only password-less
 # sudo). Unquoted at the call sites on purpose so a multi-word value word-splits.
 DOCKER="${DOCKER:-docker}"

@@ -5,7 +5,7 @@
 set -e
 
 # Pinned release tag; override with VAULT_IMAGE=... for a one-off run.
-IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.6}"
+IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.7}"
 # docker command. This smoke test is admin-run and already sudo's (sudo -v /
 # sudo mkdir below), so its default keeps sudo docker; override with
 # DOCKER="docker" on a root shell. Unquoted at the call sites on purpose so a
