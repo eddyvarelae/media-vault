@@ -37,6 +37,16 @@ type FileRef struct {
 	Size       int64     `json:"size"`
 	SHA256     string    `json:"sha256"`
 	VerifiedAt time.Time `json:"verified_at"`
+	// ByReference is set for a `deduped` row (B51): the file has no verified
+	// copy of its own; its bytes are proved by the named verified row of some
+	// disk, whose verification time this entry carries.
+	ByReference *ByRef `json:"by_reference,omitempty"`
+}
+
+// ByRef names the verified row a deduped entry's content is proved by.
+type ByRef struct {
+	Disk     string `json:"disk"`
+	DestPath string `json:"dest_path"`
 }
 
 // ErrInsideArchive is returned when the certificate would be written into
@@ -252,24 +262,44 @@ func Build(m *manifest.Manifest, disk, configDir string) (*Certificate, error) {
 		IssuedAt:   time.Now().UTC(),
 		SourceDisk: disk,
 	}
-	for _, e := range entries {
-		if e.Status != "verified" {
-			return nil, fmt.Errorf("%w: %s is %q", ErrNotCertifiable, e.SourcePath, e.Status)
+	// A `deduped` row has no verified copy of its own; its bytes are archived on
+	// a verified row of some disk (by reference, B51). Index every verified row
+	// by sha to resolve the owner and carry its verification time.
+	verifiedRows, err := m.VerifiedRows()
+	if err != nil {
+		return nil, fmt.Errorf("verified rows: %w", err)
+	}
+	ownerBySHA := make(map[string]manifest.Entry, len(verifiedRows))
+	for _, v := range verifiedRows {
+		if _, ok := ownerBySHA[v.SHA256]; !ok {
+			ownerBySHA[v.SHA256] = v
 		}
-		v := time.Unix(0, e.VerifiedAt).UTC()
+	}
+	note := func(v time.Time) {
 		if cert.OldestVerify.IsZero() || v.Before(cert.OldestVerify) {
 			cert.OldestVerify = v
 		}
 		if v.After(cert.NewestVerify) {
 			cert.NewestVerify = v
 		}
-		cert.Files = append(cert.Files, FileRef{
-			SourcePath: e.SourcePath,
-			DestPath:   e.DestPath,
-			Size:       e.Size,
-			SHA256:     e.SHA256,
-			VerifiedAt: v,
-		})
+	}
+	for _, e := range entries {
+		ref := FileRef{SourcePath: e.SourcePath, DestPath: e.DestPath, Size: e.Size, SHA256: e.SHA256}
+		switch e.Status {
+		case "verified":
+			ref.VerifiedAt = time.Unix(0, e.VerifiedAt).UTC()
+		case "deduped":
+			owner, ok := ownerBySHA[e.SHA256]
+			if !ok {
+				return nil, fmt.Errorf("%w: %s is deduped but no verified row of any disk holds its content (sha %s)", ErrNotCertifiable, e.SourcePath, e.SHA256)
+			}
+			ref.VerifiedAt = time.Unix(0, owner.VerifiedAt).UTC()
+			ref.ByReference = &ByRef{Disk: owner.SourceDisk, DestPath: owner.DestPath}
+		default:
+			return nil, fmt.Errorf("%w: %s is %q", ErrNotCertifiable, e.SourcePath, e.Status)
+		}
+		note(ref.VerifiedAt)
+		cert.Files = append(cert.Files, ref)
 		cert.FileCount++
 		cert.TotalBytes += e.Size
 	}

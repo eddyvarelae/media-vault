@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/eddyvarelae/media-vault/internal/manifest"
 	"github.com/eddyvarelae/media-vault/internal/scan"
@@ -78,9 +79,9 @@ func row(path, status string) manifest.Entry {
 }
 
 func TestBuildRefusesOnAnyNonVerifiedRow(t *testing.T) {
-	// Every status in the vocabulary except verified. A certificate over a
-	// disk with one such row would claim proof it does not have.
-	for _, status := range []string{"copied", "mismatch", "deduped", "inventoried"} {
+	// Every status that is never certifiable. `deduped` is conditionally
+	// certifiable (by reference) and has its own test (TestBuildDedupedByReference).
+	for _, status := range []string{"copied", "mismatch", "inventoried"} {
 		t.Run(status, func(t *testing.T) {
 			m := openManifest(t)
 			cfg := t.TempDir()
@@ -386,6 +387,67 @@ func TestWriteOutputNeverFollowsASubstitutedLeaf(t *testing.T) {
 		_ = os.WriteFile(link, []byte("followed"), 0o644)
 		if got, _ := os.ReadFile(victim); string(got) != "followed" {
 			t.Skip("this filesystem does not follow symlinks on write; the demonstration does not apply")
+		}
+	})
+}
+
+// TestBuildDedupedByReference is B51: a deduped row is certifiable iff its
+// content is held by a verified row of some disk. The cert entry records that
+// owner as by_reference and carries the owner's verification time; if no
+// verified row holds the content, certify refuses and names the row.
+func TestBuildDedupedByReference(t *testing.T) {
+	t.Run("owner verified on another disk → certifiable, records by_reference", func(t *testing.T) {
+		m := openManifest(t)
+		cfg := t.TempDir()
+		// The owner is a verified row of a DIFFERENT disk (LeanTank); the disk
+		// being certified (kipp-backup) has only a deduped row pointing at it.
+		owner := manifest.Entry{SourceDisk: "media-leantank", SourcePath: "STATUS.BIN", DestPath: "STATUS.BIN",
+			Size: 7, MtimeNs: 1, SHA256: "beefcafe", CopiedAt: 2, VerifiedAt: 99, Status: "verified"}
+		dedup := manifest.Entry{SourceDisk: "kipp-backup", SourcePath: "PRIVATE/M4ROOT/STATUS.BIN", DestPath: "STATUS.BIN",
+			Size: 7, MtimeNs: 1, SHA256: "beefcafe", CopiedAt: 2, Status: "deduped"}
+		for _, e := range []manifest.Entry{owner, dedup} {
+			if err := m.Upsert(e); err != nil {
+				t.Fatal(err)
+			}
+		}
+		cert, err := Build(m, "kipp-backup", cfg)
+		if err != nil {
+			t.Fatalf("certify kipp-backup: %v", err)
+		}
+		if cert.FileCount != 1 || len(cert.Files) != 1 {
+			t.Fatalf("cert = %+v", cert)
+		}
+		f := cert.Files[0]
+		if f.ByReference == nil || f.ByReference.Disk != "media-leantank" || f.ByReference.DestPath != "STATUS.BIN" {
+			t.Errorf("by_reference = %+v, want media-leantank:STATUS.BIN", f.ByReference)
+		}
+		if !f.VerifiedAt.Equal(time.Unix(0, 99).UTC()) {
+			t.Errorf("entry should carry the owner's verified_at, got %v", f.VerifiedAt)
+		}
+	})
+
+	t.Run("no verified owner → refused, names the row", func(t *testing.T) {
+		m := openManifest(t)
+		cfg := t.TempDir()
+		// A deduped row whose sha is on no verified row (the would-be owner is
+		// only copied, not verified).
+		for _, e := range []manifest.Entry{
+			{SourceDisk: "A", SourcePath: "orig.bin", DestPath: "orig.bin", Size: 7, MtimeNs: 1, SHA256: "beefcafe", CopiedAt: 2, Status: "copied"},
+			{SourceDisk: "kipp-backup", SourcePath: "PRIVATE/x.BIN", DestPath: "orig.bin", Size: 7, MtimeNs: 1, SHA256: "beefcafe", CopiedAt: 2, Status: "deduped"},
+		} {
+			if err := m.Upsert(e); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, err := Build(m, "kipp-backup", cfg)
+		if !errors.Is(err, ErrNotCertifiable) {
+			t.Fatalf("err = %v, want ErrNotCertifiable", err)
+		}
+		if !strings.Contains(err.Error(), "PRIVATE/x.BIN") || !strings.Contains(err.Error(), "deduped") {
+			t.Errorf("error should name the deduped row: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(cfg, "key.pem")); !os.IsNotExist(err) {
+			t.Error("refusal must not create a signing key")
 		}
 	})
 }

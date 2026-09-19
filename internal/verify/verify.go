@@ -19,6 +19,7 @@ type Result struct {
 	Mismatch  int
 	Missing   int
 	Errors    int
+	Deduped   int // by-reference rows skipped (B51): not hashed, status unchanged
 	BytesRead int64
 }
 
@@ -69,6 +70,20 @@ func RunWithOptions(ctx context.Context, m *manifest.Manifest, disk, dstRoot str
 	for _, e := range entries {
 		if err := ctx.Err(); err != nil {
 			return res, err
+		}
+
+		// `deduped` rows are by reference (B51): the bytes live on a verified
+		// row of some disk, and this row's dest_path is the OWNER's, resolved
+		// under the owner's root — not necessarily under this disk's dstRoot.
+		// verify must not hash it (it would read the wrong root and count a
+		// spurious Missing) nor promote it (that destroys the by-reference
+		// provenance). certify checks these against the owner's verified row.
+		if e.Status == "deduped" {
+			res.Deduped++
+			if onFile != nil {
+				onFile(e.SourcePath, e.DestPath, "deduped")
+			}
+			continue
 		}
 
 		// Inventory-only entries have an empty DestPath — fall back to
