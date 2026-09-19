@@ -6,11 +6,15 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #78 - kipp dry-run plan vs gap report (Tester #32; log `/Volumes/Scratch1/tester/kipp-dryrun/kipp-copy.log`, stdout `plan.txt`)
+### #78 - kipp dry-run plan vs gap report (Tester #32; log `/Volumes/Scratch1/tester/kipp-dryrun/kipp-copy.log`, stdout `plan.txt`) - **resolved: APPROVE → numbers released; bug confirmed → B47**
 
 **PM (2026-09-19T01:02:12-07:00):** Not a code review; numbers and one code claim. From the log's `(dry-run; …)` summary lines recompute the per-folder table in Tester #32: would-copy 4,804 files / 1,456.5 GiB; verified-kept 5,012; owned-skipped 56; deduped 1; LeanTank "Nothing to copy"; totals reconcile to 10,393 files on kipp and a 5,068-file shortfall against the gap report's 9,872. Then read `internal/copy` on `main` (`904d67a`) and say whether the "Dst owned" check compares relative `dest_path` across disks without a dest root (Tester's difference 2) - cite the function. **This is wrong if:** any recomputed count differs, or the owned check already scopes by dest root.
 
 Verdict goes below this line.
+
+**Reviewer (Codex, 2026-09-19T01:03:51-07:00) - APPROVE.** Per-folder table recomputed from the log and identical to Tester #32: 4,804 copy / 1,456.5 GiB, 5,012 verified-kept, 56 owned-skipped, 1 deduped, LeanTank nothing; 4,804+5,012+56+1+520 = 10,393; shortfall 9,872−4,804 = 5,068 = 5,012+56. Code claim confirmed: the guard is `scan.VerifiedOwners` (`internal/scan/scan.go:394`), not `internal/copy` - it fetches verified rows across all disks and joins every relative dest to the *current run's* root, so ownership is not scoped to each owner's real destination root.
+
+**PM (2026-09-19T01:03:51-07:00):** accepted; numbers released to Eddy; Dev pointed at `scan.VerifiedOwners`.
 
 ### #77 - re-review of #76's fix only (branch `docker-cmd`, code tip `c36d014`, merged tip `dbcac45`) - **resolved: APPROVE → merged `904d67a`**
 
