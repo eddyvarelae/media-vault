@@ -49,3 +49,7 @@ Format: `- YYYY-MM-DD · **decision** · context/why · received-by: {role}`
 - **B24 live repair:** executed by the **Tester** as `figmaboi`, one-off write against the live manifest, under a PM deploy lock, per `team/context/runbook-b24.md`. Eddy is told before (this note) and after (Reviewer-checked numbers).
 - **kipp dry-run on the NAS:** executed by the **Tester** as `figmaboi` (read-only) once Eddy confirms `kipp` is plugged into the NAS; the real copy is launched by Eddy.
 - **Dedicated NAS agent account:** Eddy offered one; PM recommends yes (spec in the 18:0x reply). Not a blocker for B24; adopted before the kipp copy if Eddy creates it.
+
+## 2026-09-18 18:30 - NAS agent account, kipp on the NAS, Scratch1 precaution copy (PM logged)
+- **`vaultagent`** exists on the NAS: uid 1001, admin group (Eddy's choice, left as is), key-only SSH with the Mini's `~/.ssh/id_ed25519`, `/etc/sudoers.d/vaultagent-vault` = `NOPASSWD: /usr/bin/docker` only. PM verified key login + `sudo -n docker ps` at 2026-09-18 18:30. All NAS work from the kipp dry-run onward runs as `vaultagent`; B24 finishes as `figmaboi` (no switch mid-operation). Password stays in Eddy's 1Password; no agent has or needs it.
+- **kipp** is plugged into the NAS over USB-C (2026-09-18 18:30); Eddy first copied one folder from it to **Scratch1 as a precaution - that copy is never deleted or modified by anyone but Eddy.**
