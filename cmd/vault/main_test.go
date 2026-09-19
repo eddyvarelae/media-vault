@@ -501,15 +501,16 @@ func TestCopyExitStatus(t *testing.T) {
 			stdout: []string{"Done. Copied 2/2 files"},
 		},
 		{
-			name: "dry-run with collisions exits 0 and writes nothing",
+			name: "dry-run with collisions is INCOMPLETE (exit 1) and writes nothing",
 			setup: func(t *testing.T, src, dst string) {
 				writeFile(t, filepath.Join(src, "only.mov"), "new bytes", t0)
 				writeFile(t, filepath.Join(src, "fresh.mov"), "fresh", t0)
 				writeFile(t, filepath.Join(dst, "only.mov"), "foreign", t0)
 			},
 			flags:   []string{"--dry-run"},
-			want:    0,
+			want:    1, // B47: a dry-run whose plan would leave a source file unarchived is INCOMPLETE
 			stdout:  []string{"(dry-run; 1 files would be copied, 0 recorded as deduped, 1 collisions skipped, 0 verified kept, 0 owned destinations skipped, 0 through symlinks skipped)"},
+			stderr:  []string{"INCOMPLETE:", "1 file(s) skipped on unresolved destination collisions"},
 			noFiles: true,
 		},
 		{
@@ -774,9 +775,10 @@ func TestVerifiedDestinationOwnedByAnotherRow(t *testing.T) {
 				noPartials(t, dst)
 			}
 		}
-		// The dry-run names the owner.
+		// The dry-run names the owner and, since it would leave a source file
+		// unarchived, is itself INCOMPLETE → exit 1 (B47).
 		out, _, code = vault(t, cfg, "copy", "B", srcB, dst, "--dry-run")
-		if code != 0 || !strings.Contains(out, "x.mov → x.mov (owned by A:x.mov)") {
+		if code != 1 || !strings.Contains(out, "x.mov → x.mov (owned by A:x.mov)") {
 			t.Errorf("dry-run: exit %d\n%s", code, out)
 		}
 		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
@@ -814,11 +816,16 @@ func TestVerifiedDestinationOwnedByAnotherRow(t *testing.T) {
 		}
 	})
 
-	// A verified row whose file is missing still owns its path: writing new
-	// bytes there would put a mismatch under a certified hash. The file is
-	// absent, so the on-disk collision check sees nothing - only the
-	// manifest knows.
-	t.Run("new file at a verified row's missing destination", func(t *testing.T) {
+	// A verified row of THIS copy's own disk owns its slot present or missing
+	// (a same-disk new file cannot take a deleted verified destination). Its
+	// own-disk case is covered by scan's TestBuildOwnershipRequiresSameRoot;
+	// here is the B47 change for a DIFFERENT disk: ownership is physical, and
+	// the manifest records no dest root, so a foreign row whose file is ABSENT
+	// here is under another root (the kipp/SonyZVE10 false positive) and does
+	// not own the path — the new file is copied. If they truly shared a root
+	// the write lands a detectable mismatch under the foreign cert, which verify
+	// reports; that is the accepted trade for not skipping 56 real files.
+	t.Run("foreign disk's missing destination is no longer owned (B47)", func(t *testing.T) {
 		cfg, srcA, srcB, dst := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
 		writeFile(t, filepath.Join(srcA, "x.mov"), "the clip", t0)
 		writeFile(t, filepath.Join(srcB, "x.mov"), "other bytes", t0)
@@ -831,15 +838,17 @@ func TestVerifiedDestinationOwnedByAnotherRow(t *testing.T) {
 		if err := os.Remove(filepath.Join(dst, "x.mov")); err != nil {
 			t.Fatal(err)
 		}
-		_, errOut, code := vault(t, cfg, "copy", "B", srcB, dst)
-		if code != 1 || !strings.Contains(errOut, "verified row owns their destination path") {
-			t.Errorf("exit %d, stderr %q", code, errOut)
+		out, _, code := vault(t, cfg, "copy", "B", srcB, dst)
+		if code != 0 {
+			t.Errorf("foreign missing dest should be copied, not owned: exit %d\n%s", code, out)
 		}
-		if _, err := os.Stat(filepath.Join(dst, "x.mov")); err == nil {
-			t.Errorf("x.mov was written under A's verified row")
+		if got := readFile(t, filepath.Join(dst, "x.mov")); got != "other bytes" {
+			t.Errorf("B's file was not written: %q", got)
 		}
-		if len(rowsOf(t, cfg, "B")) != 0 {
-			t.Errorf("B got a row for a file that was not written")
+		wantRow(t, rowsOf(t, cfg, "B"), "x.mov", "x.mov", "other bytes", "copied")
+		// A's row now points at bytes it did not attest — verify surfaces it.
+		if _, _, code := vault(t, cfg, "verify", "A", dst); code == 0 {
+			t.Errorf("verify A should report the mismatch after B took the slot")
 		}
 	})
 
@@ -862,19 +871,22 @@ func TestVerifiedDestinationOwnedByAnotherRow(t *testing.T) {
 		if code != 1 || !strings.Contains(errOut, "unresolved destination collisions") {
 			t.Errorf("with the file present: exit %d, stderr %q", code, errOut)
 		}
+		// Once A's renamed file is gone, its verified row is a foreign row whose
+		// file is absent here → not owned (B47): B's rename lands. (Same-root
+		// ownership of a MISSING slot would need a recorded dest root; a foreign
+		// row cannot be told from another root's, so the rename is copied and a
+		// later verify of A would surface any real overlap.)
 		if err := os.Remove(filepath.Join(dst, "x_2023.mov")); err != nil {
 			t.Fatal(err)
 		}
-		_, errOut, code = vault(t, cfg, "copy", "B", srcB, dst, "--on-collision", "rename-mtime-year")
-		if code != 1 || !strings.Contains(errOut, "verified row owns their destination path") {
-			t.Errorf("with the file missing: exit %d, stderr %q", code, errOut)
+		out, _, code := vault(t, cfg, "copy", "B", srcB, dst, "--on-collision", "rename-mtime-year")
+		if code != 0 {
+			t.Errorf("with the file missing, the rename should land: exit %d\n%s", code, out)
 		}
-		if _, err := os.Stat(filepath.Join(dst, "x_2023.mov")); err == nil {
-			t.Errorf("x_2023.mov was written under A's verified row")
+		if got := readFile(t, filepath.Join(dst, "x_2023.mov")); got != "new clip" {
+			t.Errorf("x_2023.mov not written: %q", got)
 		}
-		if len(rowsOf(t, cfg, "B")) != 0 {
-			t.Errorf("B got a row for a file that was not written")
-		}
+		wantRow(t, rowsOf(t, cfg, "B"), "x.mov", "x_2023.mov", "new clip", "copied")
 	})
 }
 
@@ -1015,8 +1027,8 @@ func TestDestinationThroughSymlink(t *testing.T) {
 			noPartials(t, filepath.Join(dst, "real"))
 		}
 		out, _, code = vault(t, cfg, "copy", "B", srcB, dst, "--dry-run")
-		if code != 0 || !strings.Contains(out, "alias/x.mov → alias/x.mov (alias is a symlink)") {
-			t.Errorf("dry-run: exit %d\n%s", code, out)
+		if code != 1 || !strings.Contains(out, "alias/x.mov → alias/x.mov (alias is a symlink)") {
+			t.Errorf("dry-run: exit %d\n%s", code, out) // B47: a through-symlink skip makes the dry-run INCOMPLETE
 		}
 		if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
 			t.Errorf("verify A afterwards: exit %d", code)

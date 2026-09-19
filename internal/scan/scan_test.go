@@ -137,16 +137,18 @@ func TestBuildVerifiedRowsAreNeverRecopied(t *testing.T) {
 }
 
 // TestBuildRefusesDestinationsOwnedByVerifiedRows: the guard is by
-// destination. Any path copy.File would write - final or staging - that a
-// verified row of any disk records as its dest_path goes to DstOwned,
-// whether the task is a new file or a recopy of an unverified row.
+// destination, and physical (B47). A verified row of ANOTHER disk owns a path
+// copy.File would write only when a file is physically there (proving the same
+// dest root); a foreign row whose file is absent here is under another root and
+// is not an owner - the new file is copied. A same-disk owner is its own test
+// (TestBuildOwnershipRequiresSameRoot).
 func TestBuildRefusesDestinationsOwnedByVerifiedRows(t *testing.T) {
 	m := openManifest(t)
 	src, dst := t.TempDir(), t.TempDir()
-	writeFile(t, filepath.Join(src, "a.mov"), "new bytes", t0)       // new; disk B verified "a.mov" (file missing)
-	writeFile(t, filepath.Join(src, "b.mov"), "new bytes", t0)       // new; disk B verified "b.mov.vault-partial"
-	writeFile(t, filepath.Join(src, "c.mov"), "changed!", t0.Add(1)) // deduped row on diskA, dest owned by disk B's verified c.mov
-	writeFile(t, filepath.Join(src, "d.mov"), "changed!", t0.Add(1)) // copied row on diskA, own dest, nobody else verified
+	writeFile(t, filepath.Join(src, "a.mov"), "new bytes", t0)       // new; disk B verified "a.mov" but its file is ABSENT here → not owned
+	writeFile(t, filepath.Join(src, "b.mov"), "new bytes", t0)       // new; disk B verified "b.mov.vault-partial" ABSENT → not owned
+	writeFile(t, filepath.Join(src, "c.mov"), "changed!", t0.Add(1)) // deduped row on diskA; dst/c.mov present, owned by disk B's verified c.mov
+	writeFile(t, filepath.Join(src, "d.mov"), "changed!", t0.Add(1)) // copied row on diskA, own dest present, nobody else verified
 	writeFile(t, filepath.Join(src, "e.mov"), "free", t0)            // new, unowned
 	writeFile(t, filepath.Join(dst, "c.mov"), "the clip", t0)
 	writeFile(t, filepath.Join(dst, "d.mov"), "old bytes", t0)
@@ -168,14 +170,11 @@ func TestBuildRefusesDestinationsOwnedByVerifiedRows(t *testing.T) {
 		for _, o := range p.DstOwned {
 			owned[o.Task.RelPath] = o
 		}
-		if len(owned) != 3 {
-			t.Errorf("policy %d: DstOwned = %v, want a.mov b.mov c.mov", c, owned)
-		}
-		if o := owned["a.mov"]; o.Path != "a.mov" || o.Owner.SourceDisk != "B" {
-			t.Errorf("policy %d: a.mov owned = %+v", c, o)
-		}
-		if o := owned["b.mov"]; o.Path != "b.mov.vault-partial" {
-			t.Errorf("policy %d: b.mov should be refused on its staging path, got %+v", c, o)
+		// Only c.mov: its dest exists and disk B's verified row is physically
+		// there. a.mov/b.mov are owned only in spelling by a foreign disk whose
+		// files are absent here (another root) → copied, not refused.
+		if len(owned) != 1 {
+			t.Errorf("policy %d: DstOwned = %v, want c.mov only", c, owned)
 		}
 		if o := owned["c.mov"]; o.Owner.SourceDisk != "B" || o.Owner.SourcePath != "c.mov" {
 			t.Errorf("policy %d: c.mov owner = %+v, want B:c.mov", c, o.Owner)
@@ -183,8 +182,8 @@ func TestBuildRefusesDestinationsOwnedByVerifiedRows(t *testing.T) {
 		if got := rels(p.ToRecopy); len(got) != 1 || got["d.mov"] == "" {
 			t.Errorf("policy %d: ToRecopy = %v, want d.mov only", c, got)
 		}
-		if got := rels(p.ToCopy); len(got) != 1 || got["e.mov"] == "" {
-			t.Errorf("policy %d: ToCopy = %v, want e.mov only", c, got)
+		if got := rels(p.ToCopy); len(got) != 3 || got["a.mov"] == "" || got["b.mov"] == "" || got["e.mov"] == "" {
+			t.Errorf("policy %d: ToCopy = %v, want a.mov b.mov e.mov", c, got)
 		}
 		if len(p.DstCollisions) != 0 {
 			t.Errorf("policy %d: DstCollisions = %v, want none", c, rels(p.DstCollisions))
@@ -207,8 +206,12 @@ func TestBuildOwnershipIsPhysical(t *testing.T) {
 	writeFile(t, filepath.Join(src, "z.mov"), "new", t0)    // final ~ A's "./sub/../Z.mov"
 	writeFile(t, filepath.Join(src, "free.mov"), "new", t0) // nobody
 	writeFile(t, filepath.Join(src, "w.mov"), "new", t0)    // A's "../other/w.mov" is a different physical file
+	// Same disk as the copy (diskA): a same-disk verified row owns its slot
+	// present or missing, so the physical-key matching (case-fold, .., staging)
+	// is exercised without needing the files on disk. Cross-root ownership is
+	// its own test (TestBuildOwnershipRequiresSameRoot).
 	for _, dest := range []string{"X.MOV.VAULT-PARTIAL", "../archive/y.mov.vault-partial", "./sub/../Z.mov", "../other/w.mov"} {
-		if err := m.Upsert(manifest.Entry{SourceDisk: "A", SourcePath: dest, DestPath: dest,
+		if err := m.Upsert(manifest.Entry{SourceDisk: "diskA", SourcePath: dest, DestPath: dest,
 			Size: 3, MtimeNs: 1, SHA256: "x", CopiedAt: 1, VerifiedAt: 2, Status: "verified"}); err != nil {
 			t.Fatal(err)
 		}
@@ -423,4 +426,86 @@ func rels(tasks []FileTask) map[string]string {
 		out[f.RelPath] = f.DstRel
 	}
 	return out
+}
+
+// TestBuildOwnershipRequiresSameRoot is B47: ownership is physical. The manifest
+// records no dest root, so a verified row of ANOTHER disk owns a destination
+// only when a file is physically there — the same relative dest_path under a
+// different root does not make it owned (the kipp dry-run wrongly skipped 56
+// files this way). A row of the copy's OWN disk owns its slot present or missing.
+func TestBuildOwnershipRequiresSameRoot(t *testing.T) {
+	m := openManifest(t)
+	rootA, rootB := t.TempDir(), t.TempDir()
+	// A verified row of disk "sony", its file physically under rootA.
+	if err := m.Upsert(manifest.Entry{SourceDisk: "sony", SourcePath: "CLIP/x.MP4", DestPath: "CLIP/x.MP4",
+		Size: 3, MtimeNs: 1, SHA256: "x", CopiedAt: 1, VerifiedAt: 2, Status: "verified"}); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(rootA, "CLIP", "x.MP4"), "aaa", t0)
+
+	// Copying disk "zve10" to rootB: the same relative dest_path, a DIFFERENT
+	// root, no file there → not owned.
+	idxB, err := VerifiedOwners(m, rootB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := idxB.Owner(rootB, "CLIP/x.MP4", "zve10"); ok {
+		t.Errorf("cross-root: same rel under a different root must not be owned")
+	}
+
+	// Copying "zve10" to rootA, where sony's file is physically present → owned.
+	idxA, err := VerifiedOwners(m, rootA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := idxA.Owner(rootA, "CLIP/x.MP4", "zve10"); !ok {
+		t.Errorf("same root, foreign file present: must be owned")
+	}
+
+	// The owner's own disk owns its slot even after the file is deleted
+	// (a new file must not silently take a verified row's missing destination).
+	if err := os.Remove(filepath.Join(rootA, "CLIP", "x.MP4")); err != nil {
+		t.Fatal(err)
+	}
+	idxSame, err := VerifiedOwners(m, rootA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := idxSame.Owner(rootA, "CLIP/x.MP4", "sony"); !ok {
+		t.Errorf("same disk, missing file: must still own its slot")
+	}
+}
+
+// TestOwnerAbsentForeignDoesNotMaskPresent is review #79 (P1): two verified
+// rows of other disks share a case-folded physical key. On a case-sensitive
+// root they are two files — CLIP/X.MOV absent, CLIP/x.mov present. The absent
+// one must never mask the present one: a copy of a third disk targeting x.mov
+// must still see it as owned, or it could overwrite the present verified file.
+// (On a case-folding root the two spellings are one file, both present, so the
+// scenario only bites on ext4 — where the NAS runs.)
+func TestOwnerAbsentForeignDoesNotMaskPresent(t *testing.T) {
+	m := openManifest(t)
+	root := t.TempDir()
+	for _, e := range []manifest.Entry{
+		{SourceDisk: "A", SourcePath: "CLIP/X.MOV", DestPath: "CLIP/X.MOV"}, // absent, indexed first
+		{SourceDisk: "B", SourcePath: "CLIP/x.mov", DestPath: "CLIP/x.mov"}, // present
+	} {
+		e.Size, e.MtimeNs, e.SHA256, e.CopiedAt, e.VerifiedAt, e.Status = 3, 1, "x", 1, 2, "verified"
+		if err := m.Upsert(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, filepath.Join(root, "CLIP", "x.mov"), "aaa", t0) // only the lowercase file exists
+
+	idx, err := VerifiedOwners(m, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, _, ok := idx.Owner(root, "CLIP/x.mov", "C")
+	if !ok {
+		t.Fatal("a present foreign owner was masked by an absent one at the same folded key (#79)")
+	}
+	if !regularFilePresent(filepath.Join(root, ownerRel(owner))) {
+		t.Errorf("owner %s:%s reported but its file is not present", owner.SourceDisk, owner.SourcePath)
+	}
 }
