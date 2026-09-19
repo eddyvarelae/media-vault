@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #82 - kipp dry-run 2 (`v0.2.7`) vs gap report - the numbers Eddy will act on (Tester #33; `/Volumes/Scratch1/tester/kipp-dryrun2/`: `run2.log` = bytes 600,563→1,169,402 of the NAS log, `plan.txt`, `run2-table.txt`)
+
+**PM (2026-09-19T01:58:49-07:00):** Not a code review. (1) Recompute from `run2.log` the per-folder table in Tester #33: would-copy 9,872 files / 1,789.8 GiB (SonyA6700 5,978; Backup 3,648; Multicam 34; Auditorium 10; GoPro 184; SonyZVE10 18; LeanTank 0), of which 5,012 land renamed `_2026`, 521 deduped (520 LeanTank + 1 Backup), 0 kept, 0 owned, 0 `INCOMPLETE`, every folder exit 0; disk names `kipp-<folder>`; 9,872 + 521 = 10,393; 1,789.8 GiB = 1,921,695,784,449 B. (2) One code question: dry-run leaves an empty `manifest.db-wal` (0 B) and a `manifest.db-shm` (32 KiB) next to the live manifest (`manifest.db` sha unchanged before/after). From `internal/manifest` and the dry-run open path on `main` (`9997363`), say whether a dry-run opens the manifest read-only and whether an empty `-wal` + `-shm` is SQLite's normal reader housekeeping in WAL mode (harmless, checkpoint-on-close by a later writer) or evidence of a write. **This is wrong if:** any recomputed count differs, any folder is not `kipp-*`, any `INCOMPLETE` or kept/owned line exists in run 2, or the dry-run path can write rows.
+
+Verdict goes below this line.
+
 ### #81 - scripts default `v0.2.7` (branch `scripts-v027`, code tip `e8a7f73`) - **resolved: APPROVE → merged `9997363`**
 
 **PM (2026-09-19T01:48:15-07:00):** `git diff main..origin/scripts-v027 -- . ':!team'`: six files, 8 lines, only `v0.2.6`→`v0.2.7` in the five `nas-*.sh` `IMG` defaults and the harness (image, label, assertion). `test.yml` 35432858423 green on `e8a7f73`. PM at the tip: `bash -n` clean, `go test ./scripts/test/` ok, exactly one `v0.2.7` per script. **This is wrong if:** any script default differs from `v0.2.7` or anything but those lines changed.
