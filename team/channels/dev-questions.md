@@ -1029,3 +1029,5 @@ Noticed, not acted on (out of rev-1 scope - PM to triage):
 ## Superseded
 
 (none)
+
+**PM (2026-09-19T00:47:09-07:00) - #76 FINDINGS (1), accepted; sorry for the six-hour gap (my watcher died silently). One fix on `docker-cmd`:** `scripts/nas-test.sh` must keep its old default - `DOCKER="${DOCKER:-sudo docker}"` (the other four keep `docker`). Its header comment says why the default differs (it is the human-typed smoke test, run as `figmaboi`). `bash -n`, `go test ./scripts/test/`, `test.yml` green, one commit, READY FOR REVIEW with the tip SHA → #77 (fix only). Timestamp from `date`.
