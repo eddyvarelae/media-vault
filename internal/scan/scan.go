@@ -432,12 +432,29 @@ func physKey(root, rel string) string {
 func (idx OwnerIndex) Owner(dstRoot, rel, disk string) (owner manifest.Entry, path string, ok bool) {
 	for _, p := range []string{rel + ".vault-partial", rel} {
 		if o, found := idx[physKey(dstRoot, p)]; found {
-			if o.SourceDisk == disk || regularFilePresent(filepath.Join(dstRoot, p)) {
+			// The physical probe uses the OWNER row's own dest_path, not the
+			// task's spelling: the two share a physKey but may differ in case
+			// (the unconditional fold) or in a routing spelling, and on a
+			// case-sensitive root the task's spelling would miss the archived
+			// file. The owner's spelling is the real one, so a case-alias write
+			// is still refused where the certified file exists (B47 keeps the
+			// fold; it only stops a foreign row under another root from owning
+			// an absent path).
+			if o.SourceDisk == disk || regularFilePresent(filepath.Join(dstRoot, ownerRel(o))) {
 				return o, p, true
 			}
 		}
 	}
 	return manifest.Entry{}, "", false
+}
+
+// ownerRel is the owner row's destination-relative path (verify's rule: an empty
+// dest_path locates the file by source_path).
+func ownerRel(e manifest.Entry) string {
+	if e.DestPath != "" {
+		return e.DestPath
+	}
+	return e.SourcePath
 }
 
 // regularFilePresent reports whether a regular file physically sits at path.
