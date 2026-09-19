@@ -29,6 +29,18 @@ log() {
 }
 
 # (disk, host root) pairs — keep aligned with the migration.
+#
+# B48: kipp copies under its own disk names (kipp-<folder>) into the same
+# /volume1/media/<Folder> trees, so once the kipp copy has written rows this
+# pass MUST verify+certify those disks too (a disk with no rows makes certify
+# exit 1, so they are enabled only after the copy lands rows). Uncomment then:
+#   "kipp-sonya6700:/volume1/media/SonyA6700"
+#   "kipp-backup:/volume1/media/Backup"
+#   "kipp-multicam:/volume1/media/Multicam"
+#   "kipp-auditorium:/volume1/media/Auditorium"
+#   "kipp-gopro:/volume1/media/GoPro"
+#   "kipp-sonyzve10:/volume1/media/SonyZVE10"
+#   "kipp-leantank:/volume1/media/LeanTank"
 disks=(
   "media-djiflip:/volume1/media/DJIFlip"
   "media-djimini2:/volume1/media/DJIMini2"

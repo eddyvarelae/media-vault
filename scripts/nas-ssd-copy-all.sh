@@ -90,15 +90,23 @@ table_tars() {
   run_copy media-sonyzve10 SonyZVE10
 }
 table_kipp() {
-  run_copy media-sonya6700  SonyA6700
-  run_copy media-backup     Backup
-  run_copy media-multicam   Multicam
-  run_copy media-auditorium Auditorium
-  run_copy media-gopro      GoPro      --prefix DCIM --rule MP4=Videos --rule LRV=Videos --rule THM=Videos --rule JPG=Photos --rule sav=Other
-  run_copy media-sonyzve10  SonyZVE10
-  # Every LeanTank file is already archived by content: this pass records
-  # kipp's provenance as deduped rows and copies nothing.
-  run_copy media-leantank   LeanTank
+  # kipp is a distinct physical source: its folders copy under their OWN disk
+  # names (kipp-<folder>), not media-<folder> (B48). kipp's Sony 4-digit names
+  # clash with rows already written from tars/noahsarc/case; under the shared
+  # (disk, source_path) key the B23(b) guard rightly refuses, so nothing would
+  # land. Under kipp-* they are new rows and --on-collision rename-mtime-year
+  # drops them beside the originals in the same /volume1/media/<folder> tree.
+  # B6 verify/certify must include the kipp-* disks.
+  run_copy kipp-sonya6700  SonyA6700
+  run_copy kipp-backup     Backup
+  run_copy kipp-multicam   Multicam
+  run_copy kipp-auditorium Auditorium
+  run_copy kipp-gopro      GoPro      --prefix DCIM --rule MP4=Videos --rule LRV=Videos --rule THM=Videos --rule JPG=Photos --rule sav=Other
+  run_copy kipp-sonyzve10  SonyZVE10
+  # Every LeanTank file is already archived by content: under the kipp-leantank
+  # disk name these are new rows, so --dedupe-content records kipp's provenance
+  # as deduped rows (media-leantank rows would be skipped as unchanged instead).
+  run_copy kipp-leantank   LeanTank
 }
 
 "table_$label"

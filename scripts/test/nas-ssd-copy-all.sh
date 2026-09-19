@@ -60,7 +60,7 @@ $img
 copy"
   case "$label" in
     tars) pairs="media-djiflip:DJIFlip media-gopro:GoPro media-sonya6700:SonyA6700 media-sonyzve10:SonyZVE10"; dedupe="" ;;
-    kipp) pairs="media-sonya6700:SonyA6700 media-backup:Backup media-multicam:Multicam media-auditorium:Auditorium media-gopro:GoPro media-sonyzve10:SonyZVE10 media-leantank:LeanTank"; dedupe="--dedupe-content" ;;
+    kipp) pairs="kipp-sonya6700:SonyA6700 kipp-backup:Backup kipp-multicam:Multicam kipp-auditorium:Auditorium kipp-gopro:GoPro kipp-sonyzve10:SonyZVE10 kipp-leantank:LeanTank"; dedupe="--dedupe-content" ;;
   esac
   for pair in $pairs; do
     folder=${pair#*:}
@@ -113,6 +113,9 @@ check "kipp: exits 0 when every copy succeeds" test $? -eq 0
 expected kipp "$SRC" "$IMG" "" > "$work/kipp.want"
 if ! diff -u "$work/kipp.want" "$calls" > "$work/kipp.diff"; then cat "$work/kipp.diff"; fi
 check "kipp: seven vectors, in order, argument by argument (source with a space intact)" test ! -s "$work/kipp.diff"
+# B48: kipp copies under its own disk names (kipp-<folder>), never media-<folder>.
+check "kipp: disk names are kipp-* (kipp-sonya6700 present)" grep -qxF 'kipp-sonya6700' "$calls"
+check "kipp: no media-* disk name leaks in" test "$(grep -cxE 'media-[a-z0-9]+' "$calls")" -eq 0
 check "kipp: seven per-folder done lines" test "$(grep -Ec '\] [A-Za-z0-9]+ done$' "$log")" -eq 7
 check "kipp: final line reports 0 failures" grep -q 'all kipp copies done — 0 folder(s) FAILED' "$log"
 
