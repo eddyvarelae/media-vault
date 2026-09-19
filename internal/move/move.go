@@ -140,7 +140,7 @@ func Execute(ctx context.Context, m *manifest.Manifest, plan *Plan, dstDisk stri
 	// any spelling - nor passes through a symlinked directory, where two
 	// spellings are one file. The on-disk Stat below sees present files;
 	// this sees the manifest and the directories.
-	owners, err := scan.VerifiedOwners(m, plan.dstRoot, dstDisk)
+	owners, err := scan.VerifiedOwners(m, plan.dstRoot)
 	if err != nil {
 		return nil, err
 	}

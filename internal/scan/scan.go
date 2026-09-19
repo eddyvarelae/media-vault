@@ -160,7 +160,7 @@ func Build(ctx context.Context, m *manifest.Manifest, disk, srcRoot, dstRoot, pr
 func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, dstRoot, prefix string, rules []Rule, onCollision CollisionStrategy, dedupeContent bool) (*Plan, error) {
 	p := &Plan{}
 	seenThisRun := map[string]string{} // sha256 -> source-relative path queued to copy
-	owners, err := VerifiedOwners(m, dstRoot, disk)
+	owners, err := VerifiedOwners(m, dstRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -388,29 +388,21 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 // normalization aliases are not folded; camera names are ASCII.) A row
 // with an empty dest_path locates its file by source_path (verify's rule)
 // and is indexed there. copy and move both consult it.
-type OwnerIndex map[string]manifest.Entry
+type OwnerIndex map[string][]manifest.Entry
 
-// VerifiedOwners builds the index for dstRoot from every verified row. disk is
-// this copy's disk; when two rows share a physical key, a row of disk wins,
-// because only a same-disk row is known to share this dest root (B47).
-func VerifiedOwners(m *manifest.Manifest, dstRoot, disk string) (OwnerIndex, error) {
+// VerifiedOwners builds the index for dstRoot from every verified row. All rows
+// that share a physical key are kept (not just the first): the caller's disk and
+// the filesystem decide which one owns, and an absent foreign row must never
+// mask a present one (review #79).
+func VerifiedOwners(m *manifest.Manifest, dstRoot string) (OwnerIndex, error) {
 	rows, err := m.VerifiedRows()
 	if err != nil {
 		return nil, err
 	}
 	idx := make(OwnerIndex, len(rows))
 	for _, e := range rows {
-		rel := e.DestPath
-		if rel == "" {
-			rel = e.SourcePath
-		}
-		k := physKey(dstRoot, rel)
-		// Keep a same-disk row already indexed; let a same-disk row replace a
-		// foreign one; otherwise keep the first foreign row.
-		if cur, ok := idx[k]; ok && (cur.SourceDisk == disk || e.SourceDisk != disk) {
-			continue
-		}
-		idx[k] = e
+		k := physKey(dstRoot, ownerRel(e))
+		idx[k] = append(idx[k], e)
 	}
 	return idx, nil
 }
@@ -431,16 +423,23 @@ func physKey(root, rel string) string {
 // deleted destination).
 func (idx OwnerIndex) Owner(dstRoot, rel, disk string) (owner manifest.Entry, path string, ok bool) {
 	for _, p := range []string{rel + ".vault-partial", rel} {
-		if o, found := idx[physKey(dstRoot, p)]; found {
-			// The physical probe uses the OWNER row's own dest_path, not the
-			// task's spelling: the two share a physKey but may differ in case
-			// (the unconditional fold) or in a routing spelling, and on a
-			// case-sensitive root the task's spelling would miss the archived
-			// file. The owner's spelling is the real one, so a case-alias write
-			// is still refused where the certified file exists (B47 keeps the
-			// fold; it only stops a foreign row under another root from owning
-			// an absent path).
-			if o.SourceDisk == disk || regularFilePresent(filepath.Join(dstRoot, ownerRel(o))) {
+		rows := idx[physKey(dstRoot, p)]
+		// A same-disk owner owns its slot present or missing (a new file must
+		// not take this disk's own deleted verified destination).
+		for _, o := range rows {
+			if o.SourceDisk == disk {
+				return o, p, true
+			}
+		}
+		// Otherwise a foreign owner owns only when its file is physically
+		// present, proving it shares this dest root. The probe uses the OWNER
+		// row's own dest_path (not the task's spelling: they share a physKey but
+		// may differ in case — the unconditional fold — or routing, and on a
+		// case-sensitive root the task's spelling would miss the archived file).
+		// EVERY candidate is checked so an absent foreign row can never mask a
+		// present one (review #79); the present owner is the refusal.
+		for _, o := range rows {
+			if regularFilePresent(filepath.Join(dstRoot, ownerRel(o))) {
 				return o, p, true
 			}
 		}

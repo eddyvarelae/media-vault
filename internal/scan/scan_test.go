@@ -445,7 +445,7 @@ func TestBuildOwnershipRequiresSameRoot(t *testing.T) {
 
 	// Copying disk "zve10" to rootB: the same relative dest_path, a DIFFERENT
 	// root, no file there → not owned.
-	idxB, err := VerifiedOwners(m, rootB, "zve10")
+	idxB, err := VerifiedOwners(m, rootB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -454,7 +454,7 @@ func TestBuildOwnershipRequiresSameRoot(t *testing.T) {
 	}
 
 	// Copying "zve10" to rootA, where sony's file is physically present → owned.
-	idxA, err := VerifiedOwners(m, rootA, "zve10")
+	idxA, err := VerifiedOwners(m, rootA)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,11 +467,45 @@ func TestBuildOwnershipRequiresSameRoot(t *testing.T) {
 	if err := os.Remove(filepath.Join(rootA, "CLIP", "x.MP4")); err != nil {
 		t.Fatal(err)
 	}
-	idxSame, err := VerifiedOwners(m, rootA, "sony")
+	idxSame, err := VerifiedOwners(m, rootA)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, ok := idxSame.Owner(rootA, "CLIP/x.MP4", "sony"); !ok {
 		t.Errorf("same disk, missing file: must still own its slot")
+	}
+}
+
+// TestOwnerAbsentForeignDoesNotMaskPresent is review #79 (P1): two verified
+// rows of other disks share a case-folded physical key. On a case-sensitive
+// root they are two files — CLIP/X.MOV absent, CLIP/x.mov present. The absent
+// one must never mask the present one: a copy of a third disk targeting x.mov
+// must still see it as owned, or it could overwrite the present verified file.
+// (On a case-folding root the two spellings are one file, both present, so the
+// scenario only bites on ext4 — where the NAS runs.)
+func TestOwnerAbsentForeignDoesNotMaskPresent(t *testing.T) {
+	m := openManifest(t)
+	root := t.TempDir()
+	for _, e := range []manifest.Entry{
+		{SourceDisk: "A", SourcePath: "CLIP/X.MOV", DestPath: "CLIP/X.MOV"}, // absent, indexed first
+		{SourceDisk: "B", SourcePath: "CLIP/x.mov", DestPath: "CLIP/x.mov"}, // present
+	} {
+		e.Size, e.MtimeNs, e.SHA256, e.CopiedAt, e.VerifiedAt, e.Status = 3, 1, "x", 1, 2, "verified"
+		if err := m.Upsert(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, filepath.Join(root, "CLIP", "x.mov"), "aaa", t0) // only the lowercase file exists
+
+	idx, err := VerifiedOwners(m, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, _, ok := idx.Owner(root, "CLIP/x.mov", "C")
+	if !ok {
+		t.Fatal("a present foreign owner was masked by an absent one at the same folded key (#79)")
+	}
+	if !regularFilePresent(filepath.Join(root, ownerRel(owner))) {
+		t.Errorf("owner %s:%s reported but its file is not present", owner.SourceDisk, owner.SourcePath)
 	}
 }
