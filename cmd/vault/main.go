@@ -296,9 +296,32 @@ func reportDedupe(plan *scan.Plan, on bool) {
 	}
 }
 
+// plannedSkips names the source files a plan will not archive: collisions the
+// policy could not resolve, verified files kept (B23(b)), destinations a
+// verified row physically owns, and paths through a symlink. Any of these makes
+// a copy INCOMPLETE (exit 1) — in a real run AND in a dry-run (B47): a plan that
+// would leave source files unarchived is not one the operator should read as
+// clean, and scripts/nas-ssd-copy-all.sh branches on the status.
+func plannedSkips(plan *scan.Plan) []string {
+	var reasons []string
+	if len(plan.DstCollisions) > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d file(s) skipped on unresolved destination collisions", len(plan.DstCollisions)))
+	}
+	if len(plan.VerifiedChanged) > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d file(s) skipped because their verified archive copy holds different content (kept)", len(plan.VerifiedChanged)))
+	}
+	if len(plan.DstOwned) > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d file(s) skipped because a verified row owns their destination path", len(plan.DstOwned)))
+	}
+	if len(plan.DstThroughLink) > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d file(s) skipped because their destination path passes through a symlink", len(plan.DstThroughLink)))
+	}
+	return reasons
+}
+
 // runCopy returns the process exit status: 0 when every planned file is
-// archived (or nothing needed doing, or --dry-run), 1 when the run finished
-// INCOMPLETE. Usage and fatal errors still exit directly via die/usage.
+// archived (or nothing needed doing), 1 when the run — or the dry-run plan —
+// is INCOMPLETE. Usage and fatal errors still exit directly via die/usage.
 func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 	pos, prefix, rules, collision, dryRun, dedupeContent := parseScanFlags(args)
 	if len(pos) != 3 {
@@ -367,6 +390,10 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 		}
 		fmt.Printf("\n(dry-run; %d files would be copied, %d recorded as deduped, %d collisions skipped, %d verified kept, %d owned destinations skipped, %d through symlinks skipped)\n",
 			len(todo), len(plan.Deduped), len(plan.DstCollisions), len(plan.VerifiedChanged), len(plan.DstOwned), len(plan.DstThroughLink))
+		if reasons := plannedSkips(plan); len(reasons) > 0 {
+			fmt.Fprintf(os.Stderr, "\nINCOMPLETE: %s — these source files would not be archived (dry-run).\n", strings.Join(reasons, "; "))
+			return 1
+		}
 		return 0
 	}
 
@@ -495,18 +522,7 @@ func runCopy(ctx context.Context, m *manifest.Manifest, args []string) int {
 		if failed > 0 {
 			reasons = append(reasons, fmt.Sprintf("%d file(s) failed to copy", failed))
 		}
-		if len(plan.DstCollisions) > 0 {
-			reasons = append(reasons, fmt.Sprintf("%d file(s) skipped on unresolved destination collisions", len(plan.DstCollisions)))
-		}
-		if len(plan.VerifiedChanged) > 0 {
-			reasons = append(reasons, fmt.Sprintf("%d file(s) skipped because their verified archive copy holds different content (kept)", len(plan.VerifiedChanged)))
-		}
-		if len(plan.DstOwned) > 0 {
-			reasons = append(reasons, fmt.Sprintf("%d file(s) skipped because a verified row owns their destination path", len(plan.DstOwned)))
-		}
-		if len(plan.DstThroughLink) > 0 {
-			reasons = append(reasons, fmt.Sprintf("%d file(s) skipped because their destination path passes through a symlink", len(plan.DstThroughLink)))
-		}
+		reasons = append(reasons, plannedSkips(plan)...)
 		if orphaned > 0 {
 			reasons = append(reasons, fmt.Sprintf("%d duplicate(s) left unarchived", orphaned))
 		}

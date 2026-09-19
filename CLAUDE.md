@@ -88,13 +88,21 @@ name — the same way. A hit goes to `DstOwned` and is never written, under
 any policy. This is what stops a `deduped` row's recopy (its own route
 lands on another disk's certified file), a new file whose staging name is
 an archived file (also spelled `X.mov` on a case-folding root, also stored
-as `../archive/x.mov` by a routing rule), and a new file at a verified
-row's *missing* destination. The fold is unconditional: on a
+as `../archive/x.mov` by a routing rule), and a new file at *this disk's*
+verified row's *missing* destination. The fold is unconditional: on a
 case-sensitive root it can only refuse a write that differs from a
-certified file by case alone. `dest_path` is relative to a root the
-manifest does not record, so a hit from another disk under another root is
-a false refusal — accepted: the safe direction, and the output names the
-owning row.
+certified file by case alone.
+
+Ownership is **physical**, not by spelling (B47): the manifest records no
+dest root, so a `verified` row of **another disk** owns a destination only
+when a file is physically there — proving it shares this dest root. A
+foreign row whose relative `dest_path` merely matches but whose file is
+absent here is under another root (e.g. `media-sonya6700:CLIP/C2671.MP4`
+under `/volume1/media/SonyA6700` cannot own `…/SonyZVE10/CLIP/C2671.MP4`)
+and is **not** an owner — the file is copied, not skipped. A row of the
+copy's **own disk** owns its slot present or missing, so a new file still
+cannot take that disk's own deleted verified destination. When two rows
+share a physical key the same-disk row wins.
 
 Neither the key nor a leaf `Lstat` can see a **symlinked directory**
 under the root (`dst/alias → real` makes `alias/x.mov` and `real/x.mov`
@@ -155,7 +163,7 @@ command:
 | Command | Exits 1 when | Exits 0 even though |
 |---|---|---|
 | `scan` | scan error (unreadable source, cancelled); a `--rule` whose subdir is absolute or has a `..` component (`invalid rule`, `die`) — same for `copy` and `move`, B34 | collisions/recopies/verified-changed are predicted — it only reports |
-| `copy` | run finished `INCOMPLETE:` — any file failed, any unresolved destination collision, any file whose verified archive copy holds different content (kept, never overwritten), any file whose destination or staging path a verified row owns, any file whose destination path passes through a symlinked directory, any intra-run duplicate left unarchived (stderr names which); interrupted between files; `die` on scan or manifest-write error | no-op (including only retouched files), `--dry-run` (even with predicted collisions, verified-changed or owned files). `--dry-run` writes **no archive file and no manifest row**, and (B31) neither creates the config dir nor initializes `manifest.db`: the manifest is opened read-only (`OpenReadOnly`, `mode=ro`, proven by a write that must fail) or, when none exists, planned against an empty in-memory one with a notice on stderr. A read-only open of a WAL database still creates `-shm`/empty `-wal` beside it — SQLite's, not ours |
+| `copy` | run finished `INCOMPLETE:` — any file failed, any unresolved destination collision, any file whose verified archive copy holds different content (kept, never overwritten), any file whose destination or staging path a verified row owns, any file whose destination path passes through a symlinked directory, any intra-run duplicate left unarchived (stderr names which); interrupted between files; `die` on scan or manifest-write error. **A `--dry-run` whose plan predicts any of those skips is `INCOMPLETE:` and exits 1 too (B47): a plan that would leave source files unarchived is not clean, and the NAS script branches on the status** | no-op (including only retouched files); a `--dry-run` whose plan would archive every source file (deduped rows count as archived). `--dry-run` writes **no archive file and no manifest row**, and (B31) neither creates the config dir nor initializes `manifest.db`: the manifest is opened read-only (`OpenReadOnly`, `mode=ro`, proven by a write that must fail) or, when none exists, planned against an empty in-memory one with a notice on stderr. A read-only open of a WAL database still creates `-shm`/empty `-wal` beside it — SQLite's, not ours |
 | `verify` | any mismatch, missing, or read error; `die` on cancel | — |
 | `certify` | output path not a regular file or absent (a symlink at the output name — dangling or not — a directory: `Cannot certify: certificate output path is not a regular file`); output path inside the tree it certifies (`Cannot certify: certificate output is inside the archive …`) — with `--root <dest-dir>` by physical containment (resolved paths, `filepath.Rel`), without it by recognising the tree from its own files (`certify.InsideArchive`: an ancestor of the output path under which a row's `dest_path` exists as a regular file of the row's size — a fallback that a damaged tree defeats, so the scripts always pass `--root`); all before signing and before the key is created; the certificate is then written through an `os.Root` on the **checked directory** — `runCertify` passes it as the trusted root and the leaf as a one-component `name` (B43): the no-symlink walk (`scan.SymlinkComponentRoot`) and `<name>.vault-partial` created `O_CREATE|O_EXCL`, fsynced and renamed over the leaf all resolve through the pinned fd, `os.Root` refuses any escaping component, and a symlink at the leaf is *replaced* by the rename, never followed. Residual (os.Root doc, as at the other sites): a parent swapped to an in-root symlink after the walk is followed. A stale `<out>.vault-partial` refuses (`die`); `--root` without a value or an unknown flag (`die`); any row not `verified` (`Cannot certify: …`); no rows for the disk; key/sign/marshal/write error | — |
 | `repair-dest` | unknown flag (`die`); query, read-dir or hash error (`die`); write error mid-run (`die`, names how many rows were already written — each was hash-backed, so they stand); after a real run, any row still unresolved — `NOT FOUND`, `AMBIGUOUS`, `OWNED`, `NOT A FILE`, `UNSAFE`, `CONFLICT` (`INCOMPLETE:` on stderr, counts per outcome) | `--dry-run` (even with unresolved rows) — it writes no manifest row, and `repair-dest` never writes archive files; and (B31) it neither creates the config dir nor initializes `manifest.db`: the manifest is opened read-only (`OpenReadOnly`, `mode=ro`) or, when none exists, planned against an empty in-memory one; a disk with no rows |

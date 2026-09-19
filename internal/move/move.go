@@ -140,7 +140,7 @@ func Execute(ctx context.Context, m *manifest.Manifest, plan *Plan, dstDisk stri
 	// any spelling - nor passes through a symlinked directory, where two
 	// spellings are one file. The on-disk Stat below sees present files;
 	// this sees the manifest and the directories.
-	owners, err := scan.VerifiedOwners(m, plan.dstRoot)
+	owners, err := scan.VerifiedOwners(m, plan.dstRoot, dstDisk)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ func Execute(ctx context.Context, m *manifest.Manifest, plan *Plan, dstDisk stri
 		// os.Remove/DeleteEntry, the rename (review #27): a destination a
 		// verified row owns, one that climbs out, or one through a
 		// symlinked directory is skipped without touching anything.
-		if skip := guardDest(plan.dstRoot, owners, mv); skip != "" {
+		if skip := guardDest(plan.dstRoot, dstDisk, owners, mv); skip != "" {
 			res.Skipped++
 			if onFile != nil {
 				onFile(mv, skip)
@@ -221,7 +221,7 @@ func Execute(ctx context.Context, m *manifest.Manifest, plan *Plan, dstDisk stri
 					mv.DstRel = newRel
 					mv.DstAbs = filepath.Join(plan.dstRoot, newRel)
 					// The rewritten path gets the same guard (review #27).
-					if skip := guardDest(plan.dstRoot, owners, mv); skip != "" {
+					if skip := guardDest(plan.dstRoot, dstDisk, owners, mv); skip != "" {
 						res.Skipped++
 						if onFile != nil {
 							onFile(mv, skip)
@@ -277,8 +277,8 @@ func Execute(ctx context.Context, m *manifest.Manifest, plan *Plan, dstDisk stri
 // path is a symlink - or "" when it is safe.
 // Consulted before every filesystem change and again after a collision
 // rename (review #27; B32).
-func guardDest(dstRoot string, owners scan.OwnerIndex, mv Move) string {
-	if owner, path, ok := owners.Owner(dstRoot, mv.DstRel); ok {
+func guardDest(dstRoot, dstDisk string, owners scan.OwnerIndex, mv Move) string {
+	if owner, path, ok := owners.Owner(dstRoot, mv.DstRel, dstDisk); ok {
 		return fmt.Sprintf("dst-owned by verified row %s:%s (%s) — never written", owner.SourceDisk, owner.SourcePath, path)
 	}
 	if link, err := scan.SymlinkComponent(dstRoot, mv.DstRel); err != nil {

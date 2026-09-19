@@ -160,7 +160,7 @@ func Build(ctx context.Context, m *manifest.Manifest, disk, srcRoot, dstRoot, pr
 func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, dstRoot, prefix string, rules []Rule, onCollision CollisionStrategy, dedupeContent bool) (*Plan, error) {
 	p := &Plan{}
 	seenThisRun := map[string]string{} // sha256 -> source-relative path queued to copy
-	owners, err := VerifiedOwners(m, dstRoot)
+	owners, err := VerifiedOwners(m, dstRoot, disk)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +278,7 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 				return nil
 			}
 			task.Replace = true
-			if owned := owners.claims(dstRoot, task); owned != nil {
+			if owned := owners.claims(dstRoot, disk, task); owned != nil {
 				p.DstOwned = append(p.DstOwned, *owned)
 				return nil
 			}
@@ -354,7 +354,7 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 		// reports it missing; writing other bytes there would make it a
 		// mismatch under a certified hash), and the staging path may be an
 		// archived file that merely ends in .vault-partial.
-		if owned := owners.claims(dstRoot, task); owned != nil {
+		if owned := owners.claims(dstRoot, disk, task); owned != nil {
 			p.DstOwned = append(p.DstOwned, *owned)
 			return nil
 		}
@@ -390,8 +390,10 @@ func BuildWithOptions(ctx context.Context, m *manifest.Manifest, disk, srcRoot, 
 // and is indexed there. copy and move both consult it.
 type OwnerIndex map[string]manifest.Entry
 
-// VerifiedOwners builds the index for dstRoot from every verified row.
-func VerifiedOwners(m *manifest.Manifest, dstRoot string) (OwnerIndex, error) {
+// VerifiedOwners builds the index for dstRoot from every verified row. disk is
+// this copy's disk; when two rows share a physical key, a row of disk wins,
+// because only a same-disk row is known to share this dest root (B47).
+func VerifiedOwners(m *manifest.Manifest, dstRoot, disk string) (OwnerIndex, error) {
 	rows, err := m.VerifiedRows()
 	if err != nil {
 		return nil, err
@@ -402,9 +404,13 @@ func VerifiedOwners(m *manifest.Manifest, dstRoot string) (OwnerIndex, error) {
 		if rel == "" {
 			rel = e.SourcePath
 		}
-		if _, dup := idx[physKey(dstRoot, rel)]; !dup {
-			idx[physKey(dstRoot, rel)] = e
+		k := physKey(dstRoot, rel)
+		// Keep a same-disk row already indexed; let a same-disk row replace a
+		// foreign one; otherwise keep the first foreign row.
+		if cur, ok := idx[k]; ok && (cur.SourceDisk == disk || e.SourceDisk != disk) {
+			continue
 		}
+		idx[k] = e
 	}
 	return idx, nil
 }
@@ -414,21 +420,35 @@ func physKey(root, rel string) string {
 	return strings.ToLower(filepath.Clean(filepath.Join(root, rel)))
 }
 
-// Owner reports the verified row, if any, whose file is at rel under
-// dstRoot or at rel's .vault-partial staging name - the two paths a writer
-// touches - and which of the two it was.
-func (idx OwnerIndex) Owner(dstRoot, rel string) (owner manifest.Entry, path string, ok bool) {
+// Owner reports the verified row, if any, whose file is at rel under dstRoot or
+// at rel's .vault-partial staging name - the two paths a writer touches - and
+// which of the two it was. disk is this copy's disk. Ownership is physical (B47):
+// the manifest records no dest root, so a row of ANOTHER disk owns the path only
+// when a regular file is physically there, proving it shares this dest root - a
+// foreign row whose relative dest_path merely matches but whose file is absent
+// here is under another root and is not an owner. A row of this copy's OWN disk
+// owns its slot present or missing (a new file must not take a verified row's
+// deleted destination).
+func (idx OwnerIndex) Owner(dstRoot, rel, disk string) (owner manifest.Entry, path string, ok bool) {
 	for _, p := range []string{rel + ".vault-partial", rel} {
 		if o, found := idx[physKey(dstRoot, p)]; found {
-			return o, p, true
+			if o.SourceDisk == disk || regularFilePresent(filepath.Join(dstRoot, p)) {
+				return o, p, true
+			}
 		}
 	}
 	return manifest.Entry{}, "", false
 }
 
+// regularFilePresent reports whether a regular file physically sits at path.
+func regularFilePresent(path string) bool {
+	fi, err := os.Lstat(path)
+	return err == nil && fi.Mode().IsRegular()
+}
+
 // claims is Owner for a task, as a refusal record.
-func (idx OwnerIndex) claims(dstRoot string, task FileTask) *OwnedTask {
-	if owner, path, ok := idx.Owner(dstRoot, task.DstRel); ok {
+func (idx OwnerIndex) claims(dstRoot, disk string, task FileTask) *OwnedTask {
+	if owner, path, ok := idx.Owner(dstRoot, task.DstRel, disk); ok {
 		return &OwnedTask{Task: task, Path: path, Owner: owner}
 	}
 	return nil
