@@ -6,11 +6,15 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #83 - the kipp copy result (Tester #34-#41; `/Volumes/Scratch1/tester/kipp-live/`: `run3.log`, `manifest-after.db` sha `dd29e115bb007cdd4406dfc24b90b4e6eecf3a894c58f25fe7d989f44c6c2758`; before = `/Volumes/Scratch1/tester/b24-live/manifest-after.db` sha `4da4c724912b035c3ff747aae9a23dd94f50610ef6e7f71abc26ca792f582665`)
+### #83 - the kipp copy result (Tester #34-#41; `/Volumes/Scratch1/tester/kipp-live/`: `run3.log`, `manifest-after.db` sha `dd29e115bb007cdd4406dfc24b90b4e6eecf3a894c58f25fe7d989f44c6c2758`; before = `/Volumes/Scratch1/tester/b24-live/manifest-after.db` sha `4da4c724912b035c3ff747aae9a23dd94f50610ef6e7f71abc26ca792f582665`) - **resolved: FINDINGS (1, PM wording) accepted → every number reproduces; released to Eddy**
 
 **PM (2026-09-19T11:43:29-07:00):** Not a code review. Recompute, read-only (`mode=ro&immutable=1`): (1) from `run3.log` the seven `Done. Copied N/N files, X GiB` lines = 5978 / 3648 / 34 / 10 / 184 / 18 / 0, the two `Recorded … deduped` lines = 1 and 520, `0 folder(s) FAILED`, 9,872 `ok (sha` lines, 0 lines matching `INCOMPLETE|error|mismatch|skipped|never overwritten`; (2) manifest: before 67,735 rows → after 78,128 = +10,393, all new rows on the seven `kipp-*` disks, and **every one of the 67,735 pre-existing rows byte-identical** (no field changed, none removed); per-disk: `kipp-sonya6700` 5,978 copied · `kipp-backup` 3,648 copied + 1 deduped · `kipp-multicam` 34 · `kipp-auditorium` 10 · `kipp-gopro` 184 · `kipp-sonyzve10` 18 · `kipp-leantank` 520 deduped; sum(size) of the 9,872 copied rows = 1,921,695,784,449 B; `dest_path` containing `_2026` = 5,012 (5,009 + 2 + 1); each of the 521 deduped rows' sha exists on a verified non-kipp row. **This is wrong if:** any count differs, any pre-existing row changed, or a deduped sha has no verified twin.
 
 Verdict goes below this line.
+
+**Reviewer (Codex, 2026-09-19T11:45:12-07:00) - FINDINGS (1).** The request said 0 lines match `never overwritten`; 7 do - the seven per-folder summary lines `Verified, changed: 0 (… never overwritten)`, all zero counts. Everything else reproduces: shas 2/2; Done lines 5978/5978, 3648/3648, 34/34, 10/10, 184/184, 18/18, 0/0 with 542.5/242.2/396.9/313.1/215.1/80.0 GiB; deduped 1+520; 0 FAILED; 9,872 `ok (sha`; manifest 67,735 → 78,128 with **67,735 identical, 0 changed, 0 removed** by primary key across every column; new rows per disk exactly as claimed; copied rows 9,872 = 1,921,695,784,449 B; `_2026` 5,012 = 5,009+2+1; 521 deduped shas all have a verified non-kipp twin; tags 110 and metadata 71 unchanged. 0 files written.
+
+**PM (2026-09-19T11:45:12-07:00):** accepted - the finding is my grep claim, not the copy. Numbers released to Eddy. kipp copy = done and witnessed; B6 on `kipp-*` next.
 
 ### #82 - kipp dry-run 2 (`v0.2.7`) vs gap report - the numbers Eddy will act on (Tester #33; `/Volumes/Scratch1/tester/kipp-dryrun2/`: `run2.log` = bytes 600,563→1,169,402 of the NAS log, `plan.txt`, `run2-table.txt`) - **resolved: FINDINGS (1, rounding) accepted → numbers released to Eddy as 1,789.7 GiB; copy awaits Eddy's go**
 
