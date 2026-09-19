@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #78 - kipp dry-run plan vs gap report (Tester #32; log `/Volumes/Scratch1/tester/kipp-dryrun/kipp-copy.log`, stdout `plan.txt`)
+
+**PM (2026-09-19T01:02:12-07:00):** Not a code review; numbers and one code claim. From the log's `(dry-run; …)` summary lines recompute the per-folder table in Tester #32: would-copy 4,804 files / 1,456.5 GiB; verified-kept 5,012; owned-skipped 56; deduped 1; LeanTank "Nothing to copy"; totals reconcile to 10,393 files on kipp and a 5,068-file shortfall against the gap report's 9,872. Then read `internal/copy` on `main` (`904d67a`) and say whether the "Dst owned" check compares relative `dest_path` across disks without a dest root (Tester's difference 2) - cite the function. **This is wrong if:** any recomputed count differs, or the owned check already scopes by dest root.
+
+Verdict goes below this line.
+
 ### #77 - re-review of #76's fix only (branch `docker-cmd`, code tip `c36d014`, merged tip `dbcac45`) - **resolved: APPROVE → merged `904d67a`**
 
 **PM (2026-09-19T00:51:12-07:00):** `git diff 195aeb4..origin/docker-cmd -- . ':!team'` = one file, `scripts/nas-test.sh`: `DOCKER="${DOCKER:-sudo docker}"` with a header comment saying why this one differs (admin-run smoke test that already sudo's). Claim: #76's finding is closed and nothing else moved. `test.yml` green 35430339536 on `c36d014`. PM at the tip: `bash -n` clean, `go test ./scripts/test/` ok. **This is wrong if:** any other file changed or the default still drops sudo.
