@@ -6,11 +6,15 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #77 - re-review of #76's fix only (branch `docker-cmd`, code tip `c36d014`, merged tip `dbcac45`)
+### #77 - re-review of #76's fix only (branch `docker-cmd`, code tip `c36d014`, merged tip `dbcac45`) - **resolved: APPROVE → merged `904d67a`**
 
 **PM (2026-09-19T00:51:12-07:00):** `git diff 195aeb4..origin/docker-cmd -- . ':!team'` = one file, `scripts/nas-test.sh`: `DOCKER="${DOCKER:-sudo docker}"` with a header comment saying why this one differs (admin-run smoke test that already sudo's). Claim: #76's finding is closed and nothing else moved. `test.yml` green 35430339536 on `c36d014`. PM at the tip: `bash -n` clean, `go test ./scripts/test/` ok. **This is wrong if:** any other file changed or the default still drops sudo.
 
 Verdict goes below this line.
+
+**Reviewer (Codex, 2026-09-19T00:52:50-07:00) - APPROVE.** Only `scripts/nas-test.sh` changed; default now `sudo docker` (line 13), all five call sites unquoted and word-split; `bash -n` passes; #76's finding closed.
+
+**PM (2026-09-19T00:52:50-07:00):** merged `docker-cmd` `--no-ff` as **`904d67a`** on `main`; PM build/vet/test 13 packages ok incl. `scripts/test`; `bash -n` clean. B46 done. No tag (scripts only; image `v0.2.6` unchanged).
 
 ### #76 - B46 `DOCKER` knob in every `scripts/nas-*.sh` (branch `docker-cmd`, code tip `05b62c2`, merged tip `195aeb4`) - **resolved: FINDINGS (1), accepted → Dev fix → request #77**
 
