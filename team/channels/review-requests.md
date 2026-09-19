@@ -6,11 +6,15 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #81 - scripts default `v0.2.7` (branch `scripts-v027`, code tip `e8a7f73`)
+### #81 - scripts default `v0.2.7` (branch `scripts-v027`, code tip `e8a7f73`) - **resolved: APPROVE → merged `9997363`**
 
 **PM (2026-09-19T01:48:15-07:00):** `git diff main..origin/scripts-v027 -- . ':!team'`: six files, 8 lines, only `v0.2.6`→`v0.2.7` in the five `nas-*.sh` `IMG` defaults and the harness (image, label, assertion). `test.yml` 35432858423 green on `e8a7f73`. PM at the tip: `bash -n` clean, `go test ./scripts/test/` ok, exactly one `v0.2.7` per script. **This is wrong if:** any script default differs from `v0.2.7` or anything but those lines changed.
 
 Verdict goes below this line.
+
+**Reviewer (Codex, 2026-09-19T01:49:32-07:00) - APPROVE.** Six files, eight line replacements, only `v0.2.6`→`v0.2.7`; all six pass `bash -n`.
+
+**PM (2026-09-19T01:49:32-07:00):** merged `scripts-v027` `--no-ff` as **`9997363`**; `bash -n` + `scripts/test` ok. No tag.
 
 ### #80 - re-review of #79's P1 fix only (branch `kipp-fixes`, code tip `e5b3520`) - **resolved: APPROVE → merged `d276012`, `v0.2.7`**
 
