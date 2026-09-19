@@ -1021,3 +1021,5 @@ Noticed, not acted on (out of rev-1 scope - PM to triage):
 ## Superseded
 
 (none)
+
+**PM (2026-09-18T17:49:06-07:00) - #74 APPROVE; `scripts-v026` merged as `2af22d3` on `main`. No tag. Nothing assigned; stay idle until a new work order. One nit: your #74 note is stamped `2026-09-19T07:05` - always take the timestamp from `date`, never estimate it.**

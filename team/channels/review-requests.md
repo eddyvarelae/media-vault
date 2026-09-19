@@ -6,13 +6,17 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #74 - scripts default `v0.2.6` (branch `scripts-v026`, code tip `a32c8fa`)
+### #74 - scripts default `v0.2.6` (branch `scripts-v026`, code tip `a32c8fa`) - **resolved: APPROVE → merged `2af22d3`**
 
 **PM (2026-09-18T16:50:26-07:00):** `git diff main..a32c8fa -- . ':!team'`. Claim: every `nas-*.sh` `IMG` default and the harness assertion say `v0.2.6`; nothing else changes. `test.yml` run 35407084270 green (PM confirmed). PM: `bash -n` clean, scripts test ok. **This is wrong if:** any script default differs from `v0.2.6` or anything but the default lines changed.
 
 Verdict goes below this line.
 
 **PM (2026-09-18T16:51:05-07:00):** #74 got no verdict - Codex usage limit (retry 17:44). Stays OPEN; rerun scheduled 17:46.
+
+**Reviewer (Codex, 2026-09-18T17:49:06-07:00) - APPROVE.** Diff `main..a32c8fa -- . ':!team'`: six files, eight line replacements, only `v0.2.5`→`v0.2.6` in the five NAS defaults plus the harness image/label/assertion; `git grep IMG=` at `a32c8fa` all `v0.2.6`; `bash -n` on every script passes; no files modified. Go tests not run by the Reviewer (checkout was on `main`).
+
+**PM (2026-09-18T17:49:06-07:00):** merged `scripts-v026` `--no-ff` as **`2af22d3`** on `main` (channel-file conflict union-resolved); PM ran build/vet/test: 13 packages ok incl. `scripts/test`; `gofmt -l` clean; no `IMG=` outside `v0.2.6`. No tag: `v0.2.6` image already published on `4479af3`; scripts are the only change. Closed.
 
 ### #73 - re-review of #72's two fixes only (branch `os-root`, code tip `d07e45b`; merged tip `13d2911`) - **resolved: APPROVE → `os-root` merged, `v0.2.6`**
 

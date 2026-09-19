@@ -6,7 +6,7 @@ Status: **draft, not approved to run.** Steps 3-5 pass the Reviewer before Eddy 
 - `kipp`: 10,393 files / 1.95 TB; **9,872 files / 1,921,695,784,449 B need archiving**; 521 already archived by content (520 = all of `LeanTank/`, 1 in `Backup/`).
 - Folders needing archive: `SonyA6700` 5,978 (582.5 GB), `Backup` 3,648 (260.0 GB), `Multicam` 34 (426.2 GB), `Auditorium` 10 (336.2 GB), `GoPro/DCIM` 184 (230.9 GB), `SonyZVE10` 18 (85.9 GB).
 - **13 files** share `(source_path, size)` with archived rows but differ in content (11 `SonyA6700/DCIM/*.ARW` with wrapped counters, `Backup/PRIVATE/DATABASE/DATABASE.BIN`, two AVCHD/XML index files). Under `v0.2.1` a `media-sonya6700` copy **skips** these (`Verified, changed`, `INCOMPLETE:`, exit 1) - the old file always wins. They need a second pass under their own disk name (step 6).
-- NAS: `sudo docker run` as `figmaboi`; USB disks appear under `/mnt/@usb/<dev>` (`tars` was `/usb/sdc1` inside the container); image `ghcr.io/eddyvarelae/media-vault:v0.2.6` - every NAS script defaults to it once #74 (`scripts-v026`) merges; until then the scripts default to v0.2.5 (`VAULT_IMAGE` overrides only for a one-off).
+- NAS: `sudo docker run` as `figmaboi`; USB disks appear under `/mnt/@usb/<dev>` (`tars` was `/usb/sdc1` inside the container); image `ghcr.io/eddyvarelae/media-vault:v0.2.6` - every NAS script defaults to it since #74 (`2af22d3`) (`VAULT_IMAGE` overrides only for a one-off).
 - Nothing writes `/volume1/media` except a `vault copy` **Eddy** launched (TEAM.md sacred paths). Any `vault` command against the live manifest = a deploy: one at a time, lock note, heartbeat.
 
 ## Steps
