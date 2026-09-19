@@ -2266,3 +2266,47 @@ func TestCertifyOutputLeafAndRoot(t *testing.T) {
 		}
 	})
 }
+
+// TestCertifyDedupedByReference is B51 end-to-end (the kipp shape): disk B's
+// file is content-deduped against disk A's verified copy, so B carries a
+// deduped row. verify B skips it (not Missing) and leaves its status; certify B
+// succeeds and the entry records A as the by-reference owner.
+func TestCertifyDedupedByReference(t *testing.T) {
+	cfg, srcA, srcB, dst := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(srcA, "clip.mov"), "shared bytes", t0)
+	writeFile(t, filepath.Join(srcB, "clip.mov"), "shared bytes", t0)
+	if _, _, code := vault(t, cfg, "copy", "A", srcA, dst); code != 0 {
+		t.Fatalf("copy A: exit %d", code)
+	}
+	if _, _, code := vault(t, cfg, "verify", "A", dst); code != 0 {
+		t.Fatalf("verify A: exit %d", code)
+	}
+	out, _, code := vault(t, cfg, "copy", "B", srcB, dst, "--dedupe-content")
+	if code != 0 || !strings.Contains(out, "Recorded 1 already-archived files") {
+		t.Fatalf("copy B deduped: exit %d\n%s", code, out)
+	}
+	wantRow(t, rowsOf(t, cfg, "B"), "clip.mov", "clip.mov", "shared bytes", "deduped")
+
+	// verify B: the deduped row is skipped, not Missing; exit 0; status kept.
+	out, _, code = vault(t, cfg, "verify", "B", dst)
+	if code != 0 || !strings.Contains(out, "Missing: 0") || !strings.Contains(out, "Deduped (by reference): 1") {
+		t.Fatalf("verify B: exit %d\n%s", code, out)
+	}
+	wantRow(t, rowsOf(t, cfg, "B"), "clip.mov", "clip.mov", "shared bytes", "deduped")
+
+	// certify B: succeeds, entry names A as the by-reference owner.
+	certPath := filepath.Join(t.TempDir(), "b.cert.json")
+	if _, _, code := vault(t, cfg, "certify", "B", certPath); code != 0 {
+		t.Fatalf("certify B: exit %d", code)
+	}
+	var cert certify.Certificate
+	if err := json.Unmarshal([]byte(readFile(t, certPath)), &cert); err != nil {
+		t.Fatal(err)
+	}
+	if len(cert.Files) != 1 {
+		t.Fatalf("cert lists %d files, want 1", len(cert.Files))
+	}
+	if r := cert.Files[0].ByReference; r == nil || r.Disk != "A" || r.DestPath != "clip.mov" {
+		t.Errorf("by_reference = %+v, want A:clip.mov", cert.Files[0].ByReference)
+	}
+}

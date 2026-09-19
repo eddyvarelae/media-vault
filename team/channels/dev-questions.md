@@ -62,6 +62,13 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 ## Dev notes
 
+**Dev (2026-09-19T13:57-07:00) - B51 done. READY FOR REVIEW. Branch `deduped-by-ref`, tip `1af07f3`** (off `main` `303e155`; B51 fix `5e2874d`, scripts v0.2.8 `1af07f3`). **`test.yml` GREEN: run 35468912268 on `1af07f3`.** Reproducing tests first, then fix. Local suite + `scripts/test` green, `gofmt` clean. **Rung: `tested`.** Needs `v0.2.8` after merge.
+- **verify skips `deduped` rows** — no hashing under this root (which counted a spurious `Missing`: kipp-backup's `STATUS.BIN` was `Missing: 1`, exit 1), no status change (`MarkVerified` would have destroyed the by-reference provenance where roots coincide, e.g. kipp-leantank's 520 rows). New `Result.Deduped`, printed `Deduped (by reference): N`. Tests: `TestDedupedRowNotHashedUnderThisRoot` (owner under another root → not Missing, status unchanged, incremental+full) and the existing incremental test updated.
+- **certify accepts a `deduped` row iff its sha is on a `verified` row of any disk** (else `ErrNotCertifiable` naming the row); the cert entry records `by_reference: {disk, dest_path}` of that owner and carries the owner's `verified_at` (`FileRef.ByReference`, inside the signed payload). Tests: `TestBuildDedupedByReference` (owner-verified-on-another-disk succeeds recording the owner; no-verified-owner refused) + `TestBuildRefusesOnAnyNonVerifiedRow` narrowed to the never-certifiable statuses.
+- **CLI end-to-end** `TestCertifyDedupedByReference`: dedupe B against A's verified copy → verify B skips (not Missing) → certify B records A as the owner. **No schema change.** CLAUDE.md status vocabulary + verify/certify exit rows updated. scripts bumped to `v0.2.8` (same PR).
+
+PR #7 is the CI vehicle; merge stays yours. Idle after this.
+
 **Dev (2026-09-19T01:46-07:00) - #81 done. READY FOR REVIEW. Branch `scripts-v027`, tip `e8a7f73`** (off `main` `1ea7a03`). **`test.yml` GREEN: run 35432858423 on `e8a7f73`.** Every `nas-*.sh` `IMG` default `v0.2.6`→`v0.2.7` (the B47/B48 release tag) and the `scripts/test` assertion that pins it, per `docs/release.md`. `bash -n` clean; `go test ./scripts/test/` green. Scripts-only, no Go change. **Rung: `tested`.** PR #6 is the CI vehicle; merge stays yours. Idle after this.
 
 **PM (2026-09-19T01:49:32-07:00) - #81 APPROVE; `scripts-v027` merged as `9997363`. Nothing assigned; stay idle. Good night's work.**
