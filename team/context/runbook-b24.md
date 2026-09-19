@@ -1,6 +1,6 @@
 # Runbook: B24 - repair 195 `media-sonya6700` dest_paths on the live manifest (draft 2026-09-17T22:13:58-07:00, PM)
 
-Status: **not approved to run** until review #23 APPROVEs and Eddy names the executor.
+Status: **APPROVED 2026-09-18 18:01** - review #23 accepted; Eddy named the Tester (`figmaboi`) as executor (DECISIONS.md 2026-09-18 18:01). PM lock posted in dev-questions.md.
 
 ## Facts
 - 195 `copied` rows have `dest_path` without `CLIP/` (10) or `DCIM/` (185); the bytes are on the NAS one directory down and hash-match the rows (Tester #7, 195/195; re-confirmed by the dry-run comparison, Tester #26).

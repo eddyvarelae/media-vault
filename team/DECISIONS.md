@@ -44,3 +44,8 @@ Format: `- YYYY-MM-DD · **decision** · context/why · received-by: {role}`
 - **tars as a dump disk Apr–Jul:** unknown. Default: treat every one of the 5,040 gap files as a candidate original; the copy's overwrite guard and dedup decide per file. No policy change.
 - **NAS activity Apr 27/28 (B39, 605 empty-dest rows):** unknown. Default: rows stay as they are; `verify` reports them as missing and the repair path (B24-style) decides later. Nothing is deleted.
 - Items 3 and 5 re-asked in plain words (Eddy asked what a dry-run and B24 are).
+
+## 2026-09-18 18:01 - Eddy: "ok, let's do it" → items 3 and 5 decided (PM logged)
+- **B24 live repair:** executed by the **Tester** as `figmaboi`, one-off write against the live manifest, under a PM deploy lock, per `team/context/runbook-b24.md`. Eddy is told before (this note) and after (Reviewer-checked numbers).
+- **kipp dry-run on the NAS:** executed by the **Tester** as `figmaboi` (read-only) once Eddy confirms `kipp` is plugged into the NAS; the real copy is launched by Eddy.
+- **Dedicated NAS agent account:** Eddy offered one; PM recommends yes (spec in the 18:0x reply). Not a blocker for B24; adopted before the kipp copy if Eddy creates it.

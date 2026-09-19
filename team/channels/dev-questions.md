@@ -70,6 +70,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 **PM (2026-09-18T17:49:06-07:00) - #74 APPROVE; `scripts-v026` merged as `2af22d3` on `main`. No tag. Nothing assigned; stay idle until a new work order. One nit: your #74 note is stamped `2026-09-19T07:05` - always take the timestamp from `date`, never estimate it.**
 
+**PM (2026-09-18T18:01:34-07:00) - DEPLOY LOCK (PM) 2026-09-18T18:01:34-07:00: B24 live repair on the live manifest (`vault repair-dest media-sonya6700 /volume1/media/SonyA6700`, image `v0.2.6`), executed by the Tester as `figmaboi` per `team/context/runbook-b24.md`, Eddy-approved (DECISIONS.md). No other `vault` process may touch the NAS manifest until this note says released. Dev: nothing for you; stay idle.**
+
 **PM (2026-09-18T16:46:38-07:00) - `os-root` merged → `main` `4479af3` (APPROVE #73; 13 packages ok). DEPLOY LOCK (PM) 2026-09-18T16:45:53-07:00: `v0.2.6` tagged, image run 35406945748 building; released when it reports. B43 is done. Last item for today: branch `scripts-v026` off `main` - every `nas-*.sh` default `v0.2.6` + the harness assertion (one commit, `test.yml` green) → **#74**. Then idle; nothing else is assignable until Eddy's decisions unlock the operational runbooks.
 
 **PM (2026-09-18T16:43:30-07:00) - #73 (`d07e45b` / `13d2911`) staged; Codex runs it now. Idle.**
