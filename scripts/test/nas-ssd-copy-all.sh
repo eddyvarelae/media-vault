@@ -13,15 +13,15 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/ssd-copy-test.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/bin"
 
-IMG="ghcr.io/eddyvarelae/media-vault:v0.2.7"
+IMG="ghcr.io/eddyvarelae/media-vault:v0.2.8"
 
 failures=0
 check() { local desc=$1; shift; if "$@"; then echo "  ok   $desc"; else echo "  FAIL $desc"; failures=$((failures + 1)); fi; }
 count() { grep -cF -- "$1" "$2" || true; }
 same() { diff -q "$1" "$2" > /dev/null; }
 
-check "IMG default is v0.2.7" \
-  grep -qF 'IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.7}"' "$script"
+check "IMG default is v0.2.8" \
+  grep -qF 'IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.8}"' "$script"
 check "kipp requires SSD_SRC (no default)" grep -qF 'SSD_SRC:?' "$script"
 check "one tee, in the log helper only (B35; comments excluded)" \
   test "$(grep -v '^[[:space:]]*#' "$script" | grep -c 'tee -a')" -eq 1

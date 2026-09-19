@@ -110,19 +110,20 @@ func TestOnlyUnverifiedHashesEveryNonVerifiedRowAndNothingElse(t *testing.T) {
 		"new.mov":       "verified",
 		"fixed.mov":     "verified",
 		"still-bad.mov": "MISMATCH",
-		"dup.mov":       "verified",
+		"dup.mov":       "deduped", // B51: by-reference, skipped (not hashed, not promoted)
 		"inv/x.mov":     "verified",
 		"gone.mov":      "missing",
 	}
 	if !reflect.DeepEqual(seen, wantSeen) {
 		t.Errorf("incremental pass touched %v, want %v", seen, wantSeen)
 	}
-	if res.Verified != 4 || res.Mismatch != 1 || res.Missing != 1 || res.Errors != 0 {
+	if res.Verified != 3 || res.Mismatch != 1 || res.Missing != 1 || res.Errors != 0 || res.Deduped != 1 {
 		t.Errorf("result = %+v", res)
 	}
 	// Bytes read = every file the pass hashed, once each: new, fixed,
-	// still-bad, dup's target (ok.mov), inv/x.mov. Not rotten.mov.
-	want := int64(len("just copied") + len("was mismatch, now fine") + len("was mismatch, STILL") + len("verified before") + len("inventoried bytes"))
+	// still-bad, inv/x.mov. Not rotten.mov (verified, skipped), and NOT dup's
+	// target (dup is a deduped row — skipped, not hashed, B51).
+	want := int64(len("just copied") + len("was mismatch, now fine") + len("was mismatch, STILL") + len("inventoried bytes"))
 	if res.BytesRead != want {
 		t.Errorf("BytesRead = %d, want %d", res.BytesRead, want)
 	}
@@ -141,10 +142,14 @@ func TestOnlyUnverifiedHashesEveryNonVerifiedRowAndNothingElse(t *testing.T) {
 	if after["still-bad.mov"].Status != "mismatch" || after["still-bad.mov"].VerifiedAt <= 600 {
 		t.Errorf("still-bad.mov should be re-stamped mismatch: %+v", after["still-bad.mov"])
 	}
-	for _, src := range []string{"new.mov", "fixed.mov", "dup.mov", "inv/x.mov"} {
+	for _, src := range []string{"new.mov", "fixed.mov", "inv/x.mov"} {
 		if after[src].Status != "verified" || after[src].VerifiedAt == 0 || after[src].SHA256 != before[src].SHA256 {
 			t.Errorf("%s not promoted cleanly: %+v", src, after[src])
 		}
+	}
+	// B51: the deduped row is left exactly as it was — not hashed, not promoted.
+	if !reflect.DeepEqual(after["dup.mov"], before["dup.mov"]) || after["dup.mov"].Status != "deduped" {
+		t.Errorf("dup.mov (deduped) touched by verify:\n before %+v\n after  %+v", before["dup.mov"], after["dup.mov"])
 	}
 
 	// A bare pass reads everything and finds the rot the incremental pass
@@ -153,10 +158,11 @@ func TestOnlyUnverifiedHashesEveryNonVerifiedRowAndNothingElse(t *testing.T) {
 	if seenFull["rotten.mov"] != "MISMATCH" || seenFull["ok.mov"] != "verified" || len(seenFull) != 8 {
 		t.Errorf("full pass: %v", seenFull)
 	}
-	// Everything the incremental pass read, plus rotten.mov; ok.mov is one
-	// path for two rows and is read once per run.
-	if full.BytesRead != want+int64(len("verified but ROTTEN")) {
-		t.Errorf("full BytesRead = %d, want %d", full.BytesRead, want+int64(len("verified but ROTTEN")))
+	// Everything the incremental pass read, plus rotten.mov and ok.mov (both
+	// verified rows a full pass re-reads). dup.mov is deduped → still skipped.
+	wantFull := want + int64(len("verified but ROTTEN")+len("verified before"))
+	if full.BytesRead != wantFull {
+		t.Errorf("full BytesRead = %d, want %d", full.BytesRead, wantFull)
 	}
 }
 
@@ -204,5 +210,33 @@ func TestCountVerifiedInDisk(t *testing.T) {
 	all, _ := m.ListByDisk("cam")
 	if len(all) != n+len(unverified) {
 		t.Errorf("all %d != verified %d + unverified %d", len(all), n, len(unverified))
+	}
+}
+
+// TestDedupedRowNotHashedUnderThisRoot is the B51 reproducer: a deduped row's
+// dest_path is the OWNER's, resolved under the owner's root. verify of THIS disk
+// must not hash it under this root (where the file is absent) and report a
+// spurious Missing, and must not touch its status. (Before B51 this was
+// Missing: 1, exit 1 — kipp-backup's one deduped STATUS.BIN.)
+func TestDedupedRowNotHashedUnderThisRoot(t *testing.T) {
+	m := openManifest(t)
+	root := t.TempDir() // this disk's root; the owner's file lives elsewhere → absent here
+	dedup := manifest.Entry{SourceDisk: "cam", SourcePath: "PRIVATE/M4ROOT/STATUS.BIN", DestPath: "STATUS.BIN",
+		Size: 7, MtimeNs: 1, SHA256: "beefcafe", CopiedAt: 2, Status: "deduped"}
+	if err := m.Upsert(dedup); err != nil {
+		t.Fatal(err)
+	}
+	before := rows(t, m)
+	for _, only := range []bool{false, true} {
+		res, seen := run(t, m, root, only)
+		if res.Deduped != 1 || res.Missing != 0 || res.Verified != 0 || res.Mismatch != 0 || res.BytesRead != 0 {
+			t.Errorf("only=%v: result = %+v, want Deduped 1 and nothing else", only, res)
+		}
+		if seen["PRIVATE/M4ROOT/STATUS.BIN"] != "deduped" {
+			t.Errorf("only=%v: row not reported as deduped: %v", only, seen)
+		}
+		if !reflect.DeepEqual(rows(t, m), before) {
+			t.Errorf("only=%v: verify changed the deduped row", only)
+		}
 	}
 }

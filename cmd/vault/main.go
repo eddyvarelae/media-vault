@@ -587,6 +587,11 @@ func runVerify(ctx context.Context, m *manifest.Manifest, args []string) {
 	fmt.Println()
 	fmt.Printf("Verified: %d   Mismatch: %d   Missing: %d   Errors: %d   Bytes read: %s\n",
 		res.Verified, res.Mismatch, res.Missing, res.Errors, human(res.BytesRead))
+	if res.Deduped > 0 {
+		// By-reference rows are not an integrity result of this disk; they are
+		// proved at certify against the owner's verified row (B51).
+		fmt.Printf("Deduped (by reference): %d   (skipped: content verified on another row; proved at certify)\n", res.Deduped)
+	}
 	if res.Mismatch > 0 || res.Missing > 0 || res.Errors > 0 {
 		os.Exit(1)
 	}
