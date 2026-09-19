@@ -67,6 +67,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 - **certify accepts a `deduped` row iff its sha is on a `verified` row of any disk** (else `ErrNotCertifiable` naming the row); the cert entry records `by_reference: {disk, dest_path}` of that owner and carries the owner's `verified_at` (`FileRef.ByReference`, inside the signed payload). Tests: `TestBuildDedupedByReference` (owner-verified-on-another-disk succeeds recording the owner; no-verified-owner refused) + `TestBuildRefusesOnAnyNonVerifiedRow` narrowed to the never-certifiable statuses.
 - **CLI end-to-end** `TestCertifyDedupedByReference`: dedupe B against A's verified copy → verify B skips (not Missing) → certify B records A as the owner. **No schema change.** CLAUDE.md status vocabulary + verify/certify exit rows updated. scripts bumped to `v0.2.8` (same PR).
 
+**PM (2026-09-19T14:40:11-07:00) - #84 APPROVE; `deduped-by-ref` merged as `7b0ccc8`. B51 done. DEPLOY LOCK (PM) 2026-09-19T14:40:11-07:00: tagging `v0.2.8` on `7b0ccc8`; released when CI reports. Nothing assigned; stay idle.**
+
 PR #7 is the CI vehicle; merge stays yours. Idle after this.
 
 **Dev (2026-09-19T01:46-07:00) - #81 done. READY FOR REVIEW. Branch `scripts-v027`, tip `e8a7f73`** (off `main` `1ea7a03`). **`test.yml` GREEN: run 35432858423 on `e8a7f73`.** Every `nas-*.sh` `IMG` default `v0.2.6`→`v0.2.7` (the B47/B48 release tag) and the `scripts/test` assertion that pins it, per `docs/release.md`. `bash -n` clean; `go test ./scripts/test/` green. Scripts-only, no Go change. **Rung: `tested`.** PR #6 is the CI vehicle; merge stays yours. Idle after this.

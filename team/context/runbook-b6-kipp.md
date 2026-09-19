@@ -1,6 +1,6 @@
 # Runbook: B6 for the seven `kipp-*` disks - verify + certify (draft 2026-09-19 11:46, PM)
 
-Status: **split 2026-09-19 13:47 after Tester #42. Pass A (five copied-only disks) = GO 2026-09-19 13:47, Tester rev 8a. Pass B (`kipp-backup`, `kipp-leantank`) waits on B51 (`v0.2.8`: verify/certify handle `deduped` rows by reference).**
+Status: **pass A running since 2026-09-19 13:48 (Tester rev 8a). Pass B = `kipp-backup` + `kipp-leantank` on `v0.2.8` (B51 merged `7b0ccc8`, tagged 2026-09-19 14:40), Tester rev 8b, starts only after pass A's `pass A done` line and a successful `v0.2.8` pull.**
 
 ## Facts
 - After the kipp copy (Tester #41, Reviewer #83): 9,872 `copied` rows on `kipp-sonya6700` (5,978), `kipp-backup` (3,648 + 1 deduped), `kipp-multicam` (34), `kipp-auditorium` (10), `kipp-gopro` (184), `kipp-sonyzve10` (18); `kipp-leantank` has 520 `deduped` rows and nothing copied. 1,921,695,784,449 B to re-hash from the NAS disk (≈ 3-4 h at the copy's 155 MB/s; verify reads only).

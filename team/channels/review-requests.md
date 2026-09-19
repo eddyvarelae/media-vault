@@ -6,11 +6,15 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #84 - B51 `deduped` rows are by-reference in `verify` and `certify` + scripts `v0.2.8` (branch `deduped-by-ref`, code tip `1af07f3`; fix `5e2874d`, scripts `1af07f3`)
+### #84 - B51 `deduped` rows are by-reference in `verify` and `certify` + scripts `v0.2.8` (branch `deduped-by-ref`, code tip `1af07f3`; fix `5e2874d`, scripts `1af07f3`) - **resolved: APPROVE → merged `7b0ccc8`, `v0.2.8`**
 
 **PM (2026-09-19T14:38:15-07:00):** `git diff main...origin/deduped-by-ref -- . ':!team'` (13 files, +238/-37: `internal/verify`, `internal/certify`, `cmd/vault`, CLAUDE.md, scripts + harness). Claims: (1) `verify` skips rows with `status == "deduped"`: not hashed under this root, not counted Missing, status unchanged, counted in a new `Result.Deduped` printed `Deduped (by reference): N`; test `TestDedupedRowNotHashedUnderThisRoot` (owner under another root; incremental and full) fails on `main`. (2) `certify` accepts a `deduped` row iff its sha exists on a `verified` row of any disk, else `ErrNotCertifiable` naming the row; the cert entry carries `by_reference: {disk, dest_path}` and the owner's `verified_at` inside the signed payload; tests `TestBuildDedupedByReference` (both branches) and CLI `TestCertifyDedupedByReference`. (3) No schema change. (4) Scripts default `v0.2.8` + harness. CI `test.yml` 35468912268 green on `1af07f3`; PM at the tip: `gofmt -l` clean, vet ok, 13 packages ok. **This is wrong if:** a `deduped` row can still be hashed/promoted/counted Missing by `verify`, `certify` accepts a `deduped` row without a verified owner or leaves `by_reference` outside the signed payload, any never-certifiable status is now accepted, or the scripts say anything but `v0.2.8`.
 
 Verdict goes below this line.
+
+**Reviewer (Codex, 2026-09-19T14:40:11-07:00) - APPROVE.** `verify.go:82` skips deduped rows before hashing/Missing/status writes in both modes and counts them; `certify.Build` resolves the sha against verified rows across all disks, absent owner → `ErrNotCertifiable` naming the row, every other non-verified status still rejected; owner disk/path + `verified_at` are inside the canonical JSON before signing; the regression tests contradict main's behaviour; no schema change; scripts and harness say `v0.2.8`. Static.
+
+**PM (2026-09-19T14:40:11-07:00):** merged `--no-ff` as **`7b0ccc8`**; PM build/vet/test 13 ok, gofmt clean, bash -n ok. Tagging `v0.2.8`. B51 done.
 
 ### #83 - the kipp copy result (Tester #34-#41; `/Volumes/Scratch1/tester/kipp-live/`: `run3.log`, `manifest-after.db` sha `dd29e115bb007cdd4406dfc24b90b4e6eecf3a894c58f25fe7d989f44c6c2758`; before = `/Volumes/Scratch1/tester/b24-live/manifest-after.db` sha `4da4c724912b035c3ff747aae9a23dd94f50610ef6e7f71abc26ca792f582665`) - **resolved: FINDINGS (1, PM wording) accepted → every number reproduces; released to Eddy**
 
