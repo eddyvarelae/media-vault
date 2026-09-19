@@ -1,12 +1,12 @@
 # Runbook: archive `kipp` (B26) - draft 2026-09-17T21:48:31-07:00, PM
 
-Status: **dry-run 1 ran 2026-09-19 01:02 (Tester #32) and FAILED expectations - 4,804 of 9,872 files would be copied. Blocked on B47 (tool, `v0.2.7`) + B48 (script: `kipp-<folder>` disk names). Script is on the NAS at `/volume1/docker/nas-ssd-copy-all.sh` (sha `1a585f7d…`, to be re-placed after B48). Then dry-run 2.** Step 1 done: `kipp` = `/usb/sdc1`.
+Status: **B47 + B48 merged `d276012` = `v0.2.7` (2026-09-19 01:44). Dry-run 2 (Tester rev 6) once the `v0.2.7` image is published and the script (now `kipp-<folder>` disk names) is re-placed on the NAS. Dry-run 1 (2026-09-19 01:00, Tester #32) would have copied 4,804 of 9,872 - see B47/B48.** Step 1 done: `kipp` = `/usb/sdc1`.
 
 ## Facts (Tester #19, Reviewer #8; #18 for the NAS)
 - `kipp`: 10,393 files / 1.95 TB; **9,872 files / 1,921,695,784,449 B need archiving**; 521 already archived by content (520 = all of `LeanTank/`, 1 in `Backup/`).
 - Folders needing archive: `SonyA6700` 5,978 (582.5 GB), `Backup` 3,648 (260.0 GB), `Multicam` 34 (426.2 GB), `Auditorium` 10 (336.2 GB), `GoPro/DCIM` 184 (230.9 GB), `SonyZVE10` 18 (85.9 GB).
 - **13 files** share `(source_path, size)` with archived rows but differ in content (11 `SonyA6700/DCIM/*.ARW` with wrapped counters, `Backup/PRIVATE/DATABASE/DATABASE.BIN`, two AVCHD/XML index files). Under a **shared** `media-*` disk name a copy **skips** these (`Verified, changed`, `INCOMPLETE:`, exit 1) - the old file always wins. **B48 removes the need for a separate pass**: kipp copies under `kipp-*` disk names, so these are new rows that `--on-collision rename-mtime-year` lands beside the originals in the main pass (step 6 kept only if Eddy wants the 13 handled separately).
-- NAS: `sudo docker run` as `figmaboi`; USB disks appear under `/mnt/@usb/<dev>` (`tars` was `/usb/sdc1` inside the container); image `ghcr.io/eddyvarelae/media-vault:v0.2.6` - every NAS script defaults to it since #74 (`2af22d3`) (`VAULT_IMAGE` overrides only for a one-off).
+- NAS: `sudo docker run` as `figmaboi`; USB disks appear under `/mnt/@usb/<dev>` (`tars` was `/usb/sdc1` inside the container); image `ghcr.io/eddyvarelae/media-vault:v0.2.7` - every NAS script defaults to it since #74 (`2af22d3`) (`VAULT_IMAGE` overrides only for a one-off).
 - Nothing writes `/volume1/media` except a `vault copy` **Eddy** launched (TEAM.md sacred paths). Any `vault` command against the live manifest = a deploy: one at a time, lock note, heartbeat.
 
 ## Steps

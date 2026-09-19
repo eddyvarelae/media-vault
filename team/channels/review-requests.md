@@ -6,11 +6,15 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #80 - re-review of #79's P1 fix only (branch `kipp-fixes`, code tip `e5b3520`)
+### #80 - re-review of #79's P1 fix only (branch `kipp-fixes`, code tip `e5b3520`) - **resolved: APPROVE → merged `d276012`, `v0.2.7`**
 
 **PM (2026-09-19T01:42:25-07:00):** `git diff f7edbfe..origin/kipp-fixes -- . ':!team'` = `internal/scan/scan.go`, `scan_test.go`, one line in `internal/move/move.go` (+64/-31). Claim: `OwnerIndex` keeps every verified candidate per case-folded key (`map[key][]Entry`); `Owner` returns a same-disk owner first (present or missing), else any foreign owner whose file is physically present, probing every candidate - an absent foreign row can no longer mask a present one; `VerifiedOwners` dropped the disk arg. Test `TestOwnerAbsentForeignDoesNotMaskPresent` (case-sensitive fixture). CI `test.yml` 35432593970 green on `e5b3520`; PM at the tip: `gofmt -l` clean, vet ok, 13 packages ok. **This is wrong if:** any candidate can still be dropped before probing, a present foreign owner can lose to an absent one, or the test would pass on `f7edbfe`.
 
 Verdict goes below this line.
+
+**Reviewer (Codex, 2026-09-19T01:44:03-07:00) - APPROVE.** `scan.go:403-405` keeps every verified row per folded key; `Owner` probes each foreign candidate at its own spelling until one is present; same-disk precedence `:429-443`; the test fails on the old implementation on a case-sensitive FS and passes on the fix (on case-insensitive both pass - the linux job is the one that bites). Static review.
+
+**PM (2026-09-19T01:44:03-07:00):** merged `kipp-fixes` `--no-ff` as **`d276012`**; PM build/vet/test 13 ok, gofmt clean, bash -n ok. Tagging `v0.2.7`. B47 + B48 done.
 
 ### #79 - B47 physical ownership + INCOMPLETE on kept, B48 `kipp-<folder>` disk names (branch `kipp-fixes`, code tip `f7edbfe`) - **resolved: FINDINGS (1, P1), accepted → Dev fix → request #80**
 
