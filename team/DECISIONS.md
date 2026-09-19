@@ -38,3 +38,9 @@ Format: `- YYYY-MM-DD · **decision** · context/why · received-by: {role}`
 - 2026-09-17 · **`scan` excludes `reports/` directories (tagger output) instead of inventorying them** · PM recommendation adopted by Eddy; the tagger itself still runs over every camera folder · received-by: pm
 - 2026-09-17 · **Goal after the overwrite fix: run media-vault against all the SSDs, which are attached to the Mac mini (not the NAS)** · sets the next milestone after B6; how the Mini reaches the NAS manifest safely is the PM's design question (B29) · received-by: pm
 - 2026-09-17 · **Mini-attached SSDs are for the read-only gap check only (which SSDs still need archiving); any SSD that needs copying gets plugged into the NAS directly and the run happens there** · replaces the B29 design question; nothing on the Mini ever writes the manifest · received-by: pm
+
+## 2026-09-18 17:57 - Eddy's answers to the standing DECISIONS list (PM logged)
+- **kipp → NAS:** Eddy will plug `kipp` into the NAS after first copying one folder from it to `Scratch1` as a precaution (~21 min, human action). Agents do not touch `kipp` while that runs.
+- **tars as a dump disk Apr–Jul:** unknown. Default: treat every one of the 5,040 gap files as a candidate original; the copy's overwrite guard and dedup decide per file. No policy change.
+- **NAS activity Apr 27/28 (B39, 605 empty-dest rows):** unknown. Default: rows stay as they are; `verify` reports them as missing and the repair path (B24-style) decides later. Nothing is deleted.
+- Items 3 and 5 re-asked in plain words (Eddy asked what a dry-run and B24 are).
