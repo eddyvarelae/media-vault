@@ -7,6 +7,9 @@ set -u
 
 # Pinned release tag; override with VAULT_IMAGE=... for a one-off run.
 IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.6}"
+# docker command; vaultagent sets DOCKER="sudo -n docker" (its only password-less
+# sudo). Unquoted at the call sites on purpose so a multi-word value word-splits.
+DOCKER="${DOCKER:-docker}"
 LOG="${VAULT_LOG:-/volume1/docker/verify-certify.log}"
 # Certificates live beside the manifest, never inside the tree they certify:
 # `vault certify` refuses an output path under the archive root (B25), and a
@@ -45,7 +48,7 @@ for entry in "${disks[@]}"; do
 
   log ""
   log "[$(date)] === VERIFY $disk at $root ==="
-  if ! docker run --rm -v /volume1:/volume1 -e VAULT_CONFIG=/volume1/docker/vault-nas-config "$IMG" \
+  if ! $DOCKER run --rm -v /volume1:/volume1 -e VAULT_CONFIG=/volume1/docker/vault-nas-config "$IMG" \
       verify "$disk" "$root" >> "$LOG" 2>&1; then
     log "[$(date)] VERIFY FAILED for $disk — skipping certify"
     failures=$((failures+1))
@@ -53,7 +56,7 @@ for entry in "${disks[@]}"; do
   fi
 
   log "[$(date)] === CERTIFY $disk ==="
-  if ! docker run --rm -v /volume1:/volume1 -e VAULT_CONFIG=/volume1/docker/vault-nas-config "$IMG" \
+  if ! $DOCKER run --rm -v /volume1:/volume1 -e VAULT_CONFIG=/volume1/docker/vault-nas-config "$IMG" \
       certify "$disk" "$CERTS/$disk.cert.json" --root "$root" >> "$LOG" 2>&1; then
     log "[$(date)] CERTIFY FAILED for $disk"
     failures=$((failures+1))

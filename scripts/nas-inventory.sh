@@ -10,18 +10,21 @@ set -e
 
 # Pinned release tag; override with VAULT_IMAGE=... for a one-off run.
 IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.6}"
+# docker command; vaultagent sets DOCKER="sudo -n docker" (its only password-less
+# sudo). Unquoted at the call sites on purpose so a multi-word value word-splits.
+DOCKER="${DOCKER:-docker}"
 HOME_ROOT=/volume1/@home/figmaboi
 CFG=/volume1/docker/vault-nas-config
 
 echo "[$(date)] starting inventory pass"
-docker pull "$IMG"
+$DOCKER pull "$IMG"
 
 run_inv() {
   local name="$1"
   local relpath="$2"
   echo
   echo "[$(date)] === inventory $name ($relpath) ==="
-  docker run --rm \
+  $DOCKER run --rm \
     -v "$HOME_ROOT/$relpath":/sources:ro \
     -v "$CFG":/config \
     "$IMG" inventory "$name" /sources
@@ -35,19 +38,19 @@ run_inv nas-recycle     "#recycle"
 
 echo
 echo "[$(date)] === DEDUP REPORT (>= 1 MiB) ==="
-docker run --rm \
+$DOCKER run --rm \
   -v "$CFG":/config \
   "$IMG" dedup --min-size 1048576
 
 echo
 echo "[$(date)] === UNIQUE TO #recycle (would be lost if emptied) ==="
-docker run --rm \
+$DOCKER run --rm \
   -v "$CFG":/config \
   "$IMG" unique nas-recycle
 
 echo
 echo "[$(date)] === UNIQUE TO Temp Footage ==="
-docker run --rm \
+$DOCKER run --rm \
   -v "$CFG":/config \
   "$IMG" unique nas-tempfootage
 

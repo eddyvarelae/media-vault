@@ -146,6 +146,25 @@ PATH="$work/bin:$PATH" VAULT_LOG="$work/src.log" SSD_SRC=/usb/other bash "$scrip
 expected tars /usb/other "$IMG" "" > "$work/src.want"
 check "SSD_SRC overrides the tars source root" same "$work/src.want" "$calls"
 
+# DOCKER knob (B46): the script calls $DOCKER unquoted, so a caller can route
+# docker through another command (vaultagent uses DOCKER="sudo -n docker"). Point
+# DOCKER at a recording stub that is NOT named "docker" — the bare-docker stub on
+# PATH must stay untouched — and give it a two-word value so the unquoted
+# word-split is proven (the extra word precedes "run").
+altcalls="$work/alt.calls"; : > "$altcalls"
+cat > "$work/bin/altdocker" <<STUB
+#!/bin/bash
+printf '%s\n' "\$@" >> "$altcalls"
+exit 0
+STUB
+chmod +x "$work/bin/altdocker"
+pathcalls="$work/pathdocker.calls"; : > "$pathcalls"; stub 0 "$pathcalls"
+PATH="$work/bin:$PATH" VAULT_LOG="$work/alt.log" DOCKER="$work/bin/altdocker WRAP" bash "$script" tars > /dev/null 2>&1
+check "DOCKER knob: bare docker on PATH was never called" test ! -s "$pathcalls"
+check "DOCKER knob: run reached the DOCKER stub" grep -qxF -- 'run' "$altcalls"
+check "DOCKER knob: --rm reached the DOCKER stub" grep -qxF -- '--rm' "$altcalls"
+check "DOCKER knob: the two-word value word-split (WRAP precedes run)" test "$(head -1 "$altcalls")" = "WRAP"
+
 echo
 if [ "$failures" -ne 0 ]; then echo "$failures check(s) failed"; exit 1; fi
 echo "all checks passed"

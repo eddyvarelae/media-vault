@@ -7,14 +7,16 @@
 #   kipp — the kipp USB disk, 7 folders, deduped against the archive by content;
 #          SSD_SRC is required (the disk's container path, runbook step 1).
 #
-#   SSD_SRC=/usb/sdd1 sudo -E nohup ./nas-ssd-copy-all.sh kipp >> /volume1/docker/kipp-copy.log 2>&1 &
-#   sudo -E nohup ./nas-ssd-copy-all.sh tars >> /volume1/docker/tars-copy.log 2>&1 &
-#   SSD_SRC=/usb/sdd1 DRY_RUN=1 sudo -E ./nas-ssd-copy-all.sh kipp
+#   SSD_SRC=/usb/sdd1 DOCKER="sudo -n docker" nohup ./nas-ssd-copy-all.sh kipp >> /volume1/docker/kipp-copy.log 2>&1 &
+#   DOCKER="sudo -n docker" nohup ./nas-ssd-copy-all.sh tars >> /volume1/docker/tars-copy.log 2>&1 &
+#   SSD_SRC=/usb/sdd1 DOCKER="sudo -n docker" DRY_RUN=1 ./nas-ssd-copy-all.sh kipp
 #     (plans only: no archive file, no manifest row — but the log is appended
 #      and every container still opens the live manifest, B31)
 #
-# docker needs root on the NAS, hence sudo -E; the outer >> is opened by the
-# invoking shell, so that user must be able to write the log.
+# The script is not run as root: the NAS account vaultagent's only password-less
+# sudo is /usr/bin/docker, so docker runs via DOCKER="sudo -n docker" (no
+# sudo -E of the whole script) and the outer >> is opened by the invoking shell,
+# so that user must be able to write the log. DOCKER defaults to bare docker.
 #
 # SSD_SRC is the disk's path INSIDE the container (/mnt/@usb is mounted at /usb
 # read-only). For kipp there is no default on purpose: the wrong disk under a
@@ -25,6 +27,9 @@ set -u
 label="${1-}"
 # Pinned release tag; override with VAULT_IMAGE=... for a one-off run.
 IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.6}"
+# docker command; vaultagent sets DOCKER="sudo -n docker" (its only password-less
+# sudo). Unquoted at the call site on purpose so a multi-word value word-splits.
+DOCKER="${DOCKER:-docker}"
 case "$label" in
   tars) SRC="${SSD_SRC:-/usb/sdc1}"; dedupe="" ;;
   kipp) SRC="${SSD_SRC:?set SSD_SRC to the container path of the kipp disk, e.g. /usb/sdd1 (runbook step 1)}"; dedupe="--dedupe-content" ;;
@@ -63,7 +68,7 @@ run_copy() {
   # recorded as a deduped row, not copied again. --on-collision
   # rename-mtime-year: a name clash with different bytes lands beside the
   # original. A verified file is never overwritten regardless.
-  if ! docker run --rm \
+  if ! $DOCKER run --rm \
     -v /volume1:/volume1 \
     -v /mnt/@usb:/usb:ro \
     -e VAULT_CONFIG=/volume1/docker/vault-nas-config \

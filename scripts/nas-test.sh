@@ -6,18 +6,23 @@ set -e
 
 # Pinned release tag; override with VAULT_IMAGE=... for a one-off run.
 IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.6}"
+# docker command. This smoke test is admin-run and already sudo's (sudo -v /
+# sudo mkdir below), so its default keeps sudo docker; override with
+# DOCKER="docker" on a root shell. Unquoted at the call sites on purpose so a
+# multi-word value word-splits.
+DOCKER="${DOCKER:-sudo docker}"
 SRC=/mnt/@usb/sdc1/Test
 DST=/volume1/docker/vault-nas-test
 CFG=/volume1/docker/vault-nas-config
 
 echo "=== sudo cache + pull ==="
 sudo -v
-sudo docker pull "$IMG"
+$DOCKER pull "$IMG"
 sudo mkdir -p "$DST" "$CFG"
 
 echo
 echo "=== SCAN ==="
-sudo docker run --rm \
+$DOCKER run --rm \
   -v "$SRC":/sources:ro \
   -v "$DST":/dest \
   -v "$CFG":/config \
@@ -25,7 +30,7 @@ sudo docker run --rm \
 
 echo
 echo "=== COPY ==="
-time sudo docker run --rm \
+time $DOCKER run --rm \
   -v "$SRC":/sources:ro \
   -v "$DST":/dest \
   -v "$CFG":/config \
@@ -33,14 +38,14 @@ time sudo docker run --rm \
 
 echo
 echo "=== VERIFY ==="
-time sudo docker run --rm \
+time $DOCKER run --rm \
   -v "$DST":/dest \
   -v "$CFG":/config \
   "$IMG" verify tars /dest
 
 echo
 echo "=== CERTIFY ==="
-sudo docker run --rm \
+$DOCKER run --rm \
   -v "$DST":/dest \
   -v "$CFG":/config \
   "$IMG" certify tars /config/tars-test.cert.json --root /dest   # beside the manifest, never under /dest (B25)
