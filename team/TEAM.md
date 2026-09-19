@@ -57,6 +57,8 @@ Every seat writes to channel files regardless of how it runs. Defaults:
 
 The human reads in bursts, hours apart, often from a phone. **Every PM message starts with the day, date and time** (`Thu 2026-09-17 18:12`, from `date "+%a %Y-%m-%d %H:%M"`) **and leads with what the human must do** - a short list, or "nothing". Then the narrative, one timestamped line per event. When an earlier ACTION becomes moot, the next message says so explicitly ("the patch is dead - nothing to confirm"). A dozen untimestamped updates are unreadable; the human should never have to ask "what happened with X?" about something the PM already resolved.
 
+**Quiet mode (v2.4, 2026-09-19).** The full shape above costs real money when every event triggers it. So: at most **two** full messages after the human's last reply. After that the PM is in *quiet mode*: each event is **one line** — `HH:MM · what happened · what changed` — with no restated decisions, no restated pending list, no closing offers; events that need nothing from the human are batched into one line per ~10 minutes. A **new decision or a new human action** breaks quiet mode for exactly one full message, then quiet again. When the human replies, or asks for a *summary*, the PM answers with a compact summary: one line per open thread, then the DECISIONS NEEDED list once. Seat traffic never reaches the human as a message; the channels are the record. The timestamps stay on every line so a stalled loop is visible as a gap, not as silence.
+
 ## Machines that run things unattended (daemon-machine hygiene)
 
 Learned on a Mac Mini running a scheduled-runner app; generalize to any always-on box:
