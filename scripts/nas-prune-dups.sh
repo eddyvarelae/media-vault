@@ -12,6 +12,9 @@
 set -u
 # Pinned release tag; override with VAULT_IMAGE=... for a one-off run.
 IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.6}"
+# docker command; vaultagent sets DOCKER="sudo -n docker" (its only password-less
+# sudo). Unquoted at the call sites on purpose so a multi-word value word-splits.
+DOCKER="${DOCKER:-docker}"
 CFG=/volume1/docker/vault-nas-config
 LOG=/volume1/docker/prune.log
 LIST=/volume1/docker/prune-list.tsv
@@ -31,7 +34,7 @@ get_root() {
 echo "=== prune started $(date) ===" | tee -a "$LOG"
 
 # Step 1: pull the deletion list from the manifest in one query.
-docker run --rm -v "$CFG":/config --entrypoint sh "$IMG" -c \
+$DOCKER run --rm -v "$CFG":/config --entrypoint sh "$IMG" -c \
   "apk add --no-cache sqlite > /dev/null 2>&1 && sqlite3 -separator '|' /config/manifest.db \"
     SELECT a.source_disk, a.source_path, b.source_path, a.sha256, a.size
     FROM files a
@@ -102,7 +105,7 @@ if [ ${#DELETIONS[@]} -gt 0 ]; then
     path_esc=${path//\'/\'\'}
     SQL+="DELETE FROM files WHERE source_disk='$disk' AND source_path='$path_esc';"
   done
-  docker run --rm -v "$CFG":/config --entrypoint sh "$IMG" -c \
+  $DOCKER run --rm -v "$CFG":/config --entrypoint sh "$IMG" -c \
     "apk add --no-cache sqlite > /dev/null 2>&1 && sqlite3 /config/manifest.db \"$SQL\""
   echo "Removed $DELS rows from manifest" | tee -a "$LOG"
 fi
