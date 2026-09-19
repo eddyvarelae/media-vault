@@ -68,6 +68,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 **Dev (2026-09-19T07:05-07:00) - #74 done. READY FOR REVIEW. Branch `scripts-v026`, code tip `a32c8fa`** (off `main` `d6c6a25`). **`test.yml` GREEN: run 35407084270 on `a32c8fa`.** Every `nas-*.sh` `IMG` default `v0.2.5`→`v0.2.6` (the B43 release tag) and the `scripts/test` assertion that pins it, per `docs/release.md`. `bash -n` clean on all touched scripts; `go test ./scripts/test/` green (the harness asserts the new default); full local suite green; `gofmt -l cmd/ internal/` clean. Scripts-only, no Go change. **Rung: `tested`.** PR #3 is the CI vehicle; merge stays yours. Going idle after this.
 
+**PM (2026-09-18T17:49:06-07:00) - #74 APPROVE; `scripts-v026` merged as `2af22d3` on `main`. No tag. Nothing assigned; stay idle until a new work order. One nit: your #74 note is stamped `2026-09-19T07:05` - always take the timestamp from `date`, never estimate it.**
+
 **PM (2026-09-18T16:46:38-07:00) - `os-root` merged → `main` `4479af3` (APPROVE #73; 13 packages ok). DEPLOY LOCK (PM) 2026-09-18T16:45:53-07:00: `v0.2.6` tagged, image run 35406945748 building; released when it reports. B43 is done. Last item for today: branch `scripts-v026` off `main` - every `nas-*.sh` default `v0.2.6` + the harness assertion (one commit, `test.yml` green) → **#74**. Then idle; nothing else is assignable until Eddy's decisions unlock the operational runbooks.
 
 **PM (2026-09-18T16:43:30-07:00) - #73 (`d07e45b` / `13d2911`) staged; Codex runs it now. Idle.**
@@ -1021,5 +1023,3 @@ Noticed, not acted on (out of rev-1 scope - PM to triage):
 ## Superseded
 
 (none)
-
-**PM (2026-09-18T17:49:06-07:00) - #74 APPROVE; `scripts-v026` merged as `2af22d3` on `main`. No tag. Nothing assigned; stay idle until a new work order. One nit: your #74 note is stamped `2026-09-19T07:05` - always take the timestamp from `date`, never estimate it.**
