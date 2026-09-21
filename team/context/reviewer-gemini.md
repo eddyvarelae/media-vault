@@ -1,0 +1,25 @@
+# Second Reviewer: Gemini CLI (drafted 2026-09-20 22:02, PM) - numbers first, code only after calibration
+
+Why: Codex on the subscription gives ~12 reviews per 5-h window and a weekly cap (hit 2026-09-19 16:39 → Tue 09-22 12:21). Eddy chose Gemini CLI as a second non-Claude reviewer (2026-09-20 22:0x). A local 7B model was tried and ruled out (DECISIONS 2026-09-20: it approved with invented numbers).
+
+## Install / auth
+- `npm install -g @google/gemini-cli` → `gemini` 0.60.0 at `/opt/homebrew/bin/gemini` (installed 2026-09-20 22:01 by the PM).
+- Auth is **Eddy's**: run `gemini` in his own Terminal, "Login with Google", finish in the browser, `/quit`. Credentials live in `~/.gemini/`; no agent sees or types them. No API key in any env an agent reads.
+
+## Invocation (PM only, one at a time, never against the live checkout)
+```
+S=<scratchpad>/review-copy            # a throwaway clone of the repo at the reviewed SHA
+cd $S && git fetch -q origin && git checkout -q <main-sha>
+gemini -m gemini-2.5-pro --sandbox --approval-mode yolo -p "<the request text + the same rules Codex gets>" </dev/null > <scratch>/reviewN-gemini.log 2>&1
+```
+- `--sandbox` on macOS = Seatbelt: writes confined to the working dir (the throwaway clone), reads open (it needs `/Volumes/Scratch1/tester/*` and `~/mounts/docker/vault-certs/*`). `--approval-mode yolo` lets it run `python3`/`sqlite3`/`git diff` without prompts. Never run it in `~/Projects/media-vault`.
+- `--approval-mode plan` is read-only and cannot run the recount commands, so it is not enough for a Reviewer.
+- The verdict is whatever it prints last; the PM records it in `review-requests.md` as **`Reviewer (Gemini, <ts>)`** so the record shows which reviewer said what.
+
+## Calibration (must pass before any verdict counts)
+1. Numbers: re-run a **closed** numeric request whose artifacts still exist and whose recorded verdict is known - #83 (kipp copy: `kipp-live/run3.log`, `b24-live/manifest-after.db` before, `kipp-live/manifest-after.db` after). Pass = it recomputes 9,872 / 521 / 5,012 / 78,128 = 67,735 + 10,393 with 0 pre-existing rows changed, by actually running the commands (the log must show them). Any invented number = fail, ruled out like the local model.
+2. Code: re-run a closed code request with a recorded FINDINGS - #79 (kipp-fixes `f7edbfe`: the P1 "absent foreign owner masks a present one" at `scan.go:410/:443`). Pass = it finds that defect (or a strictly stronger one) without being told. Until it passes this, Gemini holds **numeric verdicts only**; code reviews stay with Codex.
+
+## Scope once calibrated
+- Numbers (Tester witness recounts, rule-8 claims): Gemini or Codex, whichever has budget.
+- Code: Codex; Gemini only if calibration 2 passed, and then Codex re-reviews anything that ships a release tag when it has budget.
