@@ -6,11 +6,15 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #86 - tars dry-run 1 (`v0.2.8`, `media-*` names) vs gap report (Tester #45-#47; `/Volumes/Scratch1/tester/tars-dryrun/`: `run.log`, `plan.txt`, `table.txt`, `gap-tars.tsv`, `manifest-pre.db` sha `c6991843b870d2e537698202bf047a42c9b86cded23fb43338055faa4e467cc8`)
+### #86 - tars dry-run 1 (`v0.2.8`, `media-*` names) vs gap report (Tester #45-#47; `/Volumes/Scratch1/tester/tars-dryrun/`: `run.log`, `plan.txt`, `table.txt`, `gap-tars.tsv`, `manifest-pre.db` sha `c6991843b870d2e537698202bf047a42c9b86cded23fb43338055faa4e467cc8`) - **resolved: FINDINGS (1, PM path typo) accepted; every number reproduces → B52**
 
 **PM (2026-09-21T00:36:49-07:00):** Not a code review. Recompute from `run.log`: per folder would-copy 0 / 24 / 2,418 / 244 = 2,686 files (1,064.3 GiB), kept "Verified, changed" 1 (GoPro `DCIM/leinfo.sav`) + 2,357 (SonyA6700) = 2,358 (42.2 GiB), `INCOMPLETE:` in GoPro and SonyA6700 with those counts, per-folder exits 0/1/1/0, script `2 folder(s) FAILED`; reconcile against `gap-tars.tsv` (5,040 files / 1,188,169,289,959 B): 2,686 planned = 2,682 gap files + 4 SonyZVE10 THMBNL JPGs already archived by content (`media-sonyzve10:PRIVATE/M4ROOT/THMBNL/C2589T01..C2592T01.JPG`), 2,358 unplanned gap files = the kept set exactly; manifest sha unchanged. **Also answer:** does the tars folder table in `scripts/nas-ssd-copy-all.sh` on `main` copy under `media-<folder>` without `--dedupe-content` (cite lines)? **This is wrong if:** any count differs, the reconciliation leaves any gap file unaccounted, or the script already uses `tars-*`/dedupe.
 
 Verdict goes below this line.
+
+**Reviewer (Codex, 2026-09-21T00:38:47-07:00) - FINDINGS (1).** `tars-dryrun/gap-tars.tsv` does not exist; the file is `/Volumes/Scratch1/tester/gap-tars.tsv` (PM's path). With it: per folder 0 / 24 / 2,418 / 244 = 2,686 planned (1,142,835,148,769 B = 1,064.3 GiB), kept 1 + 2,357 = 2,358 (45,335,111,553 B = 42.2 GiB), INCOMPLETE GoPro 1 / SonyA6700 2,357, exits 0/1/1/0, script 2 FAILED exit 1; 2,686 planned = 2,682 gap + 4 archived THMBNL JPGs (970,363 B, hashes match verified rows); 5,040 gap = 2,682 + 2,358, exact path-set equality, 0 unaccounted; bytes reconcile to 1,188,169,289,959 exactly; manifest sha unchanged. Script: yes - `scripts/nas-ssd-copy-all.sh:87-90` select `media-*` names, `:34` leaves dedupe empty, `:75-76` pass them without `--dedupe-content`.
+
+**PM (2026-09-21T00:38:47-07:00):** accepted (the finding is my path). Numbers released; B52 stands as specified.
 
 ### #85 - B6 for `kipp`: passes A (`v0.2.7`) + B (`v0.2.8`), and the rule-8 claim (Tester #43-#44; `/Volumes/Scratch1/tester/b6-kipp/`: `passA.log`, `passB.log`, `manifest-after-passA.db` sha `24feabd654e6e21c66be5c35de4e8465789e32a7f975553826662d97ad54024b`, `manifest-after.db` sha `6c430225eb90156ec209e4083031ac9ea3c551b1e43188b7620aa5cffb325dcd`; before = `kipp-live/manifest-after.db` sha `dd29e115bb007cdd4406dfc24b90b4e6eecf3a894c58f25fe7d989f44c6c2758`; certs at `/volume1/docker/vault-certs/kipp-*.cert.json` - readable over SMB at `~/mounts/docker/vault-certs/`) - **resolved: APPROVE; rule-8 claim = YES**
 
