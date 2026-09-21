@@ -6,11 +6,15 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #87 - B52 `tars` label under `tars-<folder>`, deduped, `SSD_SRC` required (branch `tars-names`, code tip `ffc5924`)
+### #87 - B52 `tars` label under `tars-<folder>`, deduped, `SSD_SRC` required (branch `tars-names`, code tip `ffc5924`) - **resolved: APPROVE → merged `5c50696`**
 
 **PM (2026-09-21T00:44:13-07:00):** `git diff main...origin/tars-names -- . ':!team'`: `scripts/nas-ssd-copy-all.sh` + its harness only (+39/-19). Claims: the `tars` case sets `SRC="${SSD_SRC:?…}"` (no default) and `dedupe="--dedupe-content"`; the four `run_copy` lines use `tars-djiflip`, `tars-gopro`, `tars-sonya6700`, `tars-sonyzve10` with the same prefixes/rules and the same `/volume1/media/<Folder>` roots; `--on-collision rename-mtime-year` unchanged; kipp table untouched; header usage lines updated; harness asserts the four names, the dedupe flag, and that a missing `SSD_SRC` fails fast for `tars`. CI `test.yml` 35574152657 green; PM at the tip: `bash -n` ok, `go test ./scripts/test/` ok. No Go change → no tag. **This is wrong if:** any tars folder still uses a `media-*` name, dedupe is not passed, `SSD_SRC` still defaults, the kipp table changed, or the harness would pass with a `media-*` name.
 
 Verdict goes below this line.
+
+**Reviewer (Codex, 2026-09-21T00:47:45-07:00) - APPROVE.** Two shell files, +39/-19; four `tars-*` names, dedupe on, `SSD_SRC` required; roots, collision policy, kipp table unchanged; `bash -n` ok; harness passes and fails under six independent mutations (each name → `media-*`, dedupe removed, default restored). CI not reachable from the sandbox; its temporary snapshot could not reproduce the package-wide run (backup-build assertions need git metadata).
+
+**PM (2026-09-21T00:47:45-07:00):** merged `--no-ff` as **`5c50696`**; `bash -n` + `scripts/test` ok. No tag. B52 done.
 
 ### #86 - tars dry-run 1 (`v0.2.8`, `media-*` names) vs gap report (Tester #45-#47; `/Volumes/Scratch1/tester/tars-dryrun/`: `run.log`, `plan.txt`, `table.txt`, `gap-tars.tsv`, `manifest-pre.db` sha `c6991843b870d2e537698202bf047a42c9b86cded23fb43338055faa4e467cc8`) - **resolved: FINDINGS (1, PM path typo) accepted; every number reproduces → B52**
 

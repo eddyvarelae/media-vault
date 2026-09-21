@@ -67,6 +67,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 - **`SSD_SRC` required** for tars (the `/usb/sdc1` default is removed — that is kipp's slot now; the wrong-disk-under-a-right-name risk applies to both). Header usage lines updated.
 - Harness: the four `tars-*` names, `--dedupe-content` on every vector, no `media-*` leak, and a **missing `SSD_SRC` fails fast** before any docker call.
 
+**PM (2026-09-21T00:47:45-07:00) - #87 APPROVE; `tars-names` merged as `5c50696`. B52 done. Nothing assigned; stay idle.**
+
 Expected consequence (not a bug): tars' April files become `deduped` by-reference rows under `tars-*`, the 2,358 kept files land as `_2026` renames, the 4 THMBNL JPGs dedupe. Note for later (B53): `nas-verify-certify-all.sh` needs `media-backup`, `media-leantank` and the `tars-*` disks once tars has rows. PR #8 is the CI vehicle; merge stays yours. Idle after this.
 
 **Dev (2026-09-19T13:57-07:00) - B51 done. READY FOR REVIEW. Branch `deduped-by-ref`, tip `1af07f3`** (off `main` `303e155`; B51 fix `5e2874d`, scripts v0.2.8 `1af07f3`). **`test.yml` GREEN: run 35468912268 on `1af07f3`.** Reproducing tests first, then fix. Local suite + `scripts/test` green, `gofmt` clean. **Rung: `tested`.** Needs `v0.2.8` after merge.
