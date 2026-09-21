@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #87 - B52 `tars` label under `tars-<folder>`, deduped, `SSD_SRC` required (branch `tars-names`, code tip `ffc5924`)
+
+**PM (2026-09-21T00:44:13-07:00):** `git diff main...origin/tars-names -- . ':!team'`: `scripts/nas-ssd-copy-all.sh` + its harness only (+39/-19). Claims: the `tars` case sets `SRC="${SSD_SRC:?…}"` (no default) and `dedupe="--dedupe-content"`; the four `run_copy` lines use `tars-djiflip`, `tars-gopro`, `tars-sonya6700`, `tars-sonyzve10` with the same prefixes/rules and the same `/volume1/media/<Folder>` roots; `--on-collision rename-mtime-year` unchanged; kipp table untouched; header usage lines updated; harness asserts the four names, the dedupe flag, and that a missing `SSD_SRC` fails fast for `tars`. CI `test.yml` 35574152657 green; PM at the tip: `bash -n` ok, `go test ./scripts/test/` ok. No Go change → no tag. **This is wrong if:** any tars folder still uses a `media-*` name, dedupe is not passed, `SSD_SRC` still defaults, the kipp table changed, or the harness would pass with a `media-*` name.
+
+Verdict goes below this line.
+
 ### #86 - tars dry-run 1 (`v0.2.8`, `media-*` names) vs gap report (Tester #45-#47; `/Volumes/Scratch1/tester/tars-dryrun/`: `run.log`, `plan.txt`, `table.txt`, `gap-tars.tsv`, `manifest-pre.db` sha `c6991843b870d2e537698202bf047a42c9b86cded23fb43338055faa4e467cc8`) - **resolved: FINDINGS (1, PM path typo) accepted; every number reproduces → B52**
 
 **PM (2026-09-21T00:36:49-07:00):** Not a code review. Recompute from `run.log`: per folder would-copy 0 / 24 / 2,418 / 244 = 2,686 files (1,064.3 GiB), kept "Verified, changed" 1 (GoPro `DCIM/leinfo.sav`) + 2,357 (SonyA6700) = 2,358 (42.2 GiB), `INCOMPLETE:` in GoPro and SonyA6700 with those counts, per-folder exits 0/1/1/0, script `2 folder(s) FAILED`; reconcile against `gap-tars.tsv` (5,040 files / 1,188,169,289,959 B): 2,686 planned = 2,682 gap files + 4 SonyZVE10 THMBNL JPGs already archived by content (`media-sonyzve10:PRIVATE/M4ROOT/THMBNL/C2589T01..C2592T01.JPG`), 2,358 unplanned gap files = the kept set exactly; manifest sha unchanged. **Also answer:** does the tars folder table in `scripts/nas-ssd-copy-all.sh` on `main` copy under `media-<folder>` without `--dedupe-content` (cite lines)? **This is wrong if:** any count differs, the reconciliation leaves any gap file unaccounted, or the script already uses `tars-*`/dedupe.
