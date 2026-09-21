@@ -6,7 +6,7 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #90 - the tars copy result (Tester #51-#52; `/Volumes/Scratch1/tester/tars-live/`: `run.log` (bytes 871,631→1,179,589 of the NAS log), `manifest-after.db` sha `e3e7fcae216b7ca6e0d29180c8609663a238b297e48b01192411361ea543b78e`; before = `/Volumes/Scratch1/tester/b6-media/manifest-after.db` sha `1d0fb1f407005f47a5c03b75c8520bf908b3ec34d65c88e3f98a1d9837a95d68`)
+### #90 - the tars copy result (Tester #51-#52; `/Volumes/Scratch1/tester/tars-live/`: `run.log` (bytes 871,631→1,179,589 of the NAS log), `manifest-after.db` sha `e3e7fcae216b7ca6e0d29180c8609663a238b297e48b01192411361ea543b78e`; before = `/Volumes/Scratch1/tester/b6-media/manifest-after.db` sha `1d0fb1f407005f47a5c03b75c8520bf908b3ec34d65c88e3f98a1d9837a95d68`) - **resolved: FINDINGS (1) → addendum #90b APPROVE; tars copy numbers released**
 
 **PM (2026-09-21T15:27:19-07:00):** Not a code review. Recompute, read-only: (1) `run.log`: `Done. Copied` 0/0, 24/24, 4775/4775, 240/240; `Recorded … deduped` 183, 159, 2051, 320; 5,039 `ok (sha` lines; `Verified, changed: 0` ×4; the only SKIPPED/INCOMPLETE/FAILED lines concern GoPro `DCIM/leinfo.sav`; `1 folder(s) FAILED`. (2) Manifest before → after: 78,128 → 85,880 = +7,752, all on `tars-djiflip/gopro/sonya6700/sonyzve10`; **every pre-existing row byte-identical** (by primary key, all columns); per disk: djiflip deduped 183; gopro copied 24 + deduped 159; sonya6700 copied 4,775 + deduped 2,051; sonyzve10 copied 240 + deduped 320; sum(size) of the 5,039 copied rows = 1,188,169,289,951 B (= gap 1,188,169,289,959 − 8); copied rows with `_2026` in `dest_path` = 2,357, all `tars-sonya6700`; each of the 2,713 deduped rows' sha exists on a verified non-tars row; no row for `leinfo.sav`. **This is wrong if:** any count differs, any pre-existing row changed, a deduped sha has no verified twin, or anything but `leinfo.sav` failed.
 
@@ -15,6 +15,10 @@ Verdict goes below this line.
 **Reviewer (Codex, 2026-09-21T15:29:24-07:00) - FINDINGS (1).** Every count reproduces (shas 2/2; Done 0/24/4,775/240; deduped 183/159/2,051/320; 5,039 `ok`; `Verified, changed: 0` ×4; 78,128 → 85,880, 78,128 identical across all columns; copied bytes 1,188,169,289,951; `_2026` 2,357 all sonya6700; 2,713/2,713 deduped twins verified; tags/metadata unchanged) **but the run-3 log slice never names the skipped file** - it says `1 files SKIPPED — dst path already exists` without a path - so "the only failure is `leinfo.sav`" cannot be verified from the inputs given.
 
 **PM (2026-09-21T15:29:24-07:00):** accepted - the identity must be derived, not assumed. Addendum #90b: gap set (`/Volumes/Scratch1/tester/gap-tars.tsv`, 5,040 paths) minus the `source_path`s of the 5,039 copied `tars-*` rows in `manifest-after.db` must equal exactly {`GoPro/DCIM/leinfo.sav`}; Codex re-asked.
+
+**Reviewer (Codex, #90b, 2026-09-21T15:30:37-07:00) - APPROVE.** Gap set (`category='GAP'`, 5,040 unique `relpath`) minus the 5,039 unique copied `tars-*` `source_path`s = exactly {`GoPro/DCIM/leinfo.sav`} (8 B); copied minus gap = empty.
+
+**PM (2026-09-21T15:30:37-07:00):** accepted. The tars copy is closed: 5,039 copied + 2,713 deduped, one 8-byte out-of-scope skip, identity derived. Pending Eddy's go: rev 14 (B6 for `tars-*`).
 
 ### #89 - tars dry-run 2 (`v0.2.8`, `tars-*` names, dedupe) vs gap report - the numbers Eddy will launch on (Tester #49; `/Volumes/Scratch1/tester/tars-dryrun2/`: `run.log`, `plan.txt`, `table.txt`; gap file `/Volumes/Scratch1/tester/gap-tars.tsv`; manifest sha unchanged `1d0fb1f407005f47a5c03b75c8520bf908b3ec34d65c88e3f98a1d9837a95d68`) - **resolved: APPROVE → tars cleared for launch (expect 1 FAILED = `leinfo.sav`)**
 
