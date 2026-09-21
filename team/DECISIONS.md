@@ -71,3 +71,6 @@ Eddy pasted the runbook-kipp step-5 line in a Mini Terminal at 07:36; PM confirm
 
 ## 2026-09-19 16:40 - Reviewer unavailable until Tue 2026-09-22 12:21 (Codex weekly limit) - PM ruling
 - Nothing merges to `main`, no number reaches Eddy as verified, and no SSD is wiped on the strength of a `witnessed`-only claim until #85 is answered. Tester work that needs no verdict to *run* (read-only gap checks, dry-runs) may proceed; launches wait. Eddy asked whether to wait or to provide an alternative non-Claude reviewer.
+
+## 2026-09-20 21:57 - Local reviewer trial FAILED; a 7B model on the Mini is not a Reviewer (PM ruling)
+Eddy ran `codex exec --oss --local-provider ollama -m qwen2.5-coder:7b` on review #85 (numbers only). Result: **APPROVE with invented numbers** ("PASS: 123 / FAIL: 45", "Before: 1234 / After: 1240"), commands never executed (2,391 tokens total; it "queried" log files as SQLite tables). Ruling: no local model on the 16 GB M4 Mini may hold the Reviewer seat, for numbers or code. A tool that says APPROVE without looking is worse than no reviewer. #85 waits for Codex (Tue 2026-09-22 12:21). Revisit only with ≥48 GB unified memory and a 30B-class coder model, and then only after it passes a known-answer test (re-review a closed request and reproduce the recorded verdict).
