@@ -4,15 +4,16 @@ Why: Codex on the subscription gives ~12 reviews per 5-h window and a weekly cap
 
 ## Install / auth
 - `npm install -g @google/gemini-cli` → `gemini` 0.60.0 at `/opt/homebrew/bin/gemini` (installed 2026-09-20 22:01 by the PM).
-- Auth is **Eddy's**: run `gemini` in his own Terminal, "Login with Google", finish in the browser, `/quit`. Credentials live in `~/.gemini/`; no agent sees or types them. No API key in any env an agent reads.
+- Auth is **Eddy's**: the Google-login path is dead for individuals in this client ("migrate to Antigravity"), so it is an **AI Studio API key** (new format, prefix `AQ.`, 53 chars, project 672992288007) in `~/.gemini/.env` as `GEMINI_API_KEY=…`, mode 600, written from the clipboard with `pbpaste` (a `read -s` paste got mangled by bracketed-paste escapes). `~/.gemini/settings.json` has `security.auth.selectedType = "gemini-api-key"` (the PM set it; the default `oauth-personal` fails). No agent prints that file; the PM checks only prefix + length. Validated 2026-09-20 22:24: models endpoint 200, headless `-p` reply OK.
 
 ## Invocation (PM only, one at a time, never against the live checkout)
 ```
 S=<scratchpad>/review-copy            # a throwaway clone of the repo at the reviewed SHA
 cd $S && git fetch -q origin && git checkout -q <main-sha>
-gemini -m gemini-2.5-pro --sandbox --approval-mode yolo -p "<the request text + the same rules Codex gets>" </dev/null > <scratch>/reviewN-gemini.log 2>&1
+GEMINI_CLI_TRUST_WORKSPACE=true gemini -m gemini-2.5-pro --sandbox --approval-mode yolo -p "<the request text + the same rules Codex gets>" </dev/null > <scratch>/reviewN-gemini.log 2>&1
 ```
 - `--sandbox` on macOS = Seatbelt: writes confined to the working dir (the throwaway clone), reads open (it needs `/Volumes/Scratch1/tester/*` and `~/mounts/docker/vault-certs/*`). `--approval-mode yolo` lets it run `python3`/`sqlite3`/`git diff` without prompts. Never run it in `~/Projects/media-vault`.
+- `GEMINI_CLI_TRUST_WORKSPACE=true` is required in headless mode (otherwise it refuses an untrusted directory). No `timeout` binary on macOS: cap with `perl -e 'alarm N; exec @ARGV' gemini …`. `ripgrep` is not installed (it falls back to its own grep; fine).
 - `--approval-mode plan` is read-only and cannot run the recount commands, so it is not enough for a Reviewer.
 - The verdict is whatever it prints last; the PM records it in `review-requests.md` as **`Reviewer (Gemini, <ts>)`** so the record shows which reviewer said what.
 
