@@ -6,6 +6,12 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
+### #88 - B6 reduced sweep of the eight `media-*` disks (Tester rev 10; `/Volumes/Scratch1/tester/b6-media/`: `sweep.log`, `manifest-after.db` sha `1d0fb1f407005f47a5c03b75c8520bf908b3ec34d65c88e3f98a1d9837a95d68`; before = `/Volumes/Scratch1/tester/tars-dryrun/manifest-pre.db` sha `c6991843b870d2e537698202bf047a42c9b86cded23fb43338055faa4e467cc8`; certs `~/mounts/docker/vault-certs/media-*.cert.json` (8) and `archive-2026-09-02/` (5))
+
+**PM (2026-09-21T00:49:51-07:00):** Not a code review. Recompute: (1) `sweep.log`: `Verified: 30` and `Verified: 520` with 0 mismatch/missing/errors, verify+certify exits 0 for those two, certify-only exits 0 for the other six, `media reduced sweep done`; (2) manifest before → after: 78,128 rows, 0 added/removed, exactly 550 rows changed (`media-backup` 30 + `media-leantank` 520) and only `verified_at`; 0 status changes; `kipp-*` and the six cron disks 0 changed; all 67,729 `media-*` rows `verified`; (3) the eight certs: `file_count` = each disk's verified rows; sums 67,729 files / 9,013,285,913,186 B; Ed25519 signatures valid ×8 under the repo verifier, same key as the `kipp-*` certs; the five archived Sep-2 certs still validate. **This is wrong if:** any count differs, any row outside the 550 changed, or a signature fails.
+
+Verdict goes below this line.
+
 ### #87 - B52 `tars` label under `tars-<folder>`, deduped, `SSD_SRC` required (branch `tars-names`, code tip `ffc5924`) - **resolved: APPROVE → merged `5c50696`**
 
 **PM (2026-09-21T00:44:13-07:00):** `git diff main...origin/tars-names -- . ':!team'`: `scripts/nas-ssd-copy-all.sh` + its harness only (+39/-19). Claims: the `tars` case sets `SRC="${SSD_SRC:?…}"` (no default) and `dedupe="--dedupe-content"`; the four `run_copy` lines use `tars-djiflip`, `tars-gopro`, `tars-sonya6700`, `tars-sonyzve10` with the same prefixes/rules and the same `/volume1/media/<Folder>` roots; `--on-collision rename-mtime-year` unchanged; kipp table untouched; header usage lines updated; harness asserts the four names, the dedupe flag, and that a missing `SSD_SRC` fails fast for `tars`. CI `test.yml` 35574152657 green; PM at the tip: `bash -n` ok, `go test ./scripts/test/` ok. No Go change → no tag. **This is wrong if:** any tars folder still uses a `media-*` name, dedupe is not passed, `SSD_SRC` still defaults, the kipp table changed, or the harness would pass with a `media-*` name.
