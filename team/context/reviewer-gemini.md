@@ -10,7 +10,7 @@ Why: Codex on the subscription gives ~12 reviews per 5-h window and a weekly cap
 ```
 S=<scratchpad>/review-copy            # a throwaway clone of the repo at the reviewed SHA
 cd $S && git fetch -q origin && git checkout -q <main-sha>
-GEMINI_CLI_TRUST_WORKSPACE=true gemini -m gemini-2.5-pro --sandbox --approval-mode yolo -p "<the request text + the same rules Codex gets>" </dev/null > <scratch>/reviewN-gemini.log 2>&1
+GEMINI_CLI_TRUST_WORKSPACE=true gemini -m gemini-3.8-flash --sandbox --approval-mode yolo -p "<the request text + the same rules Codex gets>" </dev/null > <scratch>/reviewN-gemini.log 2>&1
 ```
 - `--sandbox` on macOS = Seatbelt: writes confined to the working dir (the throwaway clone), reads open (it needs `/Volumes/Scratch1/tester/*` and `~/mounts/docker/vault-certs/*`). `--approval-mode yolo` lets it run `python3`/`sqlite3`/`git diff` without prompts. Never run it in `~/Projects/media-vault`.
 - `GEMINI_CLI_TRUST_WORKSPACE=true` is required in headless mode (otherwise it refuses an untrusted directory). No `timeout` binary on macOS: cap with `perl -e 'alarm N; exec @ARGV' gemini …`. `ripgrep` is not installed (it falls back to its own grep; fine).
@@ -20,6 +20,11 @@ GEMINI_CLI_TRUST_WORKSPACE=true gemini -m gemini-2.5-pro --sandbox --approval-mo
 ## Calibration (must pass before any verdict counts)
 1. Numbers: re-run a **closed** numeric request whose artifacts still exist and whose recorded verdict is known - #83 (kipp copy: `kipp-live/run3.log`, `b24-live/manifest-after.db` before, `kipp-live/manifest-after.db` after). Pass = it recomputes 9,872 / 521 / 5,012 / 78,128 = 67,735 + 10,393 with 0 pre-existing rows changed, by actually running the commands (the log must show them). Any invented number = fail, ruled out like the local model.
 2. Code: re-run a closed code request with a recorded FINDINGS - #79 (kipp-fixes `f7edbfe`: the P1 "absent foreign owner masks a present one" at `scan.go:410/:443`). Pass = it finds that defect (or a strictly stronger one) without being told. Until it passes this, Gemini holds **numeric verdicts only**; code reviews stay with Codex.
+
+## Calibration record
+- **Cal 1 (numbers) PASSED 2026-09-20 22:30** on `gemini-3.8-flash`: re-review of #83 - it ran `grep` on `run3.log` and a python `sqlite3` script with `mode=ro&immutable=1`, and reproduced every number (shas, 67,735 → 78,128, 0 pre-existing rows changed, per-disk statuses, 5,012 `_2026`) **and** the same single finding Codex recorded (7 `never overwritten` summary lines vs the PM's "0"). Log `scratchpad/cal1-gemini.log`.
+- **Cal 2 (code) NOT RUN** - free-tier daily quota (20 requests/day/model) exhausted; `gemini-3.1-pro-preview` has **zero** free quota. Needs billing on project 672992288007. Until it passes, Gemini holds numeric verdicts only.
+- Model facts 2026-09-20 22:30: `gemini-2.5-pro` retired for new keys; use `gemini-3.8-flash` (free, calibrated for numbers) or `gemini-3.1-pro-preview` (billing). Free tier = 20 req/day/model - one review is ~10-20 requests, so budget one review per model per day without billing.
 
 ## Scope once calibrated
 - Numbers (Tester witness recounts, rule-8 claims): Gemini or Codex, whichever has budget.
