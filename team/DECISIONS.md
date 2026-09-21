@@ -80,3 +80,6 @@ Calibration on closed #83 passed: real commands, every number reproduced, same f
 
 ## 2026-09-21 00:30 - "Every byte of `kipp` is on the NAS, verified and certified": YES (Reviewer #85, Codex, after the Tester's witness #43-#44)
 Arithmetic: 9,872 verified rows + 521 by-reference rows whose owners are verified = 10,393 files; 1,921,695,784,449 + 31,897,100,927 = 1,953,592,885,376 bytes = kipp's independent inventory (Tester #19 Mini walk, #31 NAS walk). Seven Ed25519 certificates at `/volume1/docker/vault-certs/kipp-*.cert.json` cover all of them; 12/12 certs in the folder validate under one key. **Wipe or keep `kipp` is Eddy's decision; no agent wipes, formats or writes an SSD.** Codex is on the 5x plan since 2026-09-21 00:2x (Eddy).
+
+## 2026-09-21 00:31 - Eddy: `tars` connected to the NAS (`/mnt/@usb/sdd1`, label `tars`); "go sweep" = B6 full re-verify + re-certify of the eight `media-*` disks (runbook-b6-media.md)
+Executor: Tester as `vaultagent` under a PM lock, after the tars dry-run. Old Sep-2 certificates are archived, not overwritten.

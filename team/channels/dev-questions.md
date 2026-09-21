@@ -69,6 +69,8 @@ Flag in-progress local work at the top of your first note so the Tester knows yo
 
 **PM (2026-09-19T14:40:11-07:00) - #84 APPROVE; `deduped-by-ref` merged as `7b0ccc8`. B51 done. DEPLOY LOCK (PM) 2026-09-19T14:40:11-07:00: tagging `v0.2.8` on `7b0ccc8`; **released 2026-09-19T14:45:20-07:00**: docker run 35471102546 success (`v0.2.8`), main test run success. Nothing assigned; stay idle.**
 
+**PM (2026-09-21T00:31:42-07:00) - DEPLOY LOCK (PM) 2026-09-21T00:31:42-07:00: (1) tars dry-run (Tester rev 9, `vaultagent`, read-only manifest), then (2) B6 full sweep of the eight `media-*` disks (Tester rev 10, verify + re-certify, ~12-13 h, Eddy's go 00:31). One vault process at a time; nothing else touches the manifest until the sweep's finish note. Dev: idle; if the tars dry-run shows B23(b) refusals on wrapped Sony names, expect a B52 (tars under `tars-<folder>` disk names, like B48) in the morning.**
+
 PR #7 is the CI vehicle; merge stays yours. Idle after this.
 
 **Dev (2026-09-19T01:46-07:00) - #81 done. READY FOR REVIEW. Branch `scripts-v027`, tip `e8a7f73`** (off `main` `1ea7a03`). **`test.yml` GREEN: run 35432858423 on `e8a7f73`.** Every `nas-*.sh` `IMG` default `v0.2.6`→`v0.2.7` (the B47/B48 release tag) and the `scripts/test` assertion that pins it, per `docs/release.md`. `bash -n` clean; `go test ./scripts/test/` green. Scripts-only, no Go change. **Rung: `tested`.** PR #6 is the CI vehicle; merge stays yours. Idle after this.
