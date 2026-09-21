@@ -1,6 +1,6 @@
 # Runbook: B6 full sweep of the six `media-*` disks - verify (full) + re-certify (draft 2026-09-21 00:28, PM)
 
-Status: **GO from Eddy 2026-09-21 00:31 ("connected, go sweep")**. Runs after the tars dry-run (rev 9) finishes - one vault process at a time. Tester rev 10.
+Status: **REDUCED 2026-09-21 00:35 (Tester #46: the root weekly cron re-hashed six disks clean on Sep 20)** - tonight: full verify+certify for `media-backup` + `media-leantank`, certify-only for the other six on `v0.2.8`. The full 13-h sweep is kept below for any night Eddy wants it.
 
 ## Why
 The archive's rows were last verified 2026-09-13 (single newest row) and certified 2026-09-02. A full sweep turns that into "verified today" and catches any bit-rot or torn write since (B40 was found by a tail scan, not by verify - the sweep is the real check).
