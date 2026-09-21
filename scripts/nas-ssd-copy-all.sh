@@ -3,12 +3,13 @@
 # copying in parallel just thrashes the SATA pool. The <label> picks the source
 # root and the per-folder table (B26/B36, team/context/runbook-kipp.md):
 #
-#   tars — the 4 active cameras from tars (USB), source /usb/sdc1 by default.
+#   tars — the 4 active cameras from the tars SSD, 4 folders, deduped against the
+#          archive by content; SSD_SRC is required (the disk's container path).
 #   kipp — the kipp USB disk, 7 folders, deduped against the archive by content;
 #          SSD_SRC is required (the disk's container path, runbook step 1).
 #
 #   SSD_SRC=/usb/sdd1 DOCKER="sudo -n docker" nohup ./nas-ssd-copy-all.sh kipp >> /volume1/docker/kipp-copy.log 2>&1 &
-#   DOCKER="sudo -n docker" nohup ./nas-ssd-copy-all.sh tars >> /volume1/docker/tars-copy.log 2>&1 &
+#   SSD_SRC=/usb/sdc1 DOCKER="sudo -n docker" nohup ./nas-ssd-copy-all.sh tars >> /volume1/docker/tars-copy.log 2>&1 &
 #   SSD_SRC=/usb/sdd1 DOCKER="sudo -n docker" DRY_RUN=1 ./nas-ssd-copy-all.sh kipp
 #     (plans only: no archive file, no manifest row — but the log is appended
 #      and every container still opens the live manifest, B31)
@@ -19,9 +20,10 @@
 # so that user must be able to write the log. DOCKER defaults to bare docker.
 #
 # SSD_SRC is the disk's path INSIDE the container (/mnt/@usb is mounted at /usb
-# read-only). For kipp there is no default on purpose: the wrong disk under a
-# right-looking folder name is how content gets copied under the wrong
-# provenance. tars is the fixed /usb/sdc1 unless SSD_SRC overrides it.
+# read-only). Required for BOTH labels, with no default on purpose: the wrong
+# disk under a right-looking folder name is how content gets copied under the
+# wrong provenance. (tars is usually /usb/sdc1 and kipp another slot, but the
+# operator names the container path every run.)
 set -u
 
 label="${1-}"
@@ -31,7 +33,7 @@ IMG="${VAULT_IMAGE:-ghcr.io/eddyvarelae/media-vault:v0.2.8}"
 # sudo). Unquoted at the call site on purpose so a multi-word value word-splits.
 DOCKER="${DOCKER:-docker}"
 case "$label" in
-  tars) SRC="${SSD_SRC:-/usb/sdc1}"; dedupe="" ;;
+  tars) SRC="${SSD_SRC:?set SSD_SRC to the container path of the tars disk, e.g. /usb/sdc1}"; dedupe="--dedupe-content" ;;
   kipp) SRC="${SSD_SRC:?set SSD_SRC to the container path of the kipp disk, e.g. /usb/sdd1 (runbook step 1)}"; dedupe="--dedupe-content" ;;
   *)    echo "usage: $(basename "$0") <label>   (label: tars | kipp)" >&2; exit 2 ;;
 esac
@@ -84,10 +86,17 @@ run_copy() {
 # Per-folder routing flags reproduce the layout each camera already has under
 # /volume1/media (runbook step 2, Tester #23).
 table_tars() {
-  run_copy media-djiflip   DJIFlip   --prefix DCIM --rule MP4=Videos --rule SRT=FlightLogs --rule JPG=Photos
-  run_copy media-gopro     GoPro     --prefix DCIM --rule MP4=Videos --rule LRV=Videos --rule THM=Videos --rule JPG=Photos --rule sav=Other
-  run_copy media-sonya6700 SonyA6700
-  run_copy media-sonyzve10 SonyZVE10
+  # tars copies under its own disk names (tars-<folder>) into the same
+  # /volume1/media/<Folder> trees (B52, like B48 for kipp): its wrapped Sony
+  # 4-digit names clash with rows already written from other disks, and under a
+  # shared (disk, source_path) key the B23(b) guard refuses them. Under tars-*
+  # they are new rows: --dedupe-content records the files already archived by
+  # content as deduped rows, and --on-collision rename-mtime-year lands the rest
+  # beside the originals. B6 verify/certify must include the tars-* disks.
+  run_copy tars-djiflip   DJIFlip   --prefix DCIM --rule MP4=Videos --rule SRT=FlightLogs --rule JPG=Photos
+  run_copy tars-gopro     GoPro     --prefix DCIM --rule MP4=Videos --rule LRV=Videos --rule THM=Videos --rule JPG=Photos --rule sav=Other
+  run_copy tars-sonya6700 SonyA6700
+  run_copy tars-sonyzve10 SonyZVE10
 }
 table_kipp() {
   # kipp is a distinct physical source: its folders copy under their OWN disk

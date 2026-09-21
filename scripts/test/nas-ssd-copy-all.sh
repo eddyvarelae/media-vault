@@ -59,7 +59,7 @@ VAULT_CONFIG=/volume1/docker/vault-nas-config
 $img
 copy"
   case "$label" in
-    tars) pairs="media-djiflip:DJIFlip media-gopro:GoPro media-sonya6700:SonyA6700 media-sonyzve10:SonyZVE10"; dedupe="" ;;
+    tars) pairs="tars-djiflip:DJIFlip tars-gopro:GoPro tars-sonya6700:SonyA6700 tars-sonyzve10:SonyZVE10"; dedupe="--dedupe-content" ;;
     kipp) pairs="kipp-sonya6700:SonyA6700 kipp-backup:Backup kipp-multicam:Multicam kipp-auditorium:Auditorium kipp-gopro:GoPro kipp-sonyzve10:SonyZVE10 kipp-leantank:LeanTank"; dedupe="--dedupe-content" ;;
   esac
   for pair in $pairs; do
@@ -93,13 +93,24 @@ check "kipp without SSD_SRC exits non-zero" test $? -ne 0
 check "kipp without SSD_SRC never called docker" test ! -s "$calls"
 check "kipp without SSD_SRC names the variable" grep -q "SSD_SRC" "$work/nosrc.out"
 
-# tars real run: 4 ordered vectors, source /usb/sdc1 by default, no dedupe.
+# tars without SSD_SRC: refuses before any docker call (B52 — no default).
+calls="$work/tnosrc.calls"; : > "$calls"; stub 0 "$calls"
+( unset SSD_SRC; PATH="$work/bin:$PATH" VAULT_LOG="$work/tnosrc.log" bash "$script" tars > "$work/tnosrc.out" 2>&1 )
+check "tars without SSD_SRC exits non-zero" test $? -ne 0
+check "tars without SSD_SRC never called docker" test ! -s "$calls"
+check "tars without SSD_SRC names the variable" grep -q "SSD_SRC" "$work/tnosrc.out"
+
+# tars real run: 4 ordered vectors, source from SSD_SRC, --dedupe-content each (B52).
 calls="$work/tars.calls"; log="$work/tars.log"; : > "$calls"; stub 0 "$calls"
-PATH="$work/bin:$PATH" VAULT_LOG="$log" bash "$script" tars >> "$log" 2>&1
+PATH="$work/bin:$PATH" VAULT_LOG="$log" SSD_SRC=/usb/sdc1 bash "$script" tars >> "$log" 2>&1
 check "tars: exits 0 when every copy succeeds" test $? -eq 0
 expected tars /usb/sdc1 "$IMG" "" > "$work/tars.want"
 if ! diff -u "$work/tars.want" "$calls" > "$work/tars.diff"; then cat "$work/tars.diff"; fi
-check "tars: four vectors, in order, argument by argument (no --dedupe-content)" test ! -s "$work/tars.diff"
+check "tars: four vectors, in order, argument by argument (with --dedupe-content)" test ! -s "$work/tars.diff"
+# B52: tars copies under its own disk names (tars-<folder>), never media-<folder>.
+check "tars: disk names are tars-* (tars-sonya6700 present)" grep -qxF 'tars-sonya6700' "$calls"
+check "tars: no media-* disk name leaks in" test "$(grep -cxE 'media-[a-z0-9]+' "$calls")" -eq 0
+check "tars: --dedupe-content reached every vector (4)" test "$(grep -cxF -- '--dedupe-content' "$calls")" -eq 4
 check "tars: four per-folder done lines" test "$(grep -Ec '\] [A-Za-z0-9]+ done$' "$log")" -eq 4
 check "tars: start line names the label and source" grep -qF "starting tars → media copy from /usb/sdc1" "$log"
 check "tars: final line reports 0 failures" grep -q 'all tars copies done — 0 folder(s) FAILED' "$log"
@@ -129,7 +140,7 @@ check "DRY_RUN=1: the start line says so" grep -q '(DRY RUN)' "$log"
 
 # Failures: each FAILED folder logged, the pass continues, exit non-zero, count.
 calls="$work/fail.calls"; log="$work/fail.log"; : > "$calls"; stub 1 "$calls"
-PATH="$work/bin:$PATH" VAULT_LOG="$log" bash "$script" tars > /dev/null 2>&1
+PATH="$work/bin:$PATH" VAULT_LOG="$log" SSD_SRC=/usb/sdc1 bash "$script" tars > /dev/null 2>&1
 check "stub exit 1: tars exits non-zero" test $? -ne 0
 check "stub exit 1: all four still attempted, in order" same "$work/tars.want" "$calls"
 check "stub exit 1: four per-folder FAILED lines" test "$(grep -Ec '\] [A-Za-z0-9]+ FAILED$' "$log")" -eq 4
@@ -139,15 +150,15 @@ check "stub exit 1: final line counts 4" grep -q 'all tars copies done — 4 fol
 
 # VAULT_IMAGE override: same vectors with the other image.
 calls="$work/img.calls"; : > "$calls"; stub 0 "$calls"
-PATH="$work/bin:$PATH" VAULT_LOG="$work/img.log" VAULT_IMAGE=example/vault:sha-abc bash "$script" tars > /dev/null 2>&1
+PATH="$work/bin:$PATH" VAULT_LOG="$work/img.log" VAULT_IMAGE=example/vault:sha-abc SSD_SRC=/usb/sdc1 bash "$script" tars > /dev/null 2>&1
 expected tars /usb/sdc1 example/vault:sha-abc "" > "$work/img.want"
 check "VAULT_IMAGE overrides the tag in every vector" same "$work/img.want" "$calls"
 
-# SSD_SRC override for tars: the source root moves off /usb/sdc1.
+# SSD_SRC sets the tars source root (required, no default — B52).
 calls="$work/src.calls"; : > "$calls"; stub 0 "$calls"
 PATH="$work/bin:$PATH" VAULT_LOG="$work/src.log" SSD_SRC=/usb/other bash "$script" tars > /dev/null 2>&1
 expected tars /usb/other "$IMG" "" > "$work/src.want"
-check "SSD_SRC overrides the tars source root" same "$work/src.want" "$calls"
+check "SSD_SRC sets the tars source root" same "$work/src.want" "$calls"
 
 # DOCKER knob (B46): the script calls $DOCKER unquoted, so a caller can route
 # docker through another command (vaultagent uses DOCKER="sudo -n docker"). Point
@@ -162,7 +173,7 @@ exit 0
 STUB
 chmod +x "$work/bin/altdocker"
 pathcalls="$work/pathdocker.calls"; : > "$pathcalls"; stub 0 "$pathcalls"
-PATH="$work/bin:$PATH" VAULT_LOG="$work/alt.log" DOCKER="$work/bin/altdocker WRAP" bash "$script" tars > /dev/null 2>&1
+PATH="$work/bin:$PATH" VAULT_LOG="$work/alt.log" SSD_SRC=/usb/sdc1 DOCKER="$work/bin/altdocker WRAP" bash "$script" tars > /dev/null 2>&1
 check "DOCKER knob: bare docker on PATH was never called" test ! -s "$pathcalls"
 check "DOCKER knob: run reached the DOCKER stub" grep -qxF -- 'run' "$altcalls"
 check "DOCKER knob: --rm reached the DOCKER stub" grep -qxF -- '--rm' "$altcalls"
