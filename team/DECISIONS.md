@@ -77,3 +77,6 @@ Eddy ran `codex exec --oss --local-provider ollama -m qwen2.5-coder:7b` on revie
 
 ## 2026-09-20 22:30 - Gemini CLI (`gemini-3.8-flash`, Eddy's AI Studio key) is the second Reviewer for NUMERIC verdicts (PM ruling after calibration)
 Calibration on closed #83 passed: real commands, every number reproduced, same finding as Codex. Recorded as `Reviewer (Gemini, <ts>)` in review-requests.md. Code reviews stay with Codex until Gemini passes the #79 code calibration (needs the pro model = billing). Free-tier quota is 20 requests/day/model, resets 00:00 PT; #85 runs on it at 00:07 unless Eddy enables billing first.
+
+## 2026-09-21 00:30 - "Every byte of `kipp` is on the NAS, verified and certified": YES (Reviewer #85, Codex, after the Tester's witness #43-#44)
+Arithmetic: 9,872 verified rows + 521 by-reference rows whose owners are verified = 10,393 files; 1,921,695,784,449 + 31,897,100,927 = 1,953,592,885,376 bytes = kipp's independent inventory (Tester #19 Mini walk, #31 NAS walk). Seven Ed25519 certificates at `/volume1/docker/vault-certs/kipp-*.cert.json` cover all of them; 12/12 certs in the folder validate under one key. **Wipe or keep `kipp` is Eddy's decision; no agent wipes, formats or writes an SSD.** Codex is on the 5x plan since 2026-09-21 00:2x (Eddy).
