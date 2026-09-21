@@ -6,11 +6,15 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #88 - B6 reduced sweep of the eight `media-*` disks (Tester rev 10; `/Volumes/Scratch1/tester/b6-media/`: `sweep.log`, `manifest-after.db` sha `1d0fb1f407005f47a5c03b75c8520bf908b3ec34d65c88e3f98a1d9837a95d68`; before = `/Volumes/Scratch1/tester/tars-dryrun/manifest-pre.db` sha `c6991843b870d2e537698202bf047a42c9b86cded23fb43338055faa4e467cc8`; certs `~/mounts/docker/vault-certs/media-*.cert.json` (8) and `archive-2026-09-02/` (5))
+### #88 - B6 reduced sweep of the eight `media-*` disks (Tester rev 10; `/Volumes/Scratch1/tester/b6-media/`: `sweep.log`, `manifest-after.db` sha `1d0fb1f407005f47a5c03b75c8520bf908b3ec34d65c88e3f98a1d9837a95d68`; before = `/Volumes/Scratch1/tester/tars-dryrun/manifest-pre.db` sha `c6991843b870d2e537698202bf047a42c9b86cded23fb43338055faa4e467cc8`; certs `~/mounts/docker/vault-certs/media-*.cert.json` (8) and `archive-2026-09-02/` (5)) - **resolved: APPROVE → B6 media part closed**
 
 **PM (2026-09-21T00:49:51-07:00):** Not a code review. Recompute: (1) `sweep.log`: `Verified: 30` and `Verified: 520` with 0 mismatch/missing/errors, verify+certify exits 0 for those two, certify-only exits 0 for the other six, `media reduced sweep done`; (2) manifest before → after: 78,128 rows, 0 added/removed, exactly 550 rows changed (`media-backup` 30 + `media-leantank` 520) and only `verified_at`; 0 status changes; `kipp-*` and the six cron disks 0 changed; all 67,729 `media-*` rows `verified`; (3) the eight certs: `file_count` = each disk's verified rows; sums 67,729 files / 9,013,285,913,186 B; Ed25519 signatures valid ×8 under the repo verifier, same key as the `kipp-*` certs; the five archived Sep-2 certs still validate. **This is wrong if:** any count differs, any row outside the 550 changed, or a signature fails.
 
 Verdict goes below this line.
+
+**Reviewer (Codex, 2026-09-21T00:51:55-07:00) - APPROVE.** Shas 2/2; verified 30 + 520, 0/0/0; verify exits 0 ×2, certify exits 0 ×8, marker ×1. Manifest 78,128 → 78,128, 0 added/removed; exactly 550 rows changed, `verified_at` only (backup 30, leantank 520); 0 status changes; kipp and the six cron disks 0 changed; media verified 67,729/67,729. Cert counts = verified rows per disk; total 67,729 files / 9,013,285,913,186 B; signatures media 8/8, kipp 7/7, archived 5/5 valid; one public key.
+
+**PM (2026-09-21T00:51:55-07:00):** accepted. B6 for the eight `media-*` disks closed (verification: six by the Sep-20 cron pass, two tonight; certificates current).
 
 ### #87 - B52 `tars` label under `tars-<folder>`, deduped, `SSD_SRC` required (branch `tars-names`, code tip `ffc5924`) - **resolved: APPROVE → merged `5c50696`**
 
