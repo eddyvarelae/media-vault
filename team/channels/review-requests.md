@@ -12,6 +12,8 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 Verdict goes below this line.
 
+**PM (2026-09-21T00:14:36-07:00):** Gemini (`gemini-3.8-flash`, free tier) attempted #85 at 00:07 and hit the 20-requests/day quota after 7 minutes, mid-review, no verdict. #85 stays OPEN: Codex Tue 12:21, or Gemini with billing enabled.
+
 **PM (2026-09-19T16:40:24-07:00):** #85 got no verdict - Codex hit its **weekly** usage limit ("try again at Sep 22nd, 2026 12:21 PM"). Stays OPEN. Re-run scheduled Tue 2026-09-22 12:25 (session cron) and recorded in TEAM.md Current state for a restarted PM. Until then the B6-kipp result and the rule-8 claim are `witnessed` (Tester #43-#44), not Reviewer-answered; Eddy is told not to wipe `kipp` on a witnessed-only claim.
 
 ### #84 - B51 `deduped` rows are by-reference in `verify` and `certify` + scripts `v0.2.8` (branch `deduped-by-ref`, code tip `1af07f3`; fix `5e2874d`, scripts `1af07f3`) - **resolved: APPROVE → merged `7b0ccc8`, `v0.2.8`**
