@@ -1,4 +1,4 @@
-# Runbook: archive `kipp` (B26) - draft 2026-09-17T21:48:31-07:00, PM
+# Runbook: archive `kipp` (B26) - also the template used for `tars` (B36, 2026-09-21: `SSD_SRC=/usb/sdc1`, label `tars`, script `nas-ssd-copy-all.sh tars`, expected `1 folder(s) FAILED` = GoPro `leinfo.sav`) - draft 2026-09-17T21:48:31-07:00, PM
 
 Status: **CLEARED FOR LAUNCH 2026-09-19 02:00** - dry-run 2 on `v0.2.7` (Tester #33, Reviewer #82) = the gap report exactly. Waiting on Eddy's go and on who types step 5.
 
