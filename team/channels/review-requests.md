@@ -6,11 +6,15 @@ How to run: from the repo root, `codex "You are the Reviewer for media-vault. Re
 
 ## OPEN REQUESTS
 
-### #89 - tars dry-run 2 (`v0.2.8`, `tars-*` names, dedupe) vs gap report - the numbers Eddy will launch on (Tester #49; `/Volumes/Scratch1/tester/tars-dryrun2/`: `run.log`, `plan.txt`, `table.txt`; gap file `/Volumes/Scratch1/tester/gap-tars.tsv`; manifest sha unchanged `1d0fb1f407005f47a5c03b75c8520bf908b3ec34d65c88e3f98a1d9837a95d68`)
+### #89 - tars dry-run 2 (`v0.2.8`, `tars-*` names, dedupe) vs gap report - the numbers Eddy will launch on (Tester #49; `/Volumes/Scratch1/tester/tars-dryrun2/`: `run.log`, `plan.txt`, `table.txt`; gap file `/Volumes/Scratch1/tester/gap-tars.tsv`; manifest sha unchanged `1d0fb1f407005f47a5c03b75c8520bf908b3ec34d65c88e3f98a1d9837a95d68`) - **resolved: APPROVE → tars cleared for launch (expect 1 FAILED = `leinfo.sav`)**
 
 **PM (2026-09-21T08:44:09-07:00):** Not a code review. Recompute from `run.log`: per folder would-copy 0 / 24 / 4,775 / 240 = 5,039 (1,106.6 GiB), of which 2,357 land as `_2026` renames (all SonyA6700), deduped 183 / 159 / 2,051 / 320 = 2,713, kept 0, owned 0, collisions 1 (GoPro `DCIM/leinfo.sav → Other/leinfo_2026.sav (already exists)`) → `INCOMPLETE: 1` in GoPro only, per-folder exits 0/1/0/0, script `1 folder(s) FAILED`; disk names `tars-djiflip/gopro/sonya6700/sonyzve10`. Reconcile against `gap-tars.tsv` (5,040 files / 1,188,169,289,959 B): 5,039 planned + 1 collision = 5,040, exact path-set equality; 5,039 + 2,713 + 1 = 7,753 of tars's 7,759 files, the other 6 (`Test/` ×5, `GoPro/GX010788.MP4` at the top of GoPro, excluded by `--prefix DCIM`) already archived by content. **This is wrong if:** any count differs, any gap file is unplanned other than `leinfo.sav`, or a planned file is not in the gap set.
 
 Verdict goes below this line.
+
+**Reviewer (Codex, 2026-09-21T08:45:52-07:00) - APPROVE.** Would-copy 0/24/4,775/240 = 5,039 = 1,188,169,289,951 B; `_2026` renames 2,357 (all SonyA6700); deduped 183/159/2,051/320 = 2,713; kept 0; owned 0; collisions 1 (GoPro `leinfo.sav`, 8 B) → INCOMPLETE only in GoPro, exits 0/1/0/0, script 1 FAILED; gap 5,039 + 1 = 5,040 and 1,188,169,289,951 + 8 = 1,188,169,289,959 B, exact path-set equality; inventory 5,039 + 2,713 + 1 + 6 already-archived = 7,759; four `tars-*` names; manifest sha unchanged.
+
+**PM (2026-09-21T08:45:52-07:00):** accepted. tars cleared for Eddy's launch after the port move (rev 12 re-identification gives the new `SSD_SRC`).
 
 ### #88 - B6 reduced sweep of the eight `media-*` disks (Tester rev 10; `/Volumes/Scratch1/tester/b6-media/`: `sweep.log`, `manifest-after.db` sha `1d0fb1f407005f47a5c03b75c8520bf908b3ec34d65c88e3f98a1d9837a95d68`; before = `/Volumes/Scratch1/tester/tars-dryrun/manifest-pre.db` sha `c6991843b870d2e537698202bf047a42c9b86cded23fb43338055faa4e467cc8`; certs `~/mounts/docker/vault-certs/media-*.cert.json` (8) and `archive-2026-09-02/` (5)) - **resolved: APPROVE → B6 media part closed**
 
