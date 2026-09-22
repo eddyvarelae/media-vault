@@ -98,3 +98,6 @@ Rulings: (1) **Eddy disables the cron** (root file; agents cannot and should not
 ## 2026-09-21 12:28 - tars copy launched by Eddy (human-launched `vault copy`; runbook-kipp template; expected `1 folder(s) FAILED` = GoPro `leinfo.sav`, out of scope per 2026-09-21 ruling)
 
 ## 2026-09-21 18:15 - Eddy: "Go" for B6 on the four `tars-*` disks (Tester as `vaultagent` under PM lock; runbook-b6-kipp template).
+
+## 2026-09-21 20:39 - "Every byte of `tars` is on the NAS, verified and certified, except one 8-byte GoPro state file": YES (Reviewer #91, Codex, after Tester #53)
+Arithmetic: 7,752 files under the four `tars-*` certificates (1,957,999,314,322 B) + 5 `Test/` files and `GoPro/GX010788.MP4` attested by content under `media-djiflip` / `media-gopro` certificates (1,001,763,415 + 1,690,245,832 B) = 7,758 files / 1,960,691,323,569 B = tars's inventory minus `GoPro/DCIM/leinfo.sav` (8 B, ruled out of scope 2026-09-21; B55). **Wipe or keep `tars` is Eddy's decision; no agent wipes, formats or writes an SSD.** With this, B6 is complete: 19 disks with rows, all verified or verified-by-reference, 19 current certificates in `/volume1/docker/vault-certs/`.
