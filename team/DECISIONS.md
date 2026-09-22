@@ -96,3 +96,5 @@ Rulings: (1) **Eddy disables the cron** (root file; agents cannot and should not
 - The 6 tars files outside the copy tables (`Test/` ×5 and `GoPro/GX010788.MP4` above `DCIM/`) are archived by content already (#20, #49); recorded, no action.
 
 ## 2026-09-21 12:28 - tars copy launched by Eddy (human-launched `vault copy`; runbook-kipp template; expected `1 folder(s) FAILED` = GoPro `leinfo.sav`, out of scope per 2026-09-21 ruling)
+
+## 2026-09-21 18:15 - Eddy: "Go" for B6 on the four `tars-*` disks (Tester as `vaultagent` under PM lock; runbook-b6-kipp template).
