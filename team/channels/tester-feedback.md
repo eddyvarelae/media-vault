@@ -871,3 +871,19 @@ Report each as a numbered item below: outcome first, then evidence (the query an
 **PM (2026-09-22T18:18:55-07:00) - #54 and #55 accepted at `witnessed`; DEPLOY LOCK (B40 restore) released 2026-09-22T18:18:55-07:00. Staged as #92 (restore) and #93 (wipe-readiness, the rule-8 answers for `case` and EMV). Leave `restore-staging/DSC04868.JPG` in place until #92 is answered. Idle.**
 
 **PM (2026-09-22T18:26:14-07:00) - #92/#92b closed (restore confirmed: exactly row 243518 changed; my two omissions, no defect) and #93 APPROVE: `case` and `Eddy's Media Vault` rule-8 = YES. All four SSDs are answered; wiping is Eddy's. One authorized write: `rm /volume1/docker/restore-staging/DSC04868.JPG` and `rmdir` the folder (post the `ls` before/after). Then idle - nothing else is assigned. Thank you: kipp, tars, the restore and the readiness tables were all clean witness work.**
+
+56. **[2026-09-22T18:26:43-07:00] Staging file removed - the one authorized write; nothing else on the NAS touched. Idle.** Verbatim:
+    ```
+    $ before:  /volume1/docker/restore-staging/  →  -rwxrwxrwx+ 1 figmaboi admin 7285047 Sep 22 18:13 DSC04868.JPG
+               sha256 b7ecf8081e28b3a1c38a02620bec11f45894838063bf1b64b5834ff24f5f3a69 · containers=0
+    $ rm /volume1/docker/restore-staging/DSC04868.JPG   → exit 0
+    $ rmdir /volume1/docker/restore-staging             → exit 0
+    $ after:   ls -d /volume1/docker/restore-staging → "No such file or directory"; no restore-staging entry in /volume1/docker/
+               /volume1/media/SonyA6700/DCIM/DSC04868_2025.JPG sha256 b7ecf808… (the restored bytes, untouched)
+               manifest.db sha256 1b33022555d10d88334772713827da9ac5213e87959b9896044f51d92da0593e (unchanged since the restore)
+    ```
+    (The `ls -la /volume1/docker/` line still prints `…: Permission denied` for the one non-UTF-8-named item `vaultagent` cannot read - pre-existing, first noted in #32.)
+
+**IDLE (2026-09-22T18:26:43-07:00):** nothing running, nothing assigned. State at rest: manifest `1b330225…` (85,880 rows), 19 certificates in `vault-certs/` + two archive folders, four SSDs answered (`kipp` copied+certified, `tars` copied+certified, `case` and EMV rule-8 YES), `tars` still on `/usb/sdc1`. Scratch artifacts under `/Volumes/Scratch1/tester/` (kept: `gap-*`, `b6-*`, `b24-*`, `b40/`, `b56/`, `kipp-live/`, `tars-live/`, `nas-tailscan.*`, `tailscan-*`, the `sonya6700-overwritten-2026-09-01.tsv` list from B23 - that P0 is still open and its evidence stays until it closes). Detached checkout at `9c76448`.
+
+**PM (2026-09-23T13:31:28-07:00) - WORK ORDER rev 17: PRESERVE YOUR EVIDENCE before Eddy re-purposes Scratch1.** Eddy will erase `Scratch1` (back to Time Machine) and format `case` as the new `Scratch1`. Your `/Volumes/Scratch1/tester/` (1.3 GB: every gap report, manifest snapshot, dry-run/copy/verify log and witness table behind reviews #7-#93) must survive. Authorized writes: (1) `rsync -a --checksum "/Volumes/Scratch1/tester/" ~/mounts/docker/tester-artifacts/` (SMB into `/volume1/docker/tester-artifacts/`, not a sacred path), then (2) a hash listing on both sides (`find … -type f -exec shasum -a 256 {} + | sort -k2`, compare) and post file count + byte total + "identical". Also post the `ls` of `/Volumes/Scratch1/` top level (Eddy's `Multicam/` precaution copy is his, do not touch it). After the swap, when a new `Scratch1` appears, restore the folder from the NAS copy the same way and confirm the hashes - I will post that line. Until then, write nothing new under `/Volumes/Scratch1/`. Rung `tested` (it is a copy, not a claim).
