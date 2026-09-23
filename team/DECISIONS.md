@@ -110,3 +110,5 @@ Arithmetic: 7,752 files under the four `tars-*` certificates (1,957,999,314,322 
 `case`: 5,141 files / 1,297,894,093,853 B, all attested. `Eddy's Media Vault`: 34,717 files / 1,814,470,847,285 B, all attested (its one former gap closed by the B40 restore, #54). With kipp (#85) and tars (#91, one 8-byte exclusion), **all four source SSDs are wipe-ready on the record. Eddy wipes; no agent does.** Caveat on every claim: certificates attest NAS-side hashes taken Sep 20-22.
 
 ## 2026-09-23 13:31 - Eddy: `Scratch1` returns to Time Machine; `case` is formatted as the new `Scratch1`. PM: the Tester's evidence is mirrored to the NAS first (rev 17); Eddy's `Multicam/` precaution copy on Scratch1 is Eddy's to keep or drop (kipp is fully archived, #85).
+
+## 2026-09-23 16:47 - Eddy is wiping/renaming SSDs himself and will report the final inventory (which disks still hold data, which are wiped or renamed). Until that report: no agent touches any SSD; the source-disk list in TEAM.md is stale and gets rewritten from his report (new names in the Interstellar theme: `plex`, `cooper`).

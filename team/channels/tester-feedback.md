@@ -911,3 +911,15 @@ Report each as a numbered item below: outcome first, then evidence (the query an
 **PM (2026-09-23T13:33:52-07:00) - rev 17 accepted: 146 files mirrored to `/volume1/docker/tester-artifacts/`, hashes identical. Eddy is moving Scratch1's contents to the new disk himself; when a `Scratch1` with `tester/` reappears, verify its hashes against the NAS mirror (restore from the mirror only if something differs) and post. Nothing else runs; you are clear of Scratch1.**
 
 **PM (2026-09-23T16:45:22-07:00) - the new `Scratch1` is mounted (Eddy moved everything himself, old disk erased). Rev 17b: hash-check `/Volumes/Scratch1/tester/` against `/volume1/docker/tester-artifacts/` (LC_ALL=C both sides), restore from the mirror only if anything differs, post count + result; confirm your scripts (`gap-report.py`, `attest.py`, `hb.sh`) run from the new path. Then idle.**
+
+58. **[2026-09-23T16:46:46-07:00] Rev 17b: the new `Scratch1` carries the evidence intact - all 146 files hash-identical to the NAS mirror; no restore needed; the scripts run from the new path. Rung `tested`. Idle.** The new disk is the former `case`: `/dev/disk4s2 on /Volumes/Scratch1 (exfat…)` - **exFAT now, not APFS**.
+    ```
+    $ ls -la /Volumes/Scratch1/   →  Multicam/ (Eddy's, untouched) · tagging/ · tester/ · .Spotlight-V100 · .fseventsd · ._Multicam
+    $ /Volumes/Scratch1/tester: 148 files / 1,446,592,255 B   vs mirror 146 files / 1,446,573,819 B
+    $ hash compare (both sides `find . -type f -exec sha256sum {} +`, LC_ALL=C sorted):
+      only-on-new: .DS_Store, ._.DS_Store      only-on-nas: (none)      every other line identical
+    ```
+    So the 146 real files match by sha256 and path; the two extras are Finder metadata the exFAT copy created (+18,436 B) - not evidence, not restored, harmless. **Nothing restored from the mirror** (the order's condition "only if different" was not met for any evidence file). The NAS mirror at `/volume1/docker/tester-artifacts/` stays as the second copy.
+    Scripts, from the new path: `attest.py case` ran and **reproduced `attest-case.tsv` byte-identically** (`cca27a28593367f0…` on both the new Scratch1 and the NAS mirror) with the same totals as #55 (5,141 files / 1,297,894,093,853 B, attested 5,141, unattested 0); `b6-tars/hb.sh` ran its read-only NAS probe fine (containers=0, log 21,089,753 B); `gap-report.py` smoke-tested in `/tmp` against `b56/manifest.db` on a 1-file fixture (correctly reported 1 GAP), then the fixture was removed - no new files written under `/Volumes/Scratch1/` except `attest-case.tsv` re-created identical to itself.
+
+**IDLE (2026-09-23T16:46:46-07:00):** nothing running, nothing assigned. Evidence now exists in two places (new `Scratch1` + NAS `tester-artifacts/`); B23 (the 2,668 SonyA6700 photos) remains the open P0 and its list is preserved in both.
