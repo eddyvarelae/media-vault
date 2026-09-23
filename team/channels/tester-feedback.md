@@ -887,3 +887,25 @@ Report each as a numbered item below: outcome first, then evidence (the query an
 **IDLE (2026-09-22T18:26:43-07:00):** nothing running, nothing assigned. State at rest: manifest `1b330225…` (85,880 rows), 19 certificates in `vault-certs/` + two archive folders, four SSDs answered (`kipp` copied+certified, `tars` copied+certified, `case` and EMV rule-8 YES), `tars` still on `/usb/sdc1`. Scratch artifacts under `/Volumes/Scratch1/tester/` (kept: `gap-*`, `b6-*`, `b24-*`, `b40/`, `b56/`, `kipp-live/`, `tars-live/`, `nas-tailscan.*`, `tailscan-*`, the `sonya6700-overwritten-2026-09-01.tsv` list from B23 - that P0 is still open and its evidence stays until it closes). Detached checkout at `9c76448`.
 
 **PM (2026-09-23T13:31:28-07:00) - WORK ORDER rev 17: PRESERVE YOUR EVIDENCE before Eddy re-purposes Scratch1.** Eddy will erase `Scratch1` (back to Time Machine) and format `case` as the new `Scratch1`. Your `/Volumes/Scratch1/tester/` (1.3 GB: every gap report, manifest snapshot, dry-run/copy/verify log and witness table behind reviews #7-#93) must survive. Authorized writes: (1) `rsync -a --checksum "/Volumes/Scratch1/tester/" ~/mounts/docker/tester-artifacts/` (SMB into `/volume1/docker/tester-artifacts/`, not a sacred path), then (2) a hash listing on both sides (`find … -type f -exec shasum -a 256 {} + | sort -k2`, compare) and post file count + byte total + "identical". Also post the `ls` of `/Volumes/Scratch1/` top level (Eddy's `Multicam/` precaution copy is his, do not touch it). After the swap, when a new `Scratch1` appears, restore the folder from the NAS copy the same way and confirm the hashes - I will post that line. Until then, write nothing new under `/Volumes/Scratch1/`. Rung `tested` (it is a copy, not a claim).
+
+**Tester (2026-09-23, 2026-09-23T13:33:26-07:00):** WORK ORDER rev 17. `main` pulled (`5bfabe5`).
+
+57. **[2026-09-23T13:33:26-07:00] Evidence mirrored to the NAS and verified identical: 146 files / 1,446,573,819 B, every sha256 and path matching on both sides. Rung `tested`.** 13:31:56 → 13:33 (rsync 38 s at ~48 MB/s over SMB). Authorized write only: `/volume1/docker/tester-artifacts/` (created by me; nothing else touched).
+    ```
+    $ ls -la /Volumes/Scratch1/          (top level, before)
+    drwx------@ 36 varela staff 1152 Aug 19 19:45 Multicam      ← Eddy's precaution copy, NOT touched
+    drwxr-xr-x   2 varela staff   64 Sep 15 12:39 tagging       (empty)
+    drwxr-xr-x  83 varela staff 2656 Sep 22 17:14 tester        ← mirrored
+    (+ .DS_Store, .Spotlight-V100, .fseventsd)
+    $ source: 146 files, 1,446,573,819 B, 15 directories, 1.3G (du)
+    $ rsync -a --checksum "/Volumes/Scratch1/tester/" ~/mounts/docker/tester-artifacts/
+      Total file size: 1446573819 B · Total transferred file size: 1446573819 B · sent 1446766462 bytes · exit 0
+    $ NAS side: files=146 bytes=1446573819, 15 directories, 1.4G (du)      ← counts and bytes equal
+    $ hash comparison (both sides `find . -type f -exec sha256sum {} +`, LC_ALL=C sorted):
+      IDENTICAL: 146 files, every sha256 and path matches
+      (a first diff showed only ordering — macOS `sort` vs GNU `sort` collation; re-run with LC_ALL=C on both: no differences)
+    $ independent spot-checks: b56/manifest.db 1b33022555d10d88 = 1b33022555d10d88 · b40/manifest-after.db 1b33022555d10d88 = 1b33022555d10d88 · sonya6700-overwritten-2026-09-01.tsv 64bed78341758406 = 64bed78341758406
+    ```
+    What is now on the NAS at `/volume1/docker/tester-artifacts/`: every gap report (`gap-{kipp,tars,case,emv}.tsv` + summaries + logs), the manifest snapshots behind each witness (`manifest-2026-09-17.db`, `b24-dryrun/`, `b6-kipp/`, `b6-media/`, `b6-tars/`, `b40/`, `b56/`, `kipp-live/`, `tars-live/`), the tail-scan pair (`nas-tailscan.*`, `tailscan-*`), the B23 evidence (`sonya6700-overwritten-2026-09-01.tsv` and its scripts), and the scripts that regenerate all of it (`gap-report.py`, `attest.py`, `gap-confirm-ns.py`, `nas-tailscan.py`, `tailscan-join.py`, `check195b.py`, the `hb.sh` witness helpers). That covers the evidence behind reviews #7-#93. Writing nothing further under `/Volumes/Scratch1/` until the PM posts the restore line; `Multicam/` untouched.
+
+**PM (2026-09-23T13:33:52-07:00) - rev 17 accepted: 146 files mirrored to `/volume1/docker/tester-artifacts/`, hashes identical. Eddy is moving Scratch1's contents to the new disk himself; when a `Scratch1` with `tester/` reappears, verify its hashes against the NAS mirror (restore from the mirror only if something differs) and post. Nothing else runs; you are clear of Scratch1.**
