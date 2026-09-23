@@ -812,3 +812,60 @@ Report each as a numbered item below: outcome first, then evidence (the query an
 **PM (2026-09-22T17:12:31-07:00) - WORK ORDER rev 15: B40 RESTORE per `team/context/runbook-b40-restore.md`, steps 0-7, as `vaultagent` (+ one SMB staging copy from the Mini). Eddy's go 2026-09-22 17:12. Lock posted. Authorized writes: the manifest backup, the staging file under `/volume1/docker/restore-staging/`, the one replaced archive file (via `vault restore` only), the verify promotion, the cert move + new cert. Stop on any deviation at step 3. Rung `witnessed` → Reviewer #92.**
 
 **PM (2026-09-22T17:12:31-07:00) - WORK ORDER rev 16 (queued behind rev 15): WIPE-READINESS for `case` and `Eddy's Media Vault` (B56), read-only, on the Mini.** After rev 15's finish note: snapshot the post-restore manifest to `/Volumes/Scratch1/tester/b56/manifest.db` (SMB `cp`). For each SSD: (1) re-run your gap report with `--hash-all` against that snapshot (`gap-report.py "/Volumes/case" case --hash-all`, then `"/Volumes/Eddy's Media Vault" emv --hash-all`) - every file must be `HASH_ARCHIVED` (EMV's `DSC04868.JPG` now matches the restored row), 0 GAP; (2) for every file, map its matched row (disk + sha) to a certificate entry in `~/mounts/docker/vault-certs/*.cert.json` (the current 19 + the new sonya6700 one) and produce `b56/attest-<ssd>.tsv`: `relpath, size, sha, row_id, disk, status, cert_file` - **every row must have a cert and the row must be `verified` (or `deduped` with a verified owner)**; (3) totals per SSD: files, bytes, attested files, attested bytes, unattested list (expected empty). Post both tables' totals verbatim. Rung `witnessed` → Reviewer #93 (the rule-8 answers for `case` and EMV).
+
+**Tester (2026-09-22, 2026-09-22T17:14:54-07:00):** WORK ORDER rev 15 - B40 restore, as `vaultagent` (+ the one SMB staging copy). `main` pulled (`9c76448`). PM lock 2026-09-22T17:12:31.
+
+54. **[2026-09-22T17:14:54-07:00] B40 RESTORE DONE - the torn `SonyA6700/DCIM/DSC04868_2025.JPG` now holds the intact bytes, row 243518 re-verified, `media-sonya6700` re-certified; exactly one row and one file changed. Rung `witnessed`.** Steps 0-7, 17:12:58 → 17:14:11 Mini (73 s). Verbatim, in order:
+    ```
+    step 0  containers=0 · manifest sha 39b91e93c33e774e3b5f85a358399cd83144dedc656a9f4f208bf5f351a7ecaa ✓ · no -wal/-shm
+            /volume1/media/SonyA6700/DCIM/DSC04868_2025.JPG 7285047 B, mtime 2026-04-27 22:51:03 -0600, sha 41ba38962efa4d03bb7970f596d473816a6b5d92e7ae220d80ab7c0e63a8e612 ✓ (the torn bytes)
+    step 1  cp -p manifest.db manifest.db.bak-b40-20260922-181313 → exit 0; both sha 39b91e93…
+    step 2  EMV source: 7285047 B, sha b7ecf8081e28b3a1c38a02620bec11f45894838063bf1b64b5834ff24f5f3a69
+            staged /volume1/docker/restore-staging/DSC04868.JPG 7285047 B, sha b7ecf808… (identical) — the only SMB write
+    step 3  restore … --dry-run →
+            Row:        media-sonya6700:DCIM/DSC04868_2025.JPG  dest_path "" → DCIM/DSC04868_2025.JPG
+                        sha 41ba3896…  size 7285047  status verified  verified_at 1789908873579977463  copied_at 1777401462468303455
+            Current:    /volume1/media/SonyA6700/DCIM/DSC04868_2025.JPG  sha 41ba3896…  size 7285047  (row attests these bytes: yes)
+            Claimants:  none (no other row resolves to this file)
+            Replacement: …/restore-staging/DSC04868.JPG  sha b7ecf808…  size 7285047  (--expect-sha …: match)
+            (dry-run; no archive file, no manifest row)   exit=0 · manifest sha unchanged
+            I confirmed the named row IS 243518 from my pre-restore snapshot (`select rowid … where source_disk='media-sonya6700' and source_path='DCIM/DSC04868_2025.JPG'` → 243518) - the tool identifies rows by (disk, source_path), it does not print the id.
+    step 4  live restore → RESTORED media-sonya6700 DCIM/DSC04868_2025.JPG old=41ba3896…:7285047 new=b7ecf808…:7285047 expect=b7ecf808… prior_status=verified prior_verified_at=1789908873579977463 from=/volume1/docker/restore-staging/DSC04868.JPG
+            Row after: sha b7ecf808…  size 7285047  status copied  verified_at 0  copied_at 2026-09-23T00:13:50Z   exit=0
+            NAS file now: 7285047 B, mtime 2026-09-22 18:13:20, sha b7ecf808… ✓ ; manifest sha → 67d4ba1f09de7866f064031f64401a36122bc84fe27303d4c1204cea9a20112e
+    step 5  verify --only-unverified → "skipping 39413 already-verified row(s)" · "verified   DCIM/DSC04868_2025.JPG" · Verified: 1   Mismatch: 0   Missing: 0   Errors: 0   Bytes read: 6.9 MiB   exit=0
+            manifest sha → 1b33022555d10d88334772713827da9ac5213e87959b9896044f51d92da0593e ; file ends `ff d9` (EOI present; #24's zero tail gone)
+    step 6  mv vault-certs/media-sonya6700.cert.json vault-certs/archive-2026-09-21/ (exit 0) ; certify → "Wrote signed certificate: /volume1/docker/vault-certs/media-sonya6700.cert.json" · Files: 39414   Bytes: 3.3 TiB   Disk: media-sonya6700   exit=0 ; containers=0, no -wal/-shm
+    ```
+    **Step 7 witness** (`b40/manifest-after.db`, sha `1b330225…` = the NAS file; `b40/rows-after.txt`): 85,880 rows before and after, 0 added, 0 removed, **exactly 1 row changed - row 243518, fields `sha256` (41ba3896… → b7ecf808…), `verified_at`, `copied_at`**; `status` ends `verified`, `dest_path` still empty (a B39 row; the dry-run's `dest_path "" → DCIM/DSC04868_2025.JPG` is the *resolved* destination, not a planned row edit - cosmetic wording, Dev, if anyone cares). New cert: `file_count` 39,414 = the disk's verified rows ✓, `total_bytes` 3,653,982,690,108, issued 2026-09-23T00:14:10Z, **signature valid**, and its `DSC04868_2025.JPG` entry now carries sha `b7ecf8081e28b3a1…` with `verified_at` 00:14:00Z; the superseded cert (now in `vault-certs/archive-2026-09-21/`) attested `41ba38962efa4d03…`, the torn bytes. The staging file stays until the PM says otherwise. **B38's single victim is repaired; the archive has no known torn file.** Proceeding to rev 16.
+
+55. **HEARTBEAT START 2026-09-22T17:15:09-07:00 - rev 16 (B56): wipe-readiness for `case` and `Eddy's Media Vault`, read-only on the Mini.** Post-restore manifest snapshotted to `/Volumes/Scratch1/tester/b56/manifest.db` (SMB `cp`, sha `1b33022555d10d88334772713827da9ac5213e87959b9896044f51d92da0593e` = the NAS file). Certificates in play: 19 in `vault-certs/` + the archived ones excluded. Running `gap-report.py "/Volumes/case" case --hash-all` (1.30 TB) then `"/Volumes/Eddy's Media Vault" emv --hash-all` (1.81 TB), then the per-file certificate attestation join. Finish note follows.
+    **HEARTBEAT FINISH 2026-09-22T18:17:48-07:00 - rev 16 (B56) DONE: both SSDs are fully archived AND fully attested - `case` 5,141/5,141 files and `Eddy's Media Vault` 34,717/34,717 files, 0 GAP and 0 unattested on either, every matched row `verified`. Rung `witnessed`.** Run 17:15:38 → 18:17:17 (62 min, 3.11 TB hashed at ~850 MB/s). Against `b56/manifest.db` (post-restore, sha `1b33022555d10d88334772713827da9ac5213e87959b9896044f51d92da0593e` = the NAS file; 85,880 rows) and the 19 certificates in `vault-certs/` (archive-* excluded). Outputs: `b56/gap-{case,emv}.{summary.txt,tsv,log}`, `b56/attest-{case,emv}.tsv`, `b56/attest.py`, `b56/gap-report.py`. Repro: `python3 b56/gap-report.py <root> <label> --hash-all; python3 b56/attest.py <label>`.
+    ```
+    gap report for case (/Volumes/case) vs b56/manifest.db, 2026-09-22T17:40:33-07:00
+    files on SSD: 5141   bytes: 1,297,894,093,853 (1297.89 GB)
+      HASH_ARCHIVED     5141 files   1,297,894,093,853 bytes
+      GAP                  0 files                   0 bytes      check: 5141+0 = 5141
+    NEEDS ARCHIVING: NO - 0 files, 0 bytes
+
+    gap report for emv (/Volumes/Eddy's Media Vault) vs b56/manifest.db, 2026-09-22T18:17:17-07:00
+    files on SSD: 34717   bytes: 1,814,470,847,285 (1814.47 GB)
+      HASH_ARCHIVED    34717 files   1,814,470,847,285 bytes
+      GAP                  0 files                   0 bytes      check: 34717+0 = 34717
+    NEEDS ARCHIVING: NO - 0 files, 0 bytes
+    ```
+    Attestation join (every file's sha → a manifest row → a signed certificate entry):
+    ```
+    case: files=5141  bytes=1,297,894,093,853  attested=5141  attested_bytes=1,297,894,093,853  unattested=0
+      by certificate: media-sonya6700 4,284 · media-leantank 519 · media-sonyzve10 298 · media-backup 30 · media-djiflip 10    (= 5,141)
+      by row status:  verified 5141          (0 rows in any other status)
+    emv:  files=34717 bytes=1,814,470,847,285 attested=34717 attested_bytes=1,814,470,847,285 unattested=0
+      by certificate: media-sonyzve10 23,694 · media-sonya6700 10,999 · media-iphone 15 · media-gopro 9                        (= 34,717)
+      by row status:  verified 34717         (0 rows in any other status)
+    ```
+    Arithmetic: 4,284+519+298+30+10 = 5,141 ✓ and 23,694+10,999+15+9 = 34,717 ✓; attested bytes equal the on-disk byte totals exactly for both disks. **EMV's former single gap is closed by rev 15:** `Backups/SonyA6700/DCIM/DSC04868.JPG` (7,285,047 B, sha `b7ecf808…`) now maps to **row 243518, `verified`, in the new `media-sonya6700.cert.json`** - the file whose torn NAS copy this restore replaced. `case`'s 10,999-vs-10,998 shift on EMV against #22 is that same file.
+    Two caveats that belong with any rule-8 answer, neither a defect: (1) "attested" means the file's bytes appear in a signed certificate whose row is `verified` - the certificates were issued 2026-09-21/22 against hashes taken then, and this pass re-hashed the SSD side today, not the NAS side; the most recent NAS-side full sweeps are the Sep-20 cron pass (six `media-*` disks) and B6 for `kipp-*`/`tars-*`; (2) all 19 certificate signatures were verified in #48/#53/#54 and the `media-sonya6700` one again in #54 after re-issue.
+
+**STOPPED HERE (2026-09-22T18:17:48-07:00):** rev 15 (#54) and rev 16 (#55) done. Nothing running. Artifacts: `/Volumes/Scratch1/tester/b40/`, `/Volumes/Scratch1/tester/b56/`. Waiting on the PM (Reviewer #92/#93, then the rule-8 wipe answers for `case` and EMV; the `restore-staging/DSC04868.JPG` file is still on the NAS pending your word).
+
+**PM (2026-09-22T18:18:55-07:00) - #54 and #55 accepted at `witnessed`; DEPLOY LOCK (B40 restore) released 2026-09-22T18:18:55-07:00. Staged as #92 (restore) and #93 (wipe-readiness, the rule-8 answers for `case` and EMV). Leave `restore-staging/DSC04868.JPG` in place until #92 is answered. Idle.**
